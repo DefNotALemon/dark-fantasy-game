@@ -1,0 +1,145 @@
+extends Enemy
+class_name Kobold
+## Small scaly skirmisher — weakest of the humanoids but darts around fast.
+## Specials: "lunge" — drops low (ember glow) then a darting spear lunge that
+## guard-breaks. "tailspin" — a quick full spin at melee range, blockable.
+
+var rig: Node3D    ## whole visible body (crouches / spins)
+var arm: Node3D    ## right shoulder pivot holding the spear
+
+
+func _init() -> void:
+	display_name = "Kobold"
+	max_health = 30.0        ## fragile fodder
+	wander_speed = 2.0
+	chase_speed = 4.6
+	attack_range = 1.6
+	attack_damage = 6.0
+	attack_cooldown = 0.8
+	aggro_radius = 9.0
+	leash_radius = 20.0
+	xp_tier = 0
+	families = ["humanoid"]
+	## Lunge triggers from mid-range; the tail spin comes out at melee range.
+	strong_min_range = 2.0
+	strong_max_range = 5.5
+	strong_from_melee = true
+	telegraph_color = Color(1.0, 0.55, 0.10)
+
+
+func _choose_strong(dist: float) -> void:
+	if dist <= attack_range + 0.3:
+		strong_mode = "tailspin"  ## quick whirling tail swipe, blockable
+		strong_damage = 8.0
+		strong_speed = 0.0
+		strong_windup_time = 0.30
+		strong_duration = 0.35
+		strong_cooldown = 4.0
+		strong_hit_range = 2.0
+		strong_breaks_guard = false
+		strong_multi_hits = 1
+	else:
+		strong_mode = "lunge"  ## the darting spear lunge (guard-breaks)
+		strong_damage = 13.0
+		strong_speed = 11.0
+		strong_windup_time = 0.35
+		strong_duration = 0.30
+		strong_cooldown = 3.2
+		strong_hit_range = 1.5
+		strong_breaks_guard = true
+		strong_multi_hits = 1
+
+
+func _animate(delta: float) -> void:
+	if arm == null:
+		return
+	if strong_windup > 0.0:
+		var p := 1.0 - strong_windup / strong_windup_time
+		if strong_mode == "lunge":
+			## Drop low with the spear pulled back.
+			rig.position.y = lerpf(rig.position.y, -0.12 * p, delta * 16.0)
+			rig.rotation_degrees = rig.rotation_degrees.lerp(Vector3(12.0 * p, 0, 0), delta * 16.0)
+			arm.rotation_degrees = arm.rotation_degrees.lerp(Vector3(30.0 * p, 0, 0), delta * 16.0)
+		else:
+			## Coil up for the spin.
+			rig.rotation_degrees = rig.rotation_degrees.lerp(Vector3(0, -45.0 * p, 0), delta * 16.0)
+		return
+	if strong_active:
+		var p := 1.0 - strong_time / strong_duration
+		if strong_mode == "lunge":
+			## Spear thrust out level while darting forward.
+			rig.position.y = -0.12
+			rig.rotation_degrees = Vector3(12.0, 0, 0)
+			arm.rotation_degrees = Vector3(lerpf(30.0, -80.0, minf(p * 2.5, 1.0)), 0, 0)
+		else:
+			## Whirl a full turn, tail out.
+			rig.rotation_degrees = Vector3(0, lerpf(-45.0, 315.0, p), 0)
+		return
+	if melee_anim > 0.0:
+		var p := 1.0 - melee_anim / MELEE_ANIM_TIME
+		if p < 0.4:
+			arm.rotation_degrees = arm.rotation_degrees.lerp(Vector3(25, 0, 0), delta * 24.0)
+		else:
+			arm.rotation_degrees = Vector3(lerpf(25.0, -65.0, (p - 0.4) / 0.6), 0, 0)
+		return
+	## Ease back to the rest pose — riding the footfall bob while it skitters
+	## (the crouch poses above own rig.position.y during specials).
+	rig.position.y = lerpf(rig.position.y, loco_bob_y, delta * 10.0)
+	rig.rotation_degrees = rig.rotation_degrees.lerp(Vector3(0, 0, sin(walk_t) * 2.4 * _loco_amount), delta * 8.0)
+	## Spear arm pumps along with the skitter until an attack claims it.
+	arm.rotation_degrees = arm.rotation_degrees.lerp(Vector3(sin(walk_t) * 8.0 * _loco_amount, 0, 0), delta * 8.0)
+
+
+func _build_body() -> void:
+	_add_collision(Vector3(0.45, 1.0, 0.45), Vector3(0, 0.52, 0))
+
+	rig = Node3D.new()
+	add_child(rig)
+	## Gait: twitchy, skittering steps.
+	gait_rate = 1.35
+	stride_deg = 36.0
+	bob_h = 0.045
+
+	var scale_col := Color(0.48, 0.26, 0.16)
+	var belly := Color(0.62, 0.46, 0.30)
+	var wood := Color(0.35, 0.24, 0.13)
+	var flint := Color(0.45, 0.45, 0.48)
+	base_body_color = scale_col
+
+	## Hunched torso.
+	var body := _box_in(rig, Vector3(0.30, 0.36, 0.22), scale_col, Vector3(0, 0.62, 0), Vector3(12, 0, 0))
+	body_mat = body.material_override as StandardMaterial3D
+	_box_in(rig, Vector3(0.24, 0.26, 0.06), belly, Vector3(0, 0.58, -0.11), Vector3(12, 0, 0))
+	## Snouted lizard head with tiny horns.
+	_box_in(rig, Vector3(0.22, 0.20, 0.22), scale_col, Vector3(0, 0.92, -0.06))
+	_box_in(rig, Vector3(0.10, 0.09, 0.18), belly, Vector3(0, 0.87, -0.24))
+	_box_in(rig, Vector3(0.04, 0.10, 0.04), belly, Vector3(-0.07, 1.06, 0.0), Vector3(0, 0, 14))
+	_box_in(rig, Vector3(0.04, 0.10, 0.04), belly, Vector3(0.07, 1.06, 0.0), Vector3(0, 0, -14))
+	## Tail curving out the back.
+	_box_in(rig, Vector3(0.10, 0.08, 0.34), scale_col, Vector3(0, 0.48, 0.26), Vector3(-18, 0, 0))
+	_box_in(rig, Vector3(0.06, 0.05, 0.24), scale_col, Vector3(0, 0.38, 0.50), Vector3(-30, 0, 0))
+	## Left arm hangs loose — pivoted so it pumps with the skitter.
+	var larm := Node3D.new()
+	rig.add_child(larm)
+	larm.position = Vector3(-0.19, 0.75, 0)
+	_box_in(larm, Vector3(0.07, 0.30, 0.07), scale_col, Vector3(0, -0.15, 0))
+	walk_arms.append(larm)
+	## Right arm: a pivot at the shoulder so the spear-arm can thrust.
+	arm = Node3D.new()
+	rig.add_child(arm)
+	arm.position = Vector3(0.19, 0.75, 0)
+	_box_in(arm, Vector3(0.07, 0.30, 0.07), scale_col, Vector3(0, -0.15, 0))
+	## Crude flint spear in the hand.
+	_box_in(arm, Vector3(0.04, 0.04, 0.70), wood, Vector3(0.02, -0.27, -0.20), Vector3(6, 0, 0))
+	_box_in(arm, Vector3(0.05, 0.05, 0.14), flint, Vector3(0.02, -0.22, -0.58), Vector3(6, 0, 0))
+	## Digitigrade legs: hip pivots that skitter.
+	for lx: float in [-0.09, 0.09]:
+		var leg := Node3D.new()
+		rig.add_child(leg)
+		leg.position = Vector3(lx, 0.37, 0)
+		_box_in(leg, Vector3(0.09, 0.34, 0.10), scale_col, Vector3(0, -0.17, 0))
+		walk_legs.append(leg)
+
+	## Slitted eyes.
+	_add_eye(Vector3(-0.06, 0.94, -0.16), Vector3(0.04, 0.05, 0.04), rig)
+	_add_eye(Vector3(0.06, 0.94, -0.16), Vector3(0.04, 0.05, 0.04), rig)
