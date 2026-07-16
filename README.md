@@ -17,17 +17,18 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 | Mouse | Look |
 | Shift | Sprint |
 | Space | Jump |
-| Left click | Sword: attack (flowing 1-2-3 combo) · Bow: hold to draw, release to loose · Pickaxe: chop (bites ore veins) |
+| Left click | Sword: attack (flowing 1-2-3 combo) · Bow: hold to draw, release to loose · Pickaxe: chop (bites ore veins, digs cave rock) · War axe: alternating chop/cleave |
 | Right click | Sword: block · Bow: ease the string back down |
-| 1 / 2 / 3 | Weapon: sword / bow / pickaxe (while no menu is open) |
+| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full swings (overhead chop, horizontal cleave). No material matchups yet — honest iron |
 | Ctrl | Dash |
+| Space | Jump — or **climb**: if there's a grabbable ledge in front of you (up to ~2.6 m), Space mantles up onto it instead, with a pull-up animation. Works mid-air (grab a lip as you fall), costs a little stamina — spam it to scale cave walls or climb out of anywhere you're stuck (dig footholds with the pickaxe if the wall's too tall) |
 | F | Mount / dismount a saddled horse (WASD ride — camera-steered, Shift gallop, Space jump; LMB = saddle sword sweeps, left/right by where you look) |
-| Alt / Option | Sheathe / unsheathe sword |
-| Q | Cycle offhand: shield → torch → empty (only items you own) |
-| M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) |
+| Alt / Option | Sheathe / unsheathe sword — the shield stows on your back / draws with it. **The Hunch** (settings toggle, on by default): the blade auto-draws the instant something turns hostile and auto-sheathes after 6.7 quiet seconds |
+| Q | Cycle offhand: shield → torch → shield + torch (strapped to the same arm) → empty (only items you own) |
+| M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) — plus a dev button that **tears open a whole new cave region** ~30 m ahead (quake included; ~40% roll VAST) |
 | Tab | Menu: **1** Inventory · **2** Stats · **3** Progression · **4** Bestiary |
 | I | Straight to the Inventory page |
-| Esc | Settings menu (ray-traced lighting, shadows, display, input) — or closes the open menu |
+| Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch) — or closes the open menu. All menus render 67% larger |
 
 (Heavy/light builds and dodge are coming later — dropped from this slice for now.)
 
@@ -35,17 +36,25 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 - First-person movement with flowy momentum (eases into a stop), sprint, jump, stamina.
 - A visible first-person body + a hand holding the sword (look down to see them).
 - Three distinct, flowing swing animations chained as a 1-2-3 combo, with a stronger 3rd hit.
-- Sheathe / unsheathe the sword on Alt (the blade moves to the hip when sheathed).
+- Sheathe / unsheathe the sword on Alt (the blade moves to the hip, the shield to your
+  back). **The Hunch**: sword + shield leap out on their own when anything turns hostile,
+  and ride home after 6.7 calm seconds (toggle in settings). Raising a block also draws.
 - HP and stamina bars (top-left), dash (Ctrl) with a stamina cost and brief i-frames.
 - A small **forest world**: fog, dusk lighting, scattered low-poly trees and rocks.
-- **Two procedural caves**: each mouth sits inside a **grassy hill** that rises
-  from the forest floor and arcs over the opening — a little green hill with a
-  hole in it. Sloped entry tunnels dive underground into seeded networks of
-  6–9 chambers linked by real doorways, with frequent branches, loops, and at
-  least one true **3-way junction** per cave — stalagmites, stalactites, rubble,
-  and crystal light inside, with kobolds in the shallows and a skeleton deeper in.
-  Going underground thickens the fog, kills the ambient light, and fades in a
-  location title ("The Hollow Depths" / "The Dusk Forest").
+- **CAVES 2.0 — organic voxel caves** (full redo, docs/CAVES_PLAN.md): two 64×64 m
+  regions of real underground. Worm tunnels swell into caverns and pinch into
+  narrow-but-fitable cracks entirely on their own (Minecraft-1.18-style carvers,
+  flat-shaded surface-nets rock, strata colors, grass-skinned surface). Crystals
+  light the galleries, silver seams run the middle depths, meteoric waits at the
+  deepest reachable floor, and dweller packs get meaner the deeper you go — a
+  dark knight holds the bottom.
+- **The pickaxe DIGS**: bites carve real holes in cave rock — walls, floors,
+  ceilings. Rocks physically fall from every bite (mining a ceiling drops a slab
+  that HURTS — undercut at an angle). Dig a slow stubborn shaft all the way back
+  up to the surface if you're lost, or down toward the glow of something better.
+- Going underground thickens the fog, kills the ambient light, and fades in a
+  location title ("The Hollow Depths" / "The Dusk Forest"). (The old grassy-hill
+  chamber caves are retired — Cave.gd stays on disk / in git history.)
 - **No ghost hits**: attacks (theirs AND yours) need line of sight and a shared
   height band — mobs can no longer bite you through cave walls or floors, and
   they don't aggro through rock either.
@@ -92,11 +101,13 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 - **Inventory** (I, or Tab page 1): item list with a carry-weight limit
   (overweight = slowed, no sprint; STR raises the limit), five armor slots, and
   an offhand slot.
-- **Offhand items**: you start owning a wooden shield and a torch. Cycle them with
-  **Q** (or click in the inventory) — the item animates up into your left hand,
-  sways as you move, and lowers away when swapped. The shield lifts to guard the
-  view while you block; the **torch actually casts flickering light** (bring it
-  into the caves).
+- **Offhand items**: you start owning a wooden shield and a torch. Cycle with
+  **Q** (or click in the inventory) — shield → torch → **shield + torch together**
+  (the shield straps to the forearm so the torch shares the fist) → empty. Items
+  animate up into your left hand, sway as you move, and lower away when swapped.
+  The shield lifts to guard the view while you block (strapped or not); the
+  **torch actually casts flickering light** (bring it into the caves). Sheathing
+  stows the shield across your back — the torch stays lit in your hand.
 - **Mob spawn menu** (M): spawn any mob ~10 feet in front of you.
 - **Weapon materials** (docs/MATERIALS.md): every sword is made of one metal with
   real matchup damage vs creature families — silver shreds the undead and the

@@ -3,9 +3,9 @@
 > **The Withering** — first-person dark fantasy open-world survival RPG in **Godot 4.4**.
 > Skill-based melee, no spellcasting (magic = items/materials only), gear that grows with you,
 > enemies wither to dust. Art: gritty-realism low-poly, slate/indigo base + ember/frost accents.
-> Everything is placeholder primitives until step 11. Last updated: 2026-07-10.
+> Everything is placeholder primitives until step 11. Last updated: 2026-07-14.
 
-**Doc map:** `docs/DESIGN.md` = full design bible · `docs/ROADMAP.md` = build order + live checkboxes (keep updated!) · `docs/MATERIALS.md` = metals/matchups · `docs/TREES_PLAN.md` = Blender tree pipeline · `README.md` = controls + slice summary · this file = quick orientation.
+**Doc map:** `docs/DESIGN.md` = full design bible · `docs/ROADMAP.md` = build order + live checkboxes (keep updated!) · `docs/MATERIALS.md` = metals/matchups · `docs/TREES_PLAN.md` = Blender tree pipeline · `docs/CAVES_PLAN.md` = Caves 2.0 redo (SDF + marching cubes) · `README.md` = controls + slice summary · this file = quick orientation.
 
 **Rules of the road:** game must stay runnable after every change · world is built in code (scenes are thin shells — `World.tscn` is the only scene) · ambiguous design call → `TODO(design):` comment, don't guess · update ROADMAP checkboxes + README as work lands.
 
@@ -14,8 +14,9 @@
 ## ✅ COMPLETED SYSTEMS (what already works)
 
 **Player core — `Player.gd` (2500 lines: controller + combat + HUD + all menus)**
-- FP movement with momentum: WASD, sprint, jump, auto step-up, Ctrl dash (stamina + i-frames).
-- Visible first-person body (torso/legs/hands), swinging-arm walk cycle, Alt sheathe/unsheathe to hip scabbard + draw-slash.
+- FP movement with momentum: WASD, sprint, jump, auto step-up, Ctrl dash (stamina + i-frames), **Space mantle-climb** (`_try_climb`/`_update_climb`: grabbable ledge ≤2.65 m beats jumping — rise-then-haul animation, hands plant, camera dips; works mid-air; 8 stamina; cancelled by knockdown). **Bump absorber** (`_eye_smooth` in `_apply_step_smooth`): small grounded body hops on lumpy voxel rock reach the eye as an eased glide — feet bump, view floats.
+- Visible first-person body (torso/legs/hands), swinging-arm walk cycle, Alt sheathe/unsheathe to hip scabbard + draw-slash. Shield sheathes WITH the sword (stows across the back, `back_shield`); raising a block auto-draws.
+- **The Hunch** (`_update_hunch`, settings toggle, default on): blade+shield auto-draw the instant any hostile turns AGITATED at you (edge-triggered so Alt can defy it; horses excluded — their agitation is flight), auto-sheathe after 6.7 quiet seconds (`HUNCH_SHEATHE_AFTER`).
 - Stamina + health pools, very slow out-of-combat regen, respawn with i-frames.
 
 **Combat — in `Player.gd`, telegraphs in `Enemy.gd`**
@@ -24,10 +25,12 @@
 - **Parry**: block raised ≤0.18s before impact = no damage/stamina, attacker staggers, beats guard-breakers (`PARRY_WINDOW`).
 - No ghost hits: attacks both ways need line-of-sight + shared height band.
 
-**Weapons (1/2/3 select)**
+**Weapons (1/2/3/4 select)**
 - **1 Sword** — the combo loop above; material-driven (see below).
 - **2 Bow** — hold-to-draw (damage/speed ride the draw, DEX quickens, STR powers), real arrow projectiles with drop (`Arrow.gd`), missed arrows stick in terrain and are retrievable, 20-arrow ammo in inventory.
-- **3 Iron Pickaxe** — chop with impact-timed bite; mines ore veins, skates off nothing-rock. Swords can't mine.
+- **3 Iron Pickaxe** — chop with impact-timed bite; mines ore veins AND digs cave rock (Caves 2.0). Swords can't mine.
+- **4 War Axe** — heavy one-handed cleaver (`_try_axe_swing`/`_update_axe`/`_do_axe_hit`): ×1.35 base damage, slower, no combo ladder — two ALTERNATING authored swings (overhead chop / horizontal cleave), impact-timed damage, hits everything in the arc, LOS-checked. No material matchups yet (TODO: fold into metal system at step 4/5). Can't block with it; offhand shield/torch stay up.
+- **Fall damage** (`_apply_fall_damage`, fires on touchdown in `_update_gait`): safe to ~6 m (11 m/s), then 6.5 dmg per m/s over; ≥17.5 m/s also folds you into the knockdown; lethal falls kill. Bypasses block/i-frames; mantling mid-air zeroes fall speed (the grab saves you).
 
 **Enemies — `Enemy.gd` base (819 lines) + per-mob subclasses**
 - Shared AI: calm-wander → agitated, circle/orbit then dart in, telegraphed glowing windups, flinch, caught-mid-attack retreat, white-flash triangle-shatter wither death, far-off mobs sleep (CPU).
@@ -45,15 +48,15 @@
 
 **Settings menu — Esc (persisted to `user://settings.cfg`)**
 - **Ray-Traced Lighting** toggle = Godot SDFGI preset (`World.set_rt_lighting`): real-time bounced GI + SSIL/SSAO/SSR + volumetric light shafts + glow; flat ambient ×0.55 when on. Godot has no hardware RT — SDFGI is the ray-marched equivalent. Off by default (GPU-heavy).
-- Shadows Low/Med/High (atlas 2048/4096/8192 + soft filter), fullscreen, VSync, mouse sensitivity (0.3–2.5×), FOV (60–110). All applied live via `Player._apply_settings`.
+- Shadows Low/Med/High (atlas 2048/4096/8192 + soft filter), fullscreen, VSync, mouse sensitivity (0.3–2.5×), FOV (60–110), **The Hunch** on/off. All applied live via `Player._apply_settings`.
 
-**Menus (Tab = 4 pages, I = straight to inventory, M = dev mob spawner)**
+**Menus (Tab = 4 pages, I = straight to inventory, M = dev mob spawner) — all panels render 67% larger (`MENU_SCALE`, clamped to fit the window)**
 - **1 Inventory**: item list, carry-weight limit (overweight = slow, no sprint), 5 armor slots, offhand slot, Main Hand slot (click a sword to wield — blade rebuilds in hand), **Armory (dev)** column conjures any metal.
 - **2 Stats**: Cyberpunk-style sheet, hover = live before→after, queue +/− then Confirm.
 - **3 Progression**: earned tiers + next-tier live progress bar, rest hidden.
 - **4 Bestiary**: every mob ??? until first kill; material weaknesses ??? until you land that metal on that creature ("prove the matchup", green/red cells, log toasts).
 
-**Offhand** — own shield + torch from start; Q cycles owned only; raise/lower animations, shield lifts while blocking, torch casts real flickering light. Offhand lowers while bow is out.
+**Offhand** — own shield + torch from start; Q cycles owned only: shield → torch → **shield+torch together** (shield straps to the forearm, torch shares the fist; `equipment["offhand2"]` companion slot) → empty. Raise/lower animations, shield lifts while blocking (strapped or not), torch casts real flickering light. Offhand lowers while bow is out (shield slung on back); sheathed = shield on back, torch stays lit.
 
 **Materials — `Materials.gd` (all 10 metals live)**
 - bronze/iron/steel (common, no element) · silver-Moonlight, cold_iron-Frost (uncommon) · meteoric-Ember, mithril-Spark, adamant-Quake (rare) · dragonsteel-Dragonfire, voidsteel-Soulfire (endgame).
@@ -62,10 +65,10 @@
 **Mining — `OreVein.gd`**
 - 4 pickaxe bites (seam flash/chips/shake) burst veins into ore pickups; silver seams ~half the cave rooms, meteoric guards the deepest. **First ore of a new metal auto-forges that sword** (the unlock moment); spares stack for future smithing.
 
-**World — `World.gd` + `Cave.gd` + `DayNight.gd`**
+**World — `World.gd` + `CaveRegion.gd`/`CaveField.gd`/`CaveMesher.gd` + `DayNight.gd`**
 - Forest overworld: fog, placeholder cone trees + rocks.
 - **Day/night cycle** (`DayNight.gd`): Skyrim-pace — one game day per 20 real min (72×), starts 17:00. Sun + moon on one wheel, keyframed sky/fog/ambient (17:30 = the original signature dusk look), dark frost-blue nights (torch matters). Daybreak/Nightfall titles at 6:00/20:36 (surface only). `is_night()` ready for step 9 danger cycles. World._process lerps toward `surf_ambient`/`surf_fog`; caves override.
-- Two procedural caves: grassy-hill mouths, seeded 6-9 chamber networks with branches/loops + guaranteed 3-way junction, stalagmites/crystal light, cave-dweller packs. **Tunnels are full round natural passages** — `Cave._swept_tube` lofts a flat-floored (walkable) noise-bulged arch along a bowed/sagged path, flat-shaded, trimesh collision — and **flare open into bigger domed caverns** (`_build_dome` low-poly ceiling, clamped under `CEIL_LIMIT = -1.5` so it never punches the slab). Underground = thicker fog, killed ambient, location titles fade in ("The Hollow Depths"/"The Dusk Forest").
+- **CAVES 2.0 (roomless, voxel)**: two 64×64×36 m `CaveRegion` blocks, each a `CaveField` density grid (0.8 m voxels, rock=+ air=−) carved by Minecraft-1.18-style noise carvers — **worm tunnels whose radius swells/pinches on its own, cheese caverns below −8, thin fitable cracks** — plus domain warp, a 2.2 m surface roof guard, rim columns forced air (slab overhangs the seam) and an unmineable bottom row. ~40% of systems roll **VAST** (`CaveField.vast`: fatter worms, far bigger/earlier caverns, wider cracks). **Regions are visually seamless with the overworld**: vertex jitter is zero on the open surface away from the entrance (flat grass = identical lighting to the slab; relief only at the entrance zone + underground) and the skin dips 7 cm under the slab's 1.2 m overhang at the rim (`dip` in `_gen_rows`) so the border never shares a plane (no z-fighting). `World.spawn_cave_at(mouth, dir)` tears open a NEW region at runtime (re-tiles the slab, quake + "The World Has Shifted" title) — wired to an M-menu dev button (`Player._spawn_cave`). **Entrance = a SUNKEN THROAT: an open grass-walled ramp cut descending from grade, diving under a low rock CAP (`MOUND_R/H` 5.2/2.5 at `MOUND_FWD`) — only the cap's top breaks the surface; the chain may only cut the surface within `MOUTH_OPEN_R` of the mouth (kills back-side holes).** **DEFERRED DEEP LOADING**: `field.generate(true)` builds only rows above `DEEP_Y=-8` at world build (deep rows = placeholder rock, dwellers/veins/crystals deferred); approaching the mouth triggers `start_deep_generation()` → threaded field rows → threaded chunk remesh → content spawns, all polled non-blocking in `CaveRegion._process` (`_deep_state` 0-3, digging restricted to shallow rows while threads run, player digs preserved via minf) — a Chaikin-smoothed capsule chain (≤30° floor, 1.9 m+ headroom, sim-verified) runs level through the mound then dives to −11.5 m where the noise caves take over; a lit crystal cluster just inside makes the mouth glow at night. `CaveMesher` skins it with chunked (16³) **naive surface nets** — flat normals, vertex jitter, strata vertex colors (grass top skin / slate / frost / ember by depth, sRGB→linear converted to match the slab exactly), trimesh collision per chunk (group `cave_rock`), **two-sided rock material** (sub-voxel walls pinch the net into twisted slivers whose culled backfaces read as see-through cracks — drawing both sides seals them) — all threaded via WorkerThreadPool at build. Content placed by `field.reachable_air()` BFS + `floor_point`: crystals (ember in the deeps), silver veins mid-band, meteoric at the deepest reachable floor, dweller packs by depth with a dark-knight champion at the bottom. **The pickaxe DIGS**: `carve_bite` scoops the field and remeshes dirty chunks — walls, ceilings, dig slowly all the way up to the surface; every bite bursts `RockDebris.gd` falling rocks, and biting a ceiling drops a big slab that deals 10 dmg to whoever stands under it. Old `Cave.gd` (swept tubes + chamber grid) retired but on disk. Underground = thicker fog, killed ambient, location titles ("The Hollow Depths"/"The Dusk Forest") unchanged.
 
 **Horses & riding — `Horse.gd` + `SaddledHorse.gd` (step 6 first pass)**
 - Two kinds, one bestiary page: **wild** herds (2×3-4, far tree line) graze/flee — skittish radius 8m, never rideable; **saddled** (2 near spawn) are calm and mountable with **F**.
@@ -75,6 +78,7 @@
 ---
 
 ## 🔨 IN PROGRESS
+- **Caves 2.0** — core is BUILT (see World section above + `docs/CAVES_PLAN.md`): field/mesher/region + digging + falling rocks + content placement, first pass, **needs an in-game walkthrough and noise tuning** (frequencies/radii = the make-or-break iteration). Then: dressing pass (stalactite forests, pools, glowworms, breakdown boulders), squeeze camera-tuck, cavity tagging for titles/archetype dressing, sealed-pocket secrets, perf pass.
 - **Hit feedback** (step 2): camera shake done; hitstop + sound hooks TODO. Stamina-break on guard TODO.
 - **Weapon styles** (step 4): bow done; base attack loop per weapon type/weight + menu style-equip NOT started.
 - **Sword depth** (step 5): materials/matchups/sourcing done; style points, per-sword evolution bar, durability, unique styles on rare swords NOT started.

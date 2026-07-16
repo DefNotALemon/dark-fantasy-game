@@ -587,33 +587,46 @@ func _build_hill() -> void:
 	var cw := step + 0.6         ## overlap so there are no gaps between blocks
 	var crown := 2.2             ## rise into a big hill around/over the mouth
 	var base_y := -0.9
+
+	## The entry tunnel's line, so the blanket never seals it: columns sitting
+	## over the tunnel get their BASE lifted above the tube's ceiling apex
+	## (floating roof cover) instead of running full height and piercing it.
+	var dir_cell := Vector2i(int(dir.x), int(dir.z))
+	var tun_b := _door_point(Vector2i.ZERO, -dir_cell) + dir * 0.8
+	var tun_vb := (tun_b - mouth).dot(dir)   ## along-track end of the ramp
+	var tun_clear_w := TUNNEL_W * 0.5 + 1.9  ## tube half-width incl. flare + wobble
+
 	var vv := 0.6
 	while vv < 40.0:
 		var uu := -half
 		while uu <= half + 0.001:
-			## Clear only a walk-in-sized slot at the mouth; cover everything else
-			## so the big hill rises up and over the mouth and the whole top is covered.
-			if not (vv < 5.0 and absf(uu) < TUNNEL_W * 0.5 + 1.0):
-				var along := clampf(vv / 40.0, 0.0, 1.0)
-				var edge := clampf(absf(uu) / half, 0.0, 1.0)
-				## Ramp the cover UP from the mouth so there's no lip to step over.
-				var front := clampf(vv / 10.0, 0.2, 1.0)
-				var surf := (0.4 + crown * (1.0 - 0.2 * along) * (1.0 - edge * edge)) * front + _rng.randf_range(-0.1, 0.1)
-				var height := surf - base_y
-				if height > 0.2:
-					var cpos := mouth + dir * vv + perp * uu + Vector3(0, base_y + height * 0.5, 0)
-					_solid_box(self, Vector3(cw, height, cw), cpos, dirt)   ## solid = walkable
-					## Grass fully caps the top (complete cover), plus broken tufts for texture.
-					_deco_box(Vector3(cw + 0.1, 0.3, cw + 0.1),
-						mouth + dir * vv + perp * uu + Vector3(0, surf + 0.15, 0), grass,
-						Vector3(_rng.randf_range(-6, 6), _rng.randf_range(0, 360), _rng.randf_range(-6, 6)))
-					for _t in range(_rng.randi_range(0, 3)):
-						var gsz := _rng.randf_range(0.5, 1.0)
-						var ox := _rng.randf_range(-cw * 0.4, cw * 0.4)
-						var oz := _rng.randf_range(-cw * 0.4, cw * 0.4)
-						_deco_box(Vector3(gsz, _rng.randf_range(0.3, 0.55), gsz),
-							mouth + dir * vv + perp * uu + Vector3(ox, surf + 0.45, oz), grass,
-							Vector3(_rng.randf_range(-14, 14), _rng.randf_range(0, 360), _rng.randf_range(-14, 14)))
+			var along := clampf(vv / 40.0, 0.0, 1.0)
+			var edge := clampf(absf(uu) / half, 0.0, 1.0)
+			## Ramp the cover UP from the mouth so there's no lip to step over.
+			var front := clampf(vv / 10.0, 0.2, 1.0)
+			var surf := (0.4 + crown * (1.0 - 0.2 * along) * (1.0 - edge * edge)) * front + _rng.randf_range(-0.1, 0.1)
+			## Over the tunnel: base rises to clear the tube's arched ceiling
+			## (apex ≈ floor + 1.17*H, plus noise wobble — 4.4 covers it all).
+			var bottom := base_y
+			if absf(uu) < tun_clear_w and vv < tun_vb + 2.0:
+				var tt := clampf((vv + 2.0) / (tun_vb + 2.0), 0.0, 1.0)
+				var tun_floor := lerpf(0.0, tun_b.y, tt)   ## the ramp is a straight line
+				bottom = maxf(base_y, tun_floor + 4.4)
+			var height := surf - bottom
+			if height > 0.2:
+				var cpos := mouth + dir * vv + perp * uu + Vector3(0, bottom + height * 0.5, 0)
+				_solid_box(self, Vector3(cw, height, cw), cpos, dirt)   ## solid = walkable
+				## Grass fully caps the top (complete cover), plus broken tufts for texture.
+				_deco_box(Vector3(cw + 0.1, 0.3, cw + 0.1),
+					mouth + dir * vv + perp * uu + Vector3(0, surf + 0.15, 0), grass,
+					Vector3(_rng.randf_range(-6, 6), _rng.randf_range(0, 360), _rng.randf_range(-6, 6)))
+				for _t in range(_rng.randi_range(0, 3)):
+					var gsz := _rng.randf_range(0.5, 1.0)
+					var ox := _rng.randf_range(-cw * 0.4, cw * 0.4)
+					var oz := _rng.randf_range(-cw * 0.4, cw * 0.4)
+					_deco_box(Vector3(gsz, _rng.randf_range(0.3, 0.55), gsz),
+						mouth + dir * vv + perp * uu + Vector3(ox, surf + 0.45, oz), grass,
+						Vector3(_rng.randf_range(-14, 14), _rng.randf_range(0, 360), _rng.randf_range(-14, 14)))
 			uu += step
 		vv += step
 

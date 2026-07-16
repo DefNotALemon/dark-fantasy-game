@@ -67,6 +67,10 @@ func _process(delta: float) -> void:
 	_env.fog_density = lerpf(_env.fog_density, CAVE_FOG if _underground else BASE_FOG, k)
 	_env.ambient_light_energy = lerpf(_env.ambient_light_energy, want_ambient * _ambient_scale, k)
 	_env.fog_light_color = _env.fog_light_color.lerp(want_fog_col, k)
+	## Underground, the heavy cave fog must NOT swallow the sky: looking back
+	## up the throat, the daylight at the mouth stays bright — the light at
+	## the end of the tunnel. (On the surface the fog dresses the sky as before.)
+	_env.fog_sky_affect = lerpf(_env.fog_sky_affect, 0.0 if _underground else 1.0, k)
 
 	## Title fade: quick in, hold, ease out.
 	if _title_timer > 0.0:
@@ -167,30 +171,27 @@ func set_shadow_quality(level: int) -> void:
 
 func _pick_cave_sites() -> void:
 	## Cave mouths sit out in the forest with their openings facing the spawn;
-	## the entry tunnels dive OUTWARD (away from center), which keeps the two
-	## cave networks naturally far apart. Each needs a hole cut into the ground
-	## slab; the holes' x-ranges must not overlap (the slab is x-strips).
+	## the systems dive OUTWARD (away from center), which keeps the two voxel
+	## regions naturally far apart. Each CaveRegion owns a 64×64 m block whose
+	## top layer IS the ground there, so the slab gets a region-sized hole; the
+	## holes' x-ranges must not overlap (the slab is x-strips).
 	var guard := 0
-	while _cave_sites.size() < CAVE_COUNT and guard < 300:
+	while _cave_sites.size() < CAVE_COUNT and guard < 400:
 		guard += 1
 		var ang := _rng.randf() * TAU
-		var rad := _rng.randf_range(30.0, 50.0)
+		var rad := _rng.randf_range(30.0, 44.0)
 		var mouth := Vector3(cos(ang) * rad, 0, sin(ang) * rad)
 		var cdir := Vector3(signf(mouth.x), 0, 0) if absf(mouth.x) > absf(mouth.z) else Vector3(0, 0, signf(mouth.z))
-		## The hole must reach until the tunnel's ceiling is fully below the slab
-		## (~9.5m past the mouth at a ~30-degree descent).
-		var rect: Rect2
-		if cdir.x != 0.0:
-			rect = Rect2(minf(mouth.x - cdir.x * 1.0, mouth.x + cdir.x * 10.0), mouth.z - 2.1, 11.0, 4.2)
-		else:
-			rect = Rect2(mouth.x - 2.1, minf(mouth.z - cdir.z * 1.0, mouth.z + cdir.z * 10.0), 4.2, 11.0)
-		var first_chamber := mouth + cdir * 29.0
+		var center := mouth + cdir * 22.0  ## region center (CaveField geometry)
+		var half := CaveField.CELLS_X * CaveField.VOX * 0.5
+		var rect := Rect2(center.x - half, center.z - half, half * 2.0, half * 2.0)
 		var ok := true
 		for site in _cave_sites:
 			if mouth.distance_to(site.mouth) < 60.0:
 				ok = false
-			if first_chamber.distance_to((site.mouth as Vector3) + (site.dir as Vector3) * 29.0) < 45.0:
-				ok = false  ## keep the underground networks well apart
+			var other_c := (site.mouth as Vector3) + (site.dir as Vector3) * 22.0
+			if center.distance_to(other_c) < 68.0:
+				ok = false  ## keep the underground regions clear of each other
 			if rect.position.x < (site.rect as Rect2).end.x + 2.0 and rect.end.x > (site.rect as Rect2).position.x - 2.0:
 				ok = false
 		if ok:
@@ -200,6 +201,11 @@ func _pick_cave_sites() -> void:
 func _build_ground() -> void:
 	## The ground slab, assembled from x-strips so each cave's entry hole is a
 	## real opening (boxes can't be carved, so we tile around the holes).
+	## Idempotent: clears the previous strips first, so a newly torn-open cave
+	## can re-tile the world around its hole.
+	for b in _ground_bodies:
+		b.queue_free()
+	_ground_bodies.clear()
 	var w_half := WORLD_RADIUS * 1.3
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.16, 0.24, 0.14)  ## mossy forest floor
@@ -207,7 +213,9 @@ func _build_ground() -> void:
 
 	var holes: Array[Rect2] = []
 	for site in _cave_sites:
-		holes.append(site.rect as Rect2)
+		## Shrink each hole so the slab overhangs the region's rim seam (the
+		## outermost voxel column is air — the overhang hides that moat).
+		holes.append((site.rect as Rect2).grow(-1.2))
 	holes.sort_custom(func(a: Rect2, b: Rect2) -> bool: return a.position.x < b.position.x)
 
 	var xs: Array[float] = [-w_half]
@@ -235,8 +243,42 @@ func _build_ground() -> void:
 			_ground_slab(x0, x1, -w_half, w_half, mat)
 
 
+var _ground_bodies: Array[StaticBody3D] = []  ## slab strips — rebuilt when a new cave tears open
+
+
+func spawn_cave_at(mouth: Vector3, cdir: Vector3) -> bool:
+	## Tear a brand-new cave region open at runtime (M-menu dev button today;
+	## DESIGN.MD's "caves open up in the earth over time" tomorrow). Re-tiles
+	## the slab around the new hole. Refuses holes the x-strip slab can't cut
+	## (overlapping x-ranges) or spots off the slab.
+	mouth.y = 0.0
+	if cdir.length_squared() < 0.5:
+		cdir = Vector3(1, 0, 0)
+	var center := mouth + cdir * 22.0
+	var half := CaveField.CELLS_X * CaveField.VOX * 0.5
+	if absf(center.x) + half > WORLD_RADIUS * 1.3 - 2.0 or absf(center.z) + half > WORLD_RADIUS * 1.3 - 2.0:
+		return false  ## would hang off the edge of the world slab
+	var rect := Rect2(center.x - half, center.z - half, half * 2.0, half * 2.0)
+	for site in _cave_sites:
+		if rect.position.x < (site.rect as Rect2).end.x + 2.0 and rect.end.x > (site.rect as Rect2).position.x - 2.0:
+			return false  ## overlaps an existing region's x-range
+	_cave_sites.append({"mouth": mouth, "dir": cdir, "rect": rect})
+	_build_ground()  ## re-tile the slab with the new hole in it
+	var cave := CaveRegion.new()
+	cave.mouth = mouth
+	cave.dir = cdir
+	cave.cave_seed = 4457 + _cave_sites.size() * 7919 + int(absf(mouth.x) * 13.0 + absf(mouth.z) * 7.0)
+	add_child(cave)
+	## The earth does not open politely (DESIGN.md: earthquake feedback).
+	if _player:
+		_player.cam_shake = maxf(float(_player.cam_shake), 0.5)
+	_show_title("The World Has Shifted")
+	return true
+
+
 func _ground_slab(x0: float, x1: float, z0: float, z1: float, mat: StandardMaterial3D) -> void:
 	var body := StaticBody3D.new()
+	_ground_bodies.append(body)
 	body.position = Vector3((x0 + x1) * 0.5, -1, (z0 + z1) * 0.5)
 	add_child(body)
 	var size := Vector3(x1 - x0, 2, z1 - z0)
@@ -254,14 +296,15 @@ func _ground_slab(x0: float, x1: float, z0: float, z1: float, mat: StandardMater
 
 
 func _build_caves() -> void:
-	var occupied := {}  ## shared so the two cave networks can never overlap
+	## Caves 2.0 (docs/CAVES_PLAN.md): each site becomes a voxel CaveRegion —
+	## organic noise caves, mineable rock, its own grass-skinned surface.
+	## (Cave.gd, the old tube builder, is retired but kept on disk for reference.)
 	for i in range(_cave_sites.size()):
 		var site := _cave_sites[i]
-		var cave := Cave.new()
+		var cave := CaveRegion.new()
 		cave.mouth = site.mouth
 		cave.dir = site.dir
 		cave.cave_seed = 4457 + i * 7919
-		cave.occupied = occupied
 		add_child(cave)
 
 
@@ -367,8 +410,9 @@ func _random_ground_point() -> Vector3:
 		for site in _cave_sites:
 			var m := site.mouth as Vector3
 			var d := site.dir as Vector3
-			var t := clampf((pos - m).dot(d), -4.0, 28.0)
-			if pos.distance_to(m + d * t) < 8.0:
+			## Keep the whole entrance mound + approach + walk-in clear.
+			var t := clampf((pos - m).dot(d), -9.0, 28.0)
+			if pos.distance_to(m + d * t) < 11.5:
 				clear = false
 				break
 		if clear:

@@ -213,7 +213,7 @@ func effect_lines(id: String, extra := 0) -> Array:
 	vals[id] = mini(real + extra + 1, STAT_CAP)
 	var nxt := _snapshot(id)
 	vals[id] = real
-	for i in range(now.size()):
+	for i in range(mini(now.size(), nxt.size())):  ## same shape by construction, but never trust it
 		out.append([now[i][0], now[i][1], nxt[i][1]])
 	return out
 

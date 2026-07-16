@@ -8,21 +8,28 @@ class_name Player
 ##   WASD ........ move          Mouse ....... look
 ##   Shift ....... sprint        Space ....... jump
 ##   Left click .. attack (sword: flowing 1-2-3 combo / bow: hold to draw, release
-##                 to loose / pickaxe: chop — bites ore veins)
+##                 to loose / pickaxe: chop — bites ore veins + digs cave rock /
+##                 war axe: alternating overhead chop + horizontal cleave)
 ##   Right click . block (sword) / ease the string down (bow)
-##   1 / 2 / 3 ... weapon: sword / bow / pickaxe (while no menu is open)
+##   1 / 2 / 3 / 4 weapon: sword / bow / pickaxe / war axe (while no menu is open)
 ##   Ctrl ........ dash
+##   Space ....... jump — or MANTLE: a grabbable ledge ahead (≤ ~2.6 m) gets
+##                 climbed instead, hands planting, camera dipping into the
+##                 pull; works mid-air too (grab as you fall), costs stamina
 ##   F ........... mount / dismount a saddled horse (WASD ride, Shift gallop,
 ##                 Space jump; LMB sweeps the sword saddle-side — look left or
 ##                 right to pick the side, straight ahead to alternate)
-##   Alt/Option .. sheathe / unsheathe sword
+##   Alt/Option .. sheathe / unsheathe sword (the shield stows/draws with it;
+##                 THE HUNCH — settings toggle — auto-draws the moment anything
+##                 turns hostile and auto-sheathes after 6.7 quiet seconds)
 ##   M ........... mob spawn menu
 ##   Tab ......... menu (1 Inventory / 2 Stats / 3 Progression / 4 Bestiary)
 ##   I ........... straight to the Inventory page — its Armory column (dev)
 ##                 adds any material sword; click a sword in the list to wield it
-##   Q ........... cycle offhand (shield / torch / empty — owned items only)
-##   Esc ......... settings menu (ray-traced lighting, shadows, display, input)
-##                 — or closes whichever menu is open
+##   Q ........... cycle offhand (shield / torch / shield+torch / empty — owned
+##                 items only; the shield straps on so the torch shares the arm)
+##   Esc ......... settings menu (ray-traced lighting, shadows, display, input,
+##                 the hunch) — or closes whichever menu is open
 
 const SPEED := 5.0
 const SPRINT_SPEED := 8.0
@@ -52,6 +59,7 @@ var leg_pivots: Array[Node3D] = []   ## visible legs — they stride with the ga
 var viewmodel: Node3D
 var sword_vm: Node3D    ## the held blade — rebuilt when a different sword is equipped
 var hip_sword: Node3D
+var back_shield: Node3D ## stowed shield across the back — the offhand's scabbard
 var left_arm: Node3D
 var right_arm: Node3D
 var pitch := 0.0
@@ -95,12 +103,37 @@ var sheathed := false
 var sheath_t := 0.0          ## 0 = drawn, 1 = fully sheathed
 var draw_attack := false     ## true while performing a draw-from-sheath slash
 
+## --- The Hunch: steel answers intent (settings toggle). The moment a hostile
+## creature turns AGITATED at you the blade+shield clear the scabbard on their
+## own; after HUNCH_SHEATHE_AFTER quiet seconds they ride home again. ---
+const HUNCH_SHEATHE_AFTER := 6.7
+var hunch_calm_t := 0.0
+var hunch_aggro_prev := false    ## edge trigger — Alt can still defy it mid-fight
+
+## --- Climbing (Space): if a grabbable ledge is ahead, Space MANTLES it
+## instead of jumping — hands plant, camera dips into the pull, you rise then
+## haul over the lip. Works on cave walls, dig-steps, pit lips; costs stamina,
+## so scaling a rock face is a real climb, not an elevator. ---
+const CLIMB_TIME := 0.55         ## base mantle duration (taller = a beat longer)
+const CLIMB_STAMINA := 8.0
+const CLIMB_MAX_H := 2.65        ## highest ledge you can grab above your feet
+const CLIMB_MIN_H := 0.55        ## lower lips are just walked/stepped up
+var climbing := false
+var climb_t := 0.0
+var climb_from := Vector3.ZERO
+var climb_to := Vector3.ZERO
+var climb_dur := CLIMB_TIME
+var jump_queued := false         ## Space pressed — resolved next physics tick
+
 var blocking := false
 var dash_timer := 0.0
 var invuln_timer := 0.0
 var hitstun_timer := 0.0     ## thrown out of your action when hit (unblocked)
 var block_impact := 0.0      ## brief recoil when a block absorbs a hit
 var _step_smooth := 0.0      ## camera offset that eases out after an auto-step (smooth stairs)
+var _eye_smooth := 0.0       ## signed bump absorber: small body hops (jittery
+							 ## voxel floors) reach the EYE as an eased glide
+var _prev_body_y := 0.0
 var move_input := Vector3.ZERO
 var bob_t := 0.0             ## slow "breathing" sway of held items when standing still
 
@@ -113,6 +146,12 @@ var head_bob := Vector2.ZERO ## smoothed camera offset (x sway, y footfall dip)
 var land_dip := 0.0          ## soft knee-bend of the view after landing
 var _was_on_floor := true
 var _fall_speed := 0.0       ## how hard we were falling just before touchdown
+
+## --- Fall damage: gravity keeps its receipts. Safe to ~6 m; past that the
+## landing takes flesh, and a truly hard one folds your legs (knockdown). ---
+const FALL_SAFE_SPEED := 11.0    ## m/s at touchdown — under this is free
+const FALL_DMG_PER_MS := 6.5     ## damage per m/s beyond safe
+const FALL_KD_SPEED := 17.5      ## land this hard and you eat the floor
 
 const BAR_W := 340.0
 ## Out-of-combat HP regen now lives on the sheet — stats.heal_rate() (CON raises it).
@@ -136,10 +175,10 @@ var xp_show := 0.0
 var combat_timer := 99.0      ## time since last combat action
 var level := 1
 
-var log_labels: Array[Label] = []
-var log_kinds: Array[String] = []
-var log_amounts: Array[int] = []
-var log_life: Array[float] = []
+## One row per gain-log entry: {label, kind, amount, life}. A single array —
+## the old four parallel arrays could drift apart and crash on an index the
+## moment anything interrupted an append quartet mid-frame.
+var log_rows: Array[Dictionary] = []
 
 ## --- Menus (M = mob spawner; Tab = Inventory | Stats | Progression) ---
 const TAB_PANEL_SIZE := Vector2(840, 540)  ## every page shares this one size
@@ -178,10 +217,12 @@ var dist_accum := 0.0            ## sub-meter remainder for Marathoner
 
 ## --- Inventory ---
 ## Carry limit lives on the sheet now — stats.carry_limit() (STR raises it).
-const SLOT_ORDER: Array[String] = ["sword", "helmet", "chest", "arms", "pants", "shoes", "offhand"]
+## "offhand2" is the companion slot: a torch can share the shield arm (shield
+## straps to the forearm, torch rides the same fist).
+const SLOT_ORDER: Array[String] = ["sword", "helmet", "chest", "arms", "pants", "shoes", "offhand", "offhand2"]
 const SLOT_NAMES := {
 	"sword": "Main Hand", "helmet": "Helmet", "chest": "Chest", "arms": "Arms",
-	"pants": "Pants", "shoes": "Shoes", "offhand": "Offhand",
+	"pants": "Pants", "shoes": "Shoes", "offhand": "Offhand", "offhand2": "Offhand 2",
 }
 var inventory: Array[Dictionary] = []   ## {name, weight, count, slot [, material]}
 var equipment := {}                     ## slot id -> inventory index (-1 = empty)
@@ -231,7 +272,9 @@ var set_fullscreen := false
 var set_vsync := true
 var set_sens := 1.0              ## multiplier on MOUSE_SENS
 var set_fov := 75.0
+var set_hunch := true            ## the hunch: auto draw on aggro / auto sheathe when calm
 var _settings_widgets := {}      ## id -> {btns: [[value, Button]...]} or {label: Label}
+const MENU_SCALE := 1.67         ## all menus render 67% larger (clamped to the screen)
 
 ## --- Offhand (left hand: shield / torch, cycled with Q) ---
 const OH_REST_POS := Vector3(-0.30, -0.30, -0.52)
@@ -240,6 +283,7 @@ const OH_RAISE_TIME := 0.35      ## equip animation: lift up into view
 var offhand_node: Node3D
 var offhand_light: OmniLight3D   ## the torch flame's actual light
 var offhand_shown := -1          ## inventory index currently displayed (-1 none)
+var offhand_shown2 := -1         ## companion item displayed alongside (torch w/ shield)
 var offhand_raise := 0.0         ## 0 = lowered off-screen, 1 = fully up
 var oh_bob_t := 0.0
 
@@ -269,6 +313,26 @@ var pick_swinging := false
 var pick_t := 0.0
 var pick_hit_done := false
 var vein_hint_cd := 0.0          ## rate-limits the "needs a pickaxe" nudge
+
+## --- War Axe (weapon 4): a heavy one-handed cleaver. Slower and harder-
+## hitting than the sword, no combo ladder — two ALTERNATING committed swings
+## (overhead chop / horizontal cleave), each with its own full animation.
+## Honest iron: no material matchups yet.
+## TODO(design): fold the axe into the metal system + weapon styles (step 4/5);
+## should it eventually chop trees once TreeLife lands? ---
+const AXE_TIME := 0.58           ## one full swing (DEX shortens it)
+const AXE_WINDUP := 0.36         ## fraction spent hauling it back
+const AXE_HIT_AT := 0.52         ## damage lands AT the visual impact
+const AXE_STAMINA := 15.0
+const AXE_RANGE := 2.8
+const AXE_DMG_MULT := 1.35       ## × base_damage (STR rides along)
+const AXE_REST_POS := Vector3(0.34, -0.36, -0.50)
+const AXE_REST_ROT := Vector3(22.0, -16.0, 8.0)
+var axe_vm: Node3D               ## axe viewmodel (right hand + haft + head)
+var axe_swinging := false
+var axe_t := 0.0
+var axe_hit_done := false
+var axe_side := 0                ## alternates: 0 = overhead chop, 1 = cleave
 
 ## --- Bestiary (Tab page 4): what you've slain and what you've LEARNED. ---
 ## A mob's row stays ??? until your first kill of it; each material's matchup
@@ -425,6 +489,21 @@ func _build_body() -> void:
 	_box(hip_sword, Vector3(0.06, 0.06, 0.05), hilt_gold, Vector3(0, 0, 0.18))     ## pommel
 	hip_sword.visible = false
 
+	## Stowed shield across the upper back — the offhand's own "scabbard".
+	## Shown whenever an equipped shield is sheathed with the blade (or slung
+	## because both hands are on the bow). Same boards as the held version.
+	back_shield = Node3D.new()
+	body_rig.add_child(back_shield)
+	back_shield.position = Vector3(0.04, 1.28, 0.24)
+	back_shield.rotation_degrees = Vector3(4.0, 0.0, 14.0)
+	var bs_wood := Color(0.38, 0.26, 0.14)
+	var bs_rim := Color(0.24, 0.16, 0.09)
+	_box(back_shield, Vector3(0.34, 0.44, 0.045), bs_wood, Vector3.ZERO)
+	_box(back_shield, Vector3(0.44, 0.30, 0.045), bs_wood, Vector3.ZERO)
+	_box(back_shield, Vector3(0.36, 0.46, 0.02), bs_rim, Vector3(0, 0, 0.024))
+	_box(back_shield, Vector3(0.10, 0.10, 0.07), Color(0.60, 0.63, 0.68), Vector3(0, 0, 0.05), Vector3.ZERO, true)
+	back_shield.visible = false
+
 	## --- Head + camera ---
 	head = Node3D.new()
 	head.position = Vector3(0, 1.62, 0)
@@ -465,6 +544,14 @@ func _build_body() -> void:
 	pick_vm.visible = false
 	_build_pick_mesh()
 
+	## --- War axe viewmodel (weapon 4). ---
+	axe_vm = Node3D.new()
+	camera.add_child(axe_vm)
+	axe_vm.position = AXE_REST_POS
+	axe_vm.rotation_degrees = AXE_REST_ROT
+	axe_vm.visible = false
+	_build_axe_mesh()
+
 	_apply_armor_visuals()  ## start in whatever the slots say (defaults today)
 
 
@@ -491,6 +578,25 @@ func _build_bow_mesh() -> void:
 	bow_vm.add_child(bow_hand_vm)
 	_box(bow_hand_vm, Vector3(0.085, 0.085, 0.12), skin, Vector3.ZERO)
 	bow_hand_vm.visible = false
+
+
+func _build_axe_mesh() -> void:
+	## A soldier's cleaver: fist, wrapped haft, and a broad wedge of a head
+	## with a blunt back-spike. Placeholder boxes like everything else.
+	var skin := Color(0.62, 0.46, 0.36)
+	var armor := Color(0.30, 0.31, 0.36)
+	var wood := Color(0.30, 0.20, 0.11)
+	var wrap := Color(0.20, 0.14, 0.09)
+	var iron := Color(0.58, 0.60, 0.64)
+	_box(axe_vm, Vector3(0.10, 0.10, 0.13), skin, Vector3(0, 0, 0.02))                          ## hand
+	_box(axe_vm, Vector3(0.09, 0.09, 0.30), armor, Vector3(0, -0.05, 0.18), Vector3(8, 0, 0))   ## forearm
+	_box(axe_vm, Vector3(0.055, 0.055, 0.66), wood, Vector3(0, 0.02, -0.34))                    ## haft (-z)
+	_box(axe_vm, Vector3(0.06, 0.06, 0.10), wrap, Vector3(0, 0.02, -0.06))                      ## grip wrap
+	_box(axe_vm, Vector3(0.07, 0.10, 0.13), iron, Vector3(0, 0.02, -0.64), Vector3.ZERO, true)  ## head socket
+	## The blade: a broad wedge sweeping down-forward, edge proud of the haft.
+	_box(axe_vm, Vector3(0.045, 0.34, 0.16), iron, Vector3(0, -0.14, -0.66), Vector3(-8, 0, 0), true)
+	_box(axe_vm, Vector3(0.04, 0.40, 0.05), iron, Vector3(0, -0.16, -0.73), Vector3(-8, 0, 0), true)  ## edge
+	_box(axe_vm, Vector3(0.05, 0.07, 0.10), iron, Vector3(0, 0.06, -0.58), Vector3(14, 0, 0), true)   ## back spike
 
 
 func _build_pick_mesh() -> void:
@@ -588,6 +694,8 @@ func _input(event: InputEvent) -> void:
 					_bow_start_draw()
 				elif current_weapon == "pickaxe":
 					_try_pick_swing()
+				elif current_weapon == "axe":
+					_try_axe_swing()
 				else:
 					_try_attack()
 			elif current_weapon == "bow":
@@ -601,11 +709,13 @@ func _input(event: InputEvent) -> void:
 				if menu_open == "" and mount == null and kd_phase == "":  ## menus shouldn't leak dashes/jumps into the game
 					_try_dash()
 			KEY_SPACE:
-				if menu_open == "" and kd_phase == "":
+				if menu_open == "" and kd_phase == "" and not climbing:
 					if mount != null:
 						mount.request_jump()
-					elif is_on_floor():
-						velocity.y = JUMP_VELOCITY
+					else:
+						## Resolved in _physics_process — the climb check needs
+						## physics-space raycasts, which _input can't touch.
+						jump_queued = true
 			KEY_F:
 				if menu_open == "":
 					_try_mount_toggle()
@@ -650,6 +760,8 @@ func _input(event: InputEvent) -> void:
 			KEY_4:
 				if menu_open == "tab":
 					_set_tab_page("bestiary")
+				elif menu_open == "":
+					_select_weapon("axe")
 			KEY_ESCAPE:
 				if menu_open != "":
 					_close_menu()
@@ -665,6 +777,11 @@ func _physics_process(delta: float) -> void:
 	## the entire fall-and-rise. Handles its own frame, then bails.
 	if kd_phase != "":
 		_update_knockdown(delta)
+		return
+
+	## Mid-mantle: the climb owns the body until you're up and over.
+	if climbing:
+		_update_climb(delta)
 		return
 
 	## In the saddle: the horse's body does the moving — feed it the reins,
@@ -685,10 +802,21 @@ func _physics_process(delta: float) -> void:
 	## of the hit landing counts as a perfect guard.)
 	if blocking and not was_blocking:
 		block_held_time = 0.0
+		if sheathed:
+			sheathed = false  ## raising a guard pulls the steel — and the shield off your back
 	elif blocking:
 		block_held_time += delta
 	else:
 		block_held_time = 999.0
+
+	_update_hunch(delta)
+
+	## Space, resolved here where the physics space is queryable: a grabbable
+	## ledge ahead beats a jump — otherwise jump if the ground agrees.
+	if jump_queued:
+		jump_queued = false
+		if not _try_climb() and is_on_floor():
+			velocity.y = JUMP_VELOCITY
 
 	## Movement direction from raw keys (relative to facing).
 	move_input = Vector3.ZERO
@@ -771,6 +899,7 @@ func _frame_fx_and_regen(delta: float) -> void:
 	_update_offhand(delta)
 	_update_bow(delta)
 	_update_pickaxe(delta)
+	_update_axe(delta)
 
 	## Stamina regen: not while sprinting or blocking, and only after a short
 	## breather following whatever last spent it. (Regen used to run DURING the
@@ -797,6 +926,51 @@ func _frame_fx_and_regen(delta: float) -> void:
 		near_death_cd = 45.0
 		_add_log_msg("Back from the brink!", Color(1.0, 0.55, 0.45))
 		_record_progress("deaths_door", 1)
+
+
+## ================== The Hunch (auto sheathe / unsheathe) ===================
+
+
+func _any_enemy_mad_at_me() -> bool:
+	## "Mad at you" = a hostile creature sitting in its AGITATED state. Horses
+	## don't count — their agitation is flight (or one indignant kick), not menace.
+	for e in get_tree().get_nodes_in_group("enemies"):
+		var en := e as Enemy
+		if en == null or en is Horse or en.dying:
+			continue
+		if en.state == Enemy.State.AGITATED:
+			return true
+	return false
+
+
+func _update_hunch(delta: float) -> void:
+	## THE HUNCH: a prickle on the back of the neck. The instant something out
+	## there turns hostile the blade — and the shield with it — clears the
+	## scabbard on its own; after HUNCH_SHEATHE_AFTER quiet seconds everything
+	## rides home again. Toggleable in the Esc settings menu.
+	## TODO(design): should the hunch also yank you off the pickaxe/bow onto
+	## the sword when something jumps you mid-mining? For now it minds the
+	## sword only — tools are a choice.
+	if not set_hunch or current_weapon != "sword" or mount != null or kd_phase != "":
+		hunch_aggro_prev = false
+		hunch_calm_t = 0.0
+		return
+	var mad := _any_enemy_mad_at_me()
+	if mad:
+		hunch_calm_t = 0.0
+		## Edge-triggered on fresh aggro only, so Alt can still sheathe
+		## mid-fight in open defiance without being fought every frame.
+		if sheathed and not hunch_aggro_prev and not attacking:
+			sheathed = false
+			_add_log_msg("The hunch: something means you harm", Color(1.0, 0.62, 0.35))
+	elif sheathed or attacking or blocking or since_last_attack < 1.2:
+		hunch_calm_t = 0.0  ## still busy — calm hasn't started counting
+	else:
+		hunch_calm_t += delta
+		if hunch_calm_t >= HUNCH_SHEATHE_AFTER:
+			sheathed = true  ## calm confirmed — steel and shield ride home
+			hunch_calm_t = 0.0
+	hunch_aggro_prev = mad
 
 
 ## ====================== Riding (E near a saddled horse) ====================
@@ -841,7 +1015,7 @@ func _update_mounted(delta: float) -> void:
 
 
 func _try_mount_toggle() -> void:
-	if kd_phase != "":
+	if kd_phase != "" or climbing:
 		return
 	if mount != null:
 		_dismount()
@@ -954,6 +1128,7 @@ func _start_knockdown(_from_pos: Vector3, fling := Vector3.ZERO) -> void:
 	draw_attack = false
 	drawing = false
 	bow_draw = 0.0
+	climbing = false  ## knocked clean off the wall
 	pick_swinging = false
 	blocking = false
 	dash_timer = 0.0
@@ -1028,6 +1203,7 @@ func _update_gait(delta: float) -> void:
 		_fall_speed = maxf(0.0, -velocity.y)
 	elif not _was_on_floor:
 		land_dip = maxf(land_dip, clampf(_fall_speed * 0.014, 0.0, 0.16))
+		_apply_fall_damage(_fall_speed)
 	_was_on_floor = is_on_floor()
 	land_dip = lerpf(land_dip, 0.0, clampf(delta * 8.0, 0.0, 1.0))
 	## Head-bob target: a gentle side sway, plus a dip at each footfall.
@@ -1037,19 +1213,49 @@ func _update_gait(delta: float) -> void:
 	head_bob = head_bob.lerp(bt * gait_amount, clampf(delta * 10.0, 0.0, 1.0))
 
 
+func _apply_fall_damage(spd: float) -> void:
+	## Called once at touchdown with the impact speed. Bypasses blocking and
+	## i-frames — the ground doesn't care how good your guard is.
+	if spd <= FALL_SAFE_SPEED or kd_phase != "" or mount != null or climbing:
+		return
+	var dmg := (spd - FALL_SAFE_SPEED) * FALL_DMG_PER_MS
+	health -= dmg
+	health_show = 3.0
+	combat_timer = 0.0
+	cam_shake = maxf(cam_shake, clampf(0.10 + (spd - FALL_SAFE_SPEED) * 0.018, 0.0, 0.34))
+	_add_log_msg("Hard landing! -%d" % int(dmg), Color(1.0, 0.5, 0.35))
+	if health <= 0.0:
+		_add_log_msg("The fall was too far.", Color(1.0, 0.35, 0.25))
+		_die()
+		return
+	if spd >= FALL_KD_SPEED:
+		_start_knockdown(global_position)  ## legs fold — down you go
+
+
 func _apply_step_smooth(delta: float) -> void:
 	## Compose the camera's vertical motion in ONE place — step-up easing,
-	## landing dip, and walk bob (plus a whisper of roll) — so the different
-	## effects layer instead of fighting over camera.position.
+	## landing dip, bump absorption, and walk bob (plus a whisper of roll) —
+	## so the different effects layer instead of fighting over camera.position.
 	if _step_smooth <= 0.0005:
 		_step_smooth = 0.0
 	else:
 		_step_smooth = lerpf(_step_smooth, 0.0, clampf(delta * 16.0, 0.0, 1.0))
+	## Bump absorption: whatever small vertical hop the BODY just made walking
+	## the lumpy voxel rock, the EYE holds its height and eases after — the
+	## feet do the bumping, the view glides. Grounded, small deltas only
+	## (jumps, falls, and mantles stay raw and physical).
+	var dy := global_position.y - _prev_body_y
+	_prev_body_y = global_position.y
+	if is_on_floor() and _was_on_floor and absf(dy) <= 0.5 and kd_phase == "" and not climbing:
+		_eye_smooth = clampf(_eye_smooth - dy, -0.42, 0.42)
+	_eye_smooth = lerpf(_eye_smooth, 0.0, clampf(delta * 13.0, 0.0, 1.0))
+	if absf(_eye_smooth) < 0.0005:
+		_eye_smooth = 0.0
 	if camera:
 		## Hard floor on the combined downward offset — whatever step-smoothing
 		## and landing dips stack up, the lens never sinks into your own body.
 		var down := maxf(-_step_smooth - land_dip, -0.26)
-		camera.position.y = down + head_bob.y
+		camera.position.y = clampf(down + head_bob.y + _eye_smooth, -0.34, 0.55)
 		camera.rotation_degrees.z = lerpf(camera.rotation_degrees.z,
 			sin(gait_phase) * 0.4 * gait_amount, clampf(delta * 8.0, 0.0, 1.0))
 
@@ -1084,6 +1290,7 @@ func _step_up(delta: float) -> void:
 			## cave ramp) used to stack this until the camera sank into the torso.
 			global_position.y += h
 			_step_smooth = minf(_step_smooth + h, 0.26)
+			_prev_body_y += h  ## already compensated here — don't double-count in the bump absorber
 			return
 
 
@@ -1209,7 +1416,7 @@ func _record_progress(id: String, amount := 1) -> void:
 
 func _try_attack() -> void:
 	## Being stunned cancels your offense too — no swinging while hit-stunned.
-	if current_weapon != "sword" or kd_phase != "":
+	if current_weapon != "sword" or kd_phase != "" or climbing:
 		return
 	var cost := ATTACK_STAMINA * stats.stamina_cost_mult()  ## DEX: cheaper swings
 	if attacking or stamina < cost or blocking or hitstun_timer > 0.0:
@@ -1457,8 +1664,22 @@ func _do_melee_hit() -> void:
 ## ===================== Pickaxe (weapon 3): mining =========================
 
 
+func _spawn_mine_debris(point: Vector3, normal: Vector3) -> void:
+	## Rocks fall when you mine: a few chips burst from every bite, and biting
+	## a CEILING (normal pointing down) shakes loose a big slab from overhead.
+	var parent := get_parent()
+	var n := randi_range(2, 4)
+	for _i in range(n):
+		var v := normal * randf_range(1.2, 2.6) \
+			+ Vector3(randf_range(-1.0, 1.0), randf_range(0.4, 1.4), randf_range(-1.0, 1.0))
+		parent.add_child(RockDebris.make(point + normal * 0.12, v))
+	if normal.y < -0.35:
+		parent.add_child(RockDebris.make(point + Vector3(0, -0.15, 0),
+			Vector3(randf_range(-0.4, 0.4), -0.5, randf_range(-0.4, 0.4)), true))
+
+
 func _try_pick_swing() -> void:
-	if pick_swinging or hitstun_timer > 0.0 or blocking:
+	if pick_swinging or hitstun_timer > 0.0 or blocking or climbing:
 		return
 	var cost := PICK_STAMINA * stats.stamina_cost_mult()
 	if stamina < cost:
@@ -1515,6 +1736,108 @@ func _update_pickaxe(delta: float) -> void:
 			PICK_REST_ROT + Vector3(0, 0, sin(gait_phase + PI) * 1.0 * gait_amount), delta * 10.0)
 
 
+## ======================== War Axe (weapon 4) ==============================
+
+
+func _try_axe_swing() -> void:
+	if axe_swinging or hitstun_timer > 0.0 or blocking or climbing or kd_phase != "":
+		return
+	var cost := AXE_STAMINA * stats.stamina_cost_mult()
+	if stamina < cost:
+		return
+	stamina -= cost
+	stamina_delay = STAMINA_DELAY
+	combat_timer = 0.0
+	since_last_attack = 0.0
+	axe_swinging = true
+	axe_t = 0.0
+	axe_hit_done = false
+	axe_side = 1 - axe_side  ## chop, cleave, chop, cleave...
+
+
+func _update_axe(delta: float) -> void:
+	if axe_vm == null:
+		return
+	axe_vm.visible = current_weapon == "axe"
+	if not axe_vm.visible:
+		axe_swinging = false
+		axe_t = 0.0
+		return
+
+	if axe_swinging:
+		axe_t += delta
+		var at := AXE_TIME * stats.swing_mult()  ## DEX quickens the whole swing
+		var u := clampf(axe_t / at, 0.0, 1.0)
+		if not axe_hit_done and u >= AXE_HIT_AT:
+			axe_hit_done = true
+			_do_axe_hit()
+		## Two authored swings, alternating. Each: HAUL back (slow, heavy),
+		## WHIP through the arc (damage lands mid-whip), ease back to rest.
+		var wrot: Vector3
+		var wpos: Vector3
+		var srot: Vector3
+		var spos: Vector3
+		if axe_side == 0:
+			## Overhead chop: up over the shoulder, down through the skull line.
+			wrot = Vector3(-78.0, 10.0, -14.0)
+			wpos = Vector3(0.02, 0.16, 0.10)
+			srot = Vector3(58.0, -6.0, 4.0)
+			spos = Vector3(-0.04, -0.18, -0.16)
+		else:
+			## Horizontal cleave: hauled across the right shoulder, swept flat
+			## right-to-left through the ribs.
+			wrot = Vector3(-18.0, 62.0, -66.0)
+			wpos = Vector3(0.16, 0.02, 0.06)
+			srot = Vector3(-6.0, -58.0, -74.0)
+			spos = Vector3(-0.22, -0.06, -0.12)
+		if u < AXE_WINDUP:
+			var w := u / AXE_WINDUP
+			w = w * w  ## heavy thing, slow to start moving
+			axe_vm.rotation_degrees = AXE_REST_ROT + wrot * w
+			axe_vm.position = AXE_REST_POS + wpos * w
+		else:
+			var w := (u - AXE_WINDUP) / (1.0 - AXE_WINDUP)
+			var drive := clampf(w / 0.34, 0.0, 1.0)
+			drive = 1.0 - pow(1.0 - drive, 3.0)  ## whips out of the windup
+			var back := clampf((w - 0.42) / 0.58, 0.0, 1.0)
+			back = back * back * (3.0 - 2.0 * back)
+			var swing_rot := (AXE_REST_ROT + wrot).lerp(AXE_REST_ROT + srot, drive)
+			var swing_pos := AXE_REST_POS + wpos.lerp(spos, drive)
+			axe_vm.rotation_degrees = swing_rot.lerp(AXE_REST_ROT, back)
+			axe_vm.position = swing_pos.lerp(AXE_REST_POS, back)
+		if axe_t >= at:
+			axe_swinging = false
+			axe_t = 0.0
+	else:
+		## At rest: breathe on the shared gait like everything else held.
+		var bob := Vector3(
+			sin(gait_phase + PI) * 0.016 * gait_amount,
+			absf(sin(gait_phase + PI)) * 0.014 * gait_amount + sin(bob_t) * 0.002,
+			0.0)
+		axe_vm.position = axe_vm.position.lerp(AXE_REST_POS + bob, delta * 10.0)
+		axe_vm.rotation_degrees = axe_vm.rotation_degrees.lerp(
+			AXE_REST_ROT + Vector3(0, 0, sin(gait_phase + PI) * 1.2 * gait_amount), delta * 10.0)
+
+
+func _do_axe_hit() -> void:
+	## Heavy iron, no finesse: everything in the arc takes the same big hit.
+	## No material matchups (yet) — see the TODO(design) on the constants.
+	var forward := -camera.global_transform.basis.z
+	forward.y = 0.0
+	forward = forward.normalized()
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if not (e is Node3D):
+			continue
+		if e == mount:
+			continue
+		var to_e: Vector3 = e.global_position - global_position
+		to_e.y = 0.0
+		if to_e.length() <= AXE_RANGE and forward.dot(to_e.normalized()) > 0.30:
+			if e.has_method("take_damage") and _swing_reaches(e):
+				e.take_damage(base_damage * AXE_DMG_MULT)
+				cam_shake = maxf(cam_shake, 0.06)  ## the bite of contact
+
+
 func _do_pick_hit() -> void:
 	combat_timer = 0.0
 	var forward := -camera.global_transform.basis.z
@@ -1534,6 +1857,22 @@ func _do_pick_hit() -> void:
 		if best.has_method("mine_hit"):
 			best.mine_hit()
 		return
+	## Bare cave rock: the pick actually DIGS (Caves 2.0). Each bite scoops a
+	## small scoop out of the voxel field — walls, floor, ceiling, even a slow
+	## stubborn shaft all the way up to the surface — and the dislodged rock
+	## physically falls. Mining the ceiling over your own head drops a slab
+	## that HURTS: undercut at an angle like anyone with sense.
+	var space := get_world_3d().direct_space_state
+	var rq := PhysicsRayQueryParameters3D.create(camera.global_position,
+		camera.global_position + forward * PICK_RANGE)
+	rq.exclude = [get_rid()]
+	var rhit := space.intersect_ray(rq)
+	if not rhit.is_empty() and (rhit.collider as Node).is_in_group("cave_rock"):
+		var region := (rhit.collider as Node).get_meta("cave_region") as CaveRegion
+		if region != null and region.carve_bite((rhit.position as Vector3) + forward * 0.22):
+			cam_shake = maxf(cam_shake, 0.12)
+			_spawn_mine_debris(rhit.position as Vector3, rhit.normal as Vector3)
+			return
 	## No rock — it's a poor weapon, but it IS a heavy spike of iron.
 	var fwd_flat := forward
 	fwd_flat.y = 0.0
@@ -1565,19 +1904,24 @@ func _select_weapon(w: String) -> void:
 	draw_attack = false
 	pick_swinging = false
 	pick_t = 0.0
+	axe_swinging = false
+	axe_t = 0.0
 	if w == "bow":
 		sheathed = true   ## the sword rides the hip while the bow is out
 		_add_log_msg("Weapon: Bow — hold LMB, release to loose", Color(0.85, 0.9, 1.0))
 	elif w == "pickaxe":
 		sheathed = true   ## sword to the hip; the tool takes the right hand
 		_add_log_msg("Tool: Pickaxe — chop ore veins for new metal", Color(0.85, 0.9, 1.0))
+	elif w == "axe":
+		sheathed = true   ## sword to the hip; the cleaver fills the right hand
+		_add_log_msg("Weapon: War Axe — heavy, honest iron", Color(0.85, 0.9, 1.0))
 	else:
 		sheathed = false  ## pulls the blade back out
 		_add_log_msg("Weapon: Sword", Color(0.85, 0.9, 1.0))
 
 
 func _bow_start_draw() -> void:
-	if drawing or hitstun_timer > 0.0:
+	if drawing or hitstun_timer > 0.0 or climbing:
 		return
 	if _arrow_count() <= 0:
 		_add_log_msg("No arrows", Color(0.9, 0.75, 0.4))
@@ -1695,7 +2039,108 @@ func _swing_reaches(e: Node3D) -> bool:
 	return hit.collider is Enemy
 
 
+## ===================== Climbing (Space near a ledge) =======================
+
+
+func _try_climb() -> bool:
+	## THE MANTLE: find a wall ahead with a standable top within reach, then
+	## haul up onto it. Returns false (so Space falls through to a jump) when
+	## there's nothing to grab. Works grounded OR mid-air (grab as you fall).
+	if climbing or mount != null or kd_phase != "" or hitstun_timer > 0.0:
+		return false
+	if stamina < 1.0:
+		return false  ## utterly winded — no grip left in the fingers
+	var fwd := -camera.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.001:
+		return false  ## staring straight down a hole — no wall to read
+	fwd = fwd.normalized()
+	var space := get_world_3d().direct_space_state
+
+	## 1) A face to grab? Probe chest height first, then shin (low lips count).
+	var wall_d := -1.0
+	for h: float in [1.25, 0.5]:
+		var from := global_position + Vector3.UP * h
+		var q := PhysicsRayQueryParameters3D.create(from, from + fwd * 1.45)
+		q.exclude = [get_rid()]
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty() and (hit.normal as Vector3).y < 0.55:
+			wall_d = ((hit.position as Vector3) - from).dot(fwd)
+			break
+	if wall_d < 0.0:
+		return false
+
+	## 2) Where's its top? Drop a ray from above, just past the wall face.
+	var over := global_position + fwd * (wall_d + 0.55) + Vector3.UP * (CLIMB_MAX_H + 0.75)
+	var qd := PhysicsRayQueryParameters3D.create(over, over + Vector3.DOWN * (CLIMB_MAX_H + 0.95))
+	qd.exclude = [get_rid()]
+	var top := space.intersect_ray(qd)
+	if top.is_empty():
+		return false
+	var rise := (top.position as Vector3).y - global_position.y
+	if rise < CLIMB_MIN_H or rise > CLIMB_MAX_H or (top.normal as Vector3).y < 0.5:
+		return false  ## too low to bother / too high to reach / not standable
+
+	## 3) Headroom on the lip — never mantle your skull into a ceiling.
+	var land := (top.position as Vector3) + fwd * 0.22
+	var qh := PhysicsRayQueryParameters3D.create(land + Vector3.UP * 0.25, land + Vector3.UP * 1.75)
+	qh.exclude = [get_rid()]
+	if not space.intersect_ray(qh).is_empty():
+		return false
+
+	## Grab it.
+	stamina = maxf(0.0, stamina - CLIMB_STAMINA * stats.stamina_cost_mult())
+	stamina_delay = STAMINA_DELAY
+	climbing = true
+	climb_t = 0.0
+	_fall_speed = 0.0  ## the grab kills the fall — no phantom fall damage on top-out
+	climb_from = global_position
+	climb_to = land + Vector3.UP * 0.02
+	climb_dur = CLIMB_TIME + clampf((rise - 1.0) * 0.16, 0.0, 0.35)
+	velocity = Vector3.ZERO
+	blocking = false
+	drawing = false
+	bow_draw = 0.0
+	attacking = false
+	draw_attack = false
+	pick_swinging = false
+	return true
+
+
+func _update_climb(delta: float) -> void:
+	## The mantle animation: RISE first (arms doing the work), then the haul
+	## forward over the lip — two overlapping eased phases. Hands plant low,
+	## the camera dips into the pull and pops level at the top-out.
+	climb_t += delta / climb_dur
+	var t := clampf(climb_t, 0.0, 1.0)
+	var uv := minf(t / 0.62, 1.0)
+	uv = uv * uv * (3.0 - 2.0 * uv)
+	var uh := clampf((t - 0.28) / 0.72, 0.0, 1.0)
+	uh = uh * uh * (3.0 - 2.0 * uh)
+	global_position = Vector3(
+		lerpf(climb_from.x, climb_to.x, uh),
+		lerpf(climb_from.y, climb_to.y, uv),
+		lerpf(climb_from.z, climb_to.z, uh))
+	velocity = Vector3.ZERO
+	camera.position.y = -sin(t * PI) * 0.16  ## the dip of a real pull-up
+	if viewmodel:  ## sword hand plants forward-low, like bracing on the rock
+		viewmodel.position = viewmodel.position.lerp(vm_ready_pos + Vector3(-0.05, -0.20, -0.10), delta * 14.0)
+		viewmodel.rotation_degrees = viewmodel.rotation_degrees.lerp(vm_ready_rot + Vector3(40.0, 8.0, -12.0), delta * 14.0)
+	if offhand_node and offhand_node.visible:
+		offhand_node.position = offhand_node.position.lerp(OH_REST_POS + Vector3(0.05, -0.18, -0.06), delta * 14.0)
+	if climb_t >= 1.0:
+		climbing = false
+		camera.position.y = 0.0
+		cam_shake = maxf(cam_shake, 0.05)  ## soft top-out thud
+		var push := (climb_to - climb_from)
+		push.y = 0.0
+		if push.length_squared() > 0.001:
+			velocity = push.normalized() * 1.6  ## a step onto the ledge, not a stop
+
+
 func _try_dash() -> void:
+	if climbing:
+		return  ## both hands are full of cliff
 	var cost := DASH_STAMINA * stats.stamina_cost_mult()  ## DEX: cheaper dashes
 	if dash_timer > 0.0 or stamina < cost:
 		return
@@ -1799,6 +2244,8 @@ func _die() -> void:
 	health = max_health
 	stamina = max_stamina
 	global_position = Vector3(0, 2, 0)
+	climbing = false
+	_fall_speed = 0.0
 	## Respawn cancels everything in flight: no lingering knockback or queued hits.
 	velocity = Vector3.ZERO
 	hitstun_timer = 0.0
@@ -1874,7 +2321,13 @@ func _update_hud(delta: float) -> void:
 		elif menu_open == "settings":
 			panel = settings_panel
 		if panel:
-			panel.position = (vp - panel.size) * 0.5
+			## Menus render MENU_SCALE (67%) bigger — clamped so the largest
+			## pages never spill off a small window. floor() keeps text crisp.
+			var sc := minf(MENU_SCALE, minf(
+				vp.x * 0.97 / maxf(panel.size.x, 1.0),
+				vp.y * 0.97 / maxf(panel.size.y, 1.0)))
+			panel.scale = Vector2(sc, sc)
+			panel.position = ((vp - panel.size * sc) * 0.5).floor()
 
 
 func _new_log_label() -> Label:
@@ -1889,67 +2342,69 @@ func _new_log_label() -> Label:
 
 func _push_gain(kind: String, amount: int) -> void:
 	## Merge into the newest entry if it's the same kind and still fresh.
-	var n := log_labels.size()
-	if n > 0 and log_kinds[n - 1] == kind and log_life[n - 1] > 2.2:
-		log_amounts[n - 1] += amount
-		log_life[n - 1] = 3.0
-		_refresh_gain_label(n - 1)
-	else:
-		log_labels.append(_new_log_label())
-		log_kinds.append(kind)
-		log_amounts.append(amount)
-		log_life.append(3.0)
-		_refresh_gain_label(log_labels.size() - 1)
+	if not log_rows.is_empty():
+		var last: Dictionary = log_rows[log_rows.size() - 1]
+		if String(last.kind) == kind and float(last.life) > 2.2:
+			last.amount = int(last.amount) + amount
+			last.life = 3.0
+			_refresh_gain_label(last)
+			return
+	var row := {"label": _new_log_label(), "kind": kind, "amount": amount, "life": 3.0}
+	log_rows.append(row)
+	_refresh_gain_label(row)
 
 
-func _refresh_gain_label(idx: int) -> void:
-	var kind := log_kinds[idx]
-	var amt := log_amounts[idx]
+func _refresh_gain_label(row: Dictionary) -> void:
+	var lbl := row.label as Label
+	if lbl == null or not is_instance_valid(lbl):
+		return
+	var kind := String(row.kind)
+	var amt := int(row.amount)
 	if kind == "coin":
-		log_labels[idx].text = "+%d Gold" % amt
-		log_labels[idx].modulate = Color(1.0, 0.85, 0.30)
+		lbl.text = "+%d Gold" % amt
+		lbl.modulate = Color(1.0, 0.85, 0.30)
 	elif kind == "xp":
-		log_labels[idx].text = "+%d XP" % amt
-		log_labels[idx].modulate = Color(0.40, 1.0, 0.55)
+		lbl.text = "+%d XP" % amt
+		lbl.modulate = Color(0.40, 1.0, 0.55)
 	else:
-		log_labels[idx].text = "+%d %s" % [amt, kind]
-		log_labels[idx].modulate = Color(1, 1, 1)
+		lbl.text = "+%d %s" % [amt, kind]
+		lbl.modulate = Color(1, 1, 1)
 
 
 func _add_log_msg(text: String, col: Color) -> void:
 	var lbl := _new_log_label()
-	lbl.text = text
-	lbl.modulate = col
-	log_labels.append(lbl)
-	log_kinds.append("msg")
-	log_amounts.append(0)
-	log_life.append(3.0)
+	if lbl != null:
+		lbl.text = text
+		lbl.modulate = col
+	log_rows.append({"label": lbl, "kind": "msg", "amount": 0, "life": 3.0})
 
 
 func _update_log(delta: float) -> void:
 	var vp := get_viewport().get_visible_rect().size
 	## Expire old entries (iterate backward for safe removal).
-	var i := log_labels.size() - 1
+	var i := log_rows.size() - 1
 	while i >= 0:
-		log_life[i] -= delta
-		if log_life[i] <= 0.0:
-			log_labels[i].queue_free()
-			log_labels.remove_at(i)
-			log_kinds.remove_at(i)
-			log_amounts.remove_at(i)
-			log_life.remove_at(i)
+		var row: Dictionary = log_rows[i]
+		row.life = float(row.life) - delta
+		if float(row.life) <= 0.0:
+			var lbl := row.label as Label
+			if lbl != null and is_instance_valid(lbl):
+				lbl.queue_free()
+			log_rows.remove_at(i)
 		i -= 1
 	## Reposition top-right, ~3/4 up the screen, newest on top.
 	var y := vp.y * 0.25
-	var j := log_labels.size() - 1
+	var j := log_rows.size() - 1
 	while j >= 0:
-		var lbl := log_labels[j]
-		lbl.position = Vector2(vp.x - 210.0, y)
-		var a := clampf(log_life[j] / 0.6, 0.0, 1.0)
-		var m := lbl.modulate
-		m.a = a
-		lbl.modulate = m
-		y += 26.0
+		var row: Dictionary = log_rows[j]
+		var lbl := row.label as Label
+		if lbl != null and is_instance_valid(lbl):
+			lbl.position = Vector2(vp.x - 210.0, y)
+			var a := clampf(float(row.life) / 0.6, 0.0, 1.0)
+			var m := lbl.modulate
+			m.a = a
+			lbl.modulate = m
+			y += 26.0
 		j -= 1
 
 
@@ -2036,10 +2491,38 @@ func _build_spawn_menu() -> void:
 		b.custom_minimum_size = Vector2(200, 0)
 		b.pressed.connect(_spawn_mob.bind(entry[1]))
 		vb.add_child(b)
+	vb.add_child(HSeparator.new())
+	var bc := Button.new()
+	bc.text = "Tear open a CAVE (~30 m ahead)"
+	bc.custom_minimum_size = Vector2(200, 0)
+	bc.focus_mode = Control.FOCUS_NONE
+	bc.pressed.connect(_spawn_cave)
+	vb.add_child(bc)
 	var hint := Label.new()
 	hint.text = "M / Esc to close"
 	hint.modulate = Color(1, 1, 1, 0.55)
 	vb.add_child(hint)
+
+
+func _spawn_cave() -> void:
+	## Dev: rip a whole new cave system open ahead of you (~40% roll VAST).
+	## The world handles the slab surgery + the quake; we just point.
+	var w := get_tree().get_first_node_in_group("world")
+	if w == null or not w.has_method("spawn_cave_at"):
+		return
+	var fwd := -transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var mouth := global_position + fwd * 30.0
+	## The system dives outward, away from the world center — the same rule
+	## worldgen uses, so new regions never crowd the spawn clearing.
+	var cdir := Vector3(signf(mouth.x), 0, 0) if absf(mouth.x) > absf(mouth.z) else Vector3(0, 0, signf(mouth.z))
+	if cdir.length_squared() < 0.5:
+		cdir = Vector3(1, 0, 0)
+	if bool(w.call("spawn_cave_at", mouth, cdir)):
+		_add_log_msg("The earth tears open ahead...", Color(1.0, 0.75, 0.35))
+	else:
+		_add_log_msg("The rock refuses here — too close to another cave", Color(0.8, 0.8, 0.8))
 
 
 func _spawn_mob(mob_script: Variant) -> void:
@@ -2103,6 +2586,14 @@ func _build_settings_menu() -> void:
 		[["Off", false], ["On", true]])
 	_settings_step_row(vb, "Mouse Sensitivity", "sens")
 	_settings_step_row(vb, "Field of View", "fov")
+
+	_settings_option_row(vb, "The Hunch", "hunch",
+		[["Off", false], ["On", true]])
+	var hunch_note := Label.new()
+	hunch_note.text = "Steel answers intent: the moment something turns hostile, sword and shield\nclear the scabbard on their own — after 6.7 quiet seconds they ride home again."
+	hunch_note.add_theme_font_size_override("font_size", 13)
+	hunch_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(hunch_note)
 
 	vb.add_child(HSeparator.new())
 	var hint := Label.new()
@@ -2168,6 +2659,7 @@ func _settings_pick(id: String, value: Variant) -> void:
 		"shadows": set_shadows = int(value)
 		"fullscreen": set_fullscreen = bool(value)
 		"vsync": set_vsync = bool(value)
+		"hunch": set_hunch = bool(value)
 	_apply_settings()
 	_save_settings()
 	_refresh_settings_ui()
@@ -2192,6 +2684,7 @@ func _refresh_settings_ui() -> void:
 				"shadows": cur = set_shadows
 				"fullscreen": cur = set_fullscreen
 				"vsync": cur = set_vsync
+				"hunch": cur = set_hunch
 			for pair: Array in (w["btns"] as Array):
 				(pair[1] as Button).button_pressed = pair[0] == cur
 		elif w.has("label"):
@@ -2226,6 +2719,7 @@ func _save_settings() -> void:
 	cf.set_value("gfx", "vsync", set_vsync)
 	cf.set_value("gfx", "fov", set_fov)
 	cf.set_value("input", "sens", set_sens)
+	cf.set_value("game", "hunch", set_hunch)
 	cf.save(SETTINGS_PATH)
 
 
@@ -2239,6 +2733,7 @@ func _load_settings() -> void:
 	set_vsync = bool(cf.get_value("gfx", "vsync", true))
 	set_fov = clampf(float(cf.get_value("gfx", "fov", 75.0)), 60.0, 110.0)
 	set_sens = clampf(float(cf.get_value("input", "sens", 1.0)), 0.3, 2.5)
+	set_hunch = bool(cf.get_value("game", "hunch", true))
 
 
 ## ========================= Inventory (I / Tab) ============================
@@ -2707,7 +3202,7 @@ func _build_inventory_page() -> Control:
 		right.add_child(lbl)
 		inv_slot_labels[slot] = lbl
 	var hint := Label.new()
-	hint.text = "Click an item to equip / unequip\n(swords: click to wield)\nQ over an item drops one at your feet\n1 / 2 / 3 / 4 switch pages — Esc closes"
+	hint.text = "Click an item to equip / unequip\n(swords: click to wield; shield + torch\ncan share the offhand arm)\nQ over an item drops one at your feet\n1 / 2 / 3 / 4 switch pages — Esc closes"
 	hint.modulate = Color(1, 1, 1, 0.55)
 	right.add_child(hint)
 	return hb
@@ -3187,7 +3682,8 @@ func _refresh_inventory_ui() -> void:
 		var txt := "%s  ×%d  —  %.1f wt" % [it.name, it.count, float(it.weight) * float(it.count)]
 		if it.slot != "":
 			txt += "   [%s]" % SLOT_NAMES[it.slot]
-			if int(equipment.get(it.slot, -1)) == i:
+			if int(equipment.get(it.slot, -1)) == i \
+					or (String(it.slot) == "offhand" and int(equipment.get("offhand2", -1)) == i):
 				txt += "   (equipped)"
 		b.text = txt
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -3213,6 +3709,22 @@ func _item_clicked(idx: int) -> void:
 			_apply_equipped_sword()
 		_refresh_inventory_ui()
 		return
+	if String(it.slot) == "offhand":
+		## One arm, two berths: a shield and a torch can ride together (the
+		## shield straps on, the torch keeps the fist). Click toggles each.
+		var a := int(equipment.get("offhand", -1))
+		var b := int(equipment.get("offhand2", -1))
+		if idx == a:
+			equipment["offhand"] = b   ## the companion (if any) slides up
+			equipment["offhand2"] = -1
+		elif idx == b:
+			equipment["offhand2"] = -1
+		elif a == -1:
+			equipment["offhand"] = idx
+		else:
+			equipment["offhand2"] = idx  ## joins the arm that's already busy
+		_refresh_inventory_ui()
+		return
 	if int(equipment.get(it.slot, -1)) == idx:
 		equipment[it.slot] = -1
 	else:
@@ -3225,45 +3737,79 @@ func _item_clicked(idx: int) -> void:
 
 
 func _cycle_offhand() -> void:
-	## Cycle the offhand through items you actually OWN: item -> item -> empty.
+	## Cycle the offhand through what you actually OWN: shield -> torch ->
+	## shield+torch (the shield straps to the forearm so the torch can ride
+	## the same fist) -> empty hand -> around again.
 	if current_weapon == "bow":
 		_add_log_msg("Hands are full (bow)", Color(0.8, 0.8, 0.8))
 		return
 	var owned: Array[int] = []
+	var shield_i := -1
+	var torch_i := -1
 	for i in range(inventory.size()):
 		if String(inventory[i].slot) == "offhand":
 			owned.append(i)
+			if shield_i == -1 and String(inventory[i].name).contains("Shield"):
+				shield_i = i
+			elif torch_i == -1 and String(inventory[i].name).contains("Torch"):
+				torch_i = i
 	if owned.is_empty():
 		_add_log_msg("No offhand items", Color(0.8, 0.8, 0.8))
 		return
-	var cur := int(equipment.get("offhand", -1))
-	var pos := owned.find(cur)
-	var nxt := -1  ## after the last owned item comes the empty hand
-	if pos == -1:
-		nxt = owned[0]
-	elif pos < owned.size() - 1:
-		nxt = owned[pos + 1]
-	equipment["offhand"] = nxt
-	if nxt != -1:
-		_add_log_msg("Offhand: %s" % inventory[nxt].name, Color(0.85, 0.9, 1.0))
-	else:
+	## Build the ordered mode list: each single item, the pair, the empty hand.
+	var modes: Array = []
+	for i in owned:
+		modes.append([i, -1])
+	if shield_i != -1 and torch_i != -1:
+		modes.append([shield_i, torch_i])
+	modes.append([-1, -1])
+	var cur_a := int(equipment.get("offhand", -1))
+	var cur_b := int(equipment.get("offhand2", -1))
+	var pos := -1
+	for m in range(modes.size()):
+		if int(modes[m][0]) == cur_a and int(modes[m][1]) == cur_b:
+			pos = m
+			break
+	var nxt: Array = modes[0] if pos == -1 else modes[(pos + 1) % modes.size()]
+	equipment["offhand"] = nxt[0]
+	equipment["offhand2"] = nxt[1]
+	if int(nxt[0]) == -1:
 		_add_log_msg("Offhand: empty", Color(0.8, 0.8, 0.8))
+	elif int(nxt[1]) != -1:
+		_add_log_msg("Offhand: %s + %s" % [inventory[nxt[0]].name, inventory[nxt[1]].name], Color(0.85, 0.9, 1.0))
+	else:
+		_add_log_msg("Offhand: %s" % inventory[nxt[0]].name, Color(0.85, 0.9, 1.0))
 	if menu_open == "tab" and tab_page == "inventory":
 		_refresh_inventory_ui()
 
 
+func _idx_is(idx: int, what: String) -> bool:
+	## Does this inventory index hold an item whose name contains `what`?
+	return idx >= 0 and idx < inventory.size() and String(inventory[idx].name).contains(what)
+
+
 func _offhand_is_shield() -> bool:
-	return offhand_shown >= 0 and String(inventory[offhand_shown].name).contains("Shield")
+	## Either displayed offhand item counts — a strapped shield still blocks.
+	return _idx_is(offhand_shown, "Shield") or _idx_is(offhand_shown2, "Shield")
 
 
-func _build_offhand_mesh(idx: int) -> void:
+func _build_offhand_mesh(idx: int, idx2: int = -1) -> void:
+	## One left hand, up to two items: alone, an item sits in the fist; paired,
+	## the shield straps across the forearm and the torch keeps the fist.
 	for c in offhand_node.get_children():
 		c.queue_free()
 	offhand_light = null
-	if idx < 0:
+	if idx < 0 and idx2 < 0:
 		return
 	var skin := Color(0.62, 0.46, 0.36)
 	_box(offhand_node, Vector3(0.09, 0.09, 0.12), skin, Vector3(0, -0.02, 0.03))  ## left hand
+	if idx >= 0:
+		_add_offhand_item(idx)
+	if idx2 >= 0:
+		_add_offhand_item(idx2)
+
+
+func _add_offhand_item(idx: int) -> void:
 	var item_name := String(inventory[idx].name)
 	if item_name.contains("Shield"):
 		## Round-ish wooden shield: boards, a rim, and a steel boss.
@@ -3302,14 +3848,38 @@ func _build_offhand_mesh(idx: int) -> void:
 
 func _update_offhand(delta: float) -> void:
 	var want := int(equipment.get("offhand", -1))
+	var want2 := int(equipment.get("offhand2", -1))
+	if want == -1 and want2 != -1:
+		## Never a companion without a main (a drop/unequip edge) — slide it up.
+		equipment["offhand"] = want2
+		equipment["offhand2"] = -1
+		want = want2
+		want2 = -1
 	if current_weapon == "bow":
-		want = -1  ## the left hand is on the bow grip — shield/torch lower away
-	if want != offhand_shown:
-		## Lower whatever is up first, then swap to the new item and raise it.
+		want = -1   ## the left hand is on the bow grip — shield/torch lower away
+		want2 = -1
+	elif sheathed:
+		## The shield sheathes WITH the sword — it rides your back while the
+		## blade rides the hip. The torch stays up: light is welcome company
+		## even with the steel put away.
+		if _idx_is(want2, "Shield"):
+			want2 = -1
+		if _idx_is(want, "Shield"):
+			want = want2  ## a torch sharing the arm slides into the fist alone
+			want2 = -1
+	## The stowed shield shows on your back whenever you WEAR one that isn't in hand.
+	if back_shield:
+		var eq_shield := _idx_is(int(equipment.get("offhand", -1)), "Shield") \
+			or _idx_is(int(equipment.get("offhand2", -1)), "Shield")
+		back_shield.visible = eq_shield and not (_idx_is(want, "Shield") or _idx_is(want2, "Shield"))
+
+	if want != offhand_shown or want2 != offhand_shown2:
+		## Lower whatever is up first, then swap to the new items and raise them.
 		offhand_raise = maxf(0.0, offhand_raise - delta / OH_RAISE_TIME)
 		if offhand_raise <= 0.0:
-			_build_offhand_mesh(want)
+			_build_offhand_mesh(want, want2)
 			offhand_shown = want
+			offhand_shown2 = want2
 	elif offhand_shown != -1 and offhand_raise < 1.0:
 		offhand_raise = minf(1.0, offhand_raise + delta / OH_RAISE_TIME)
 

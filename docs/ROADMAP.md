@@ -72,9 +72,26 @@ Status keys: [x] done · [~] in progress · [ ] not started
 - [ ] Basic survival (health/healing; more later)
 
 ## Step 9 — Living world ("more than a game") [~]
-- [~] Procedural caves + dungeons — caves DONE (seeded chamber networks, round
+- [~] Procedural caves + dungeons — caves v1 DONE (seeded chamber networks, round
       natural swept tunnels that flare into domed caverns, crystal lighting, cave
       dwellers); dungeons next
+- [~] **CAVES 2.0 — full redo, organic noise caves, realistic high-poly** (see
+      docs/CAVES_PLAN.md — user brief: DROP the room system): CORE BUILT
+      2026-07-14 — CaveField.gd voxel density grid (0.8 m voxels; worm tunnels
+      that swell/pinch on their own, cheese caverns, fitable cracks, domain
+      warp, surface roof guard, mouth-ramp entrance, sealed rim/bottom) +
+      CaveMesher.gd chunked surface-nets skin (flat-shaded, jittered, strata
+      vertex colors, grass top skin, trimesh collision) + CaveRegion.gd
+      orchestrator (threaded build, BFS reachability placing crystals /
+      silver veins / deepest-point meteoric / depth-tiered packs + champion).
+      **MINING DIGS NOW**: pickaxe bites carve the field and remesh (slow
+      honest shafts up to the surface work); every bite drops falling
+      RockDebris.gd rocks, ceiling bites shake loose a big slab (10 dmg
+      under it). Chunk/carve/winding logic sim-verified. REMAINING: in-game
+      walkthrough + noise tuning, dressing pass (stalactites, pools,
+      glowworms, breakdown), cavity tags for titles, squeeze camera-tuck,
+      sealed-pocket secrets, perf pass. Old Cave.gd retired (kept on disk).
+      Also the foundation for shifting caves below
 - [ ] Shifting caves (regenerate, stronger shake inside, off-screen rebuild)
 - [ ] Camps that grow → raid villages/cities
 - [~] Random world events + titles — first pass: "The Hollow Depths / The Dusk
@@ -127,6 +144,41 @@ Status keys: [x] done · [~] in progress · [ ] not started
       armor slots (helmet/chest/arms/pants/shoes) + shield offhand slot
 - [x] Offhand items: shield + torch owned from the start; Q cycles owned items only;
       equip raise/lower animation, shield block-raise, torch casts real flickering light
+- [x] Shield + torch held TOGETHER (shield straps to the forearm, torch shares the
+      fist — Q gains a combined mode; "offhand2" companion slot in the inventory)
+- [x] Shield sheathes with the sword: stows across the back (also while the bow has
+      both hands), redraws on unsheathe; raising a block auto-draws steel
+- [x] THE HUNCH (settings toggle, default on): auto-unsheathe the moment any hostile
+      turns agitated at you (edge-triggered, horses excluded), auto-sheathe after
+      6.7 quiet seconds
+- [x] All menus render 67% bigger (MENU_SCALE, clamped so pages fit the window)
+- [x] CLIMBING on Space: grabbable ledge ahead (≤2.65 m) = mantle instead of jump
+      (rise-then-haul animation, hands plant, camera dip, stamina cost, works
+      mid-air) — the answer to steep voxel-cave terrain; pairs with digging
+      footholds via the pickaxe
+- [x] Walk-feel + cave polish pass: camera bump absorber (feet bump, view
+      glides), voxel grass skin blends flush into the slab at region rims,
+      smaller entrance mound with a low dark arch, ~40% of systems roll VAST
+      (fatter tunnels, much bigger caverns), and a dev M-menu button that
+      TEARS OPEN a new cave region at runtime (slab re-tiled, quake + title —
+      first taste of DESIGN.md's "caves open up in the earth")
+- [x] SEAMLESS REGION BORDERS: the "giant patch" is gone — region surface is
+      perfectly flat + exact slab grass away from the entrance (jitter now
+      returns only with depth or near the mouth), and the skin dips 7 cm under
+      the slab overhang at the rim so the border never z-fights
+- [x] FALL DAMAGE: safe to ~6 m, scaling damage past it, hard landings (≥17.5
+      m/s) fold into the knockdown, lethal falls kill; mid-air mantle zeroes it
+- [x] WAR AXE (weapon 4): heavy one-hand cleaver, ×1.35 damage, two alternating
+      authored swing animations (overhead chop / horizontal cleave), impact-
+      timed arc hits; first non-sword melee weapon (step-4 styles groundwork)
+- [x] SUNKEN ENTRANCE + DEFERRED DEEPS: entrance redone as an open descending
+      ramp cut that dives under a low rock cap (only the cap top breaks the
+      surface; surface cuts hard-limited to the mouth zone — no more back-side
+      holes); ALL systems roomy underneath (vast baseline 0.6, 40% roll 1.0);
+      the deep rows (below −8 m) are placeholder rock until the player
+      approaches — then carved + meshed on worker threads, polled without
+      blocking, and only then do crystals/veins/dwellers spawn. Player digs
+      into placeholder rock survive the real carve (minf preserve)
 - [x] Grassy entrance hills over the cave mouths; branchier cave networks with loops
       and a guaranteed 3-way junction
 - [x] Armory (dev) column on the I inventory page — grab any material sword;
