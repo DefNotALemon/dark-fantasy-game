@@ -23,6 +23,8 @@ class_name Player
 ##                 THE HUNCH — settings toggle — auto-draws the moment anything
 ##                 turns hostile and auto-sheathes after 6.7 quiet seconds)
 ##   M ........... mob spawn menu
+##   G ........... CREATIVE menu (dev): every item in the game — swords /
+##                 armor sets / ores for all 10 metals, plus the mundane kit
 ##   Tab ......... menu (1 Inventory / 2 Stats / 3 Progression / 4 Bestiary)
 ##   I ........... straight to the Inventory page — its Armory column (dev)
 ##                 adds any material sword; click a sword in the list to wield it
@@ -227,10 +229,12 @@ const SLOT_NAMES := {
 var inventory: Array[Dictionary] = []   ## {name, weight, count, slot [, material]}
 var equipment := {}                     ## slot id -> inventory index (-1 = empty)
 var hovered_item_idx := -1              ## inventory row under the mouse (Q drops it)
+var inv_sets_box: VBoxContainer         ## one-click "Equip X set" buttons
 
 ## --- Dropped items (Q to toss from the inventory; look + E to reclaim) ---
 var pickup_prompt: Label                ## "[E] Pick up ..." hint, bottom-center
 var _drop_target: DroppedItem = null    ## the dropped item currently looked at
+var _bed_target: Node3D = null          ## the bedroll under the gaze (E = pack up)
 
 ## --- Worn armor visuals: the visible body tints to the equipped material ---
 const BODY_ARMOR_COL := Color(0.20, 0.22, 0.28)     ## default padded slate
@@ -266,6 +270,7 @@ var kd_t := 0.0
 ## --- Settings (Esc) — applied live, saved to user://settings.cfg ---
 const SETTINGS_PATH := "user://settings.cfg"
 var settings_panel: PanelContainer
+var creative_panel: PanelContainer   ## G — every item in the game, one click away
 var set_rt := false              ## "ray-traced" lighting preset (SDFGI et al.)
 var set_shadows := 1             ## 0 low / 1 medium / 2 high
 var set_fullscreen := false
@@ -285,6 +290,13 @@ var offhand_light: OmniLight3D   ## the torch flame's actual light
 var offhand_shown := -1          ## inventory index currently displayed (-1 none)
 var offhand_shown2 := -1         ## companion item displayed alongside (torch w/ shield)
 var offhand_raise := 0.0         ## 0 = lowered off-screen, 1 = fully up
+
+## --- Darkness watch: in a cave (or out at night) the torch comes out on its
+## own, sharing the arm with the shield — and while it's dark, SHEATHING only
+## puts the sword away: shield + torch stay raised so the guard never drops. ---
+var _in_dark := false
+var _dark_prev_names: Array[String] = []  ## offhand loadout from before the dark
+var _dark_manual := false                 ## player cycled by hand in the dark — respect it
 var oh_bob_t := 0.0
 
 ## --- Weapons (1 = sword, 2 = bow, 3 = pickaxe, while no menu is open) ---
@@ -306,12 +318,20 @@ const PICK_WINDUP := 0.34        ## fraction spent hoisting it up
 const PICK_HIT_AT := 0.52        ## fraction where the spike visually lands — the bite
 const PICK_STAMINA := 10.0
 const PICK_RANGE := 2.9
-const PICK_REST_POS := Vector3(0.32, -0.34, -0.52)
-const PICK_REST_ROT := Vector3(18.0, -14.0, 6.0)
+## Carried UPRIGHT like the sword (haft vertical, head up); the swing arcs
+## were authored on the old forward-tilted base, so swings BLEND from the
+## upright carry into that base over their first fifth — same trick the
+## sword uses (the raise becomes part of the chop).
+const PICK_REST_POS := Vector3(0.32, -0.30, -0.50)
+const PICK_REST_ROT := Vector3(78.0, -10.0, 6.0)
+const PICK_BASE_POS := Vector3(0.32, -0.34, -0.52)   ## swing-arc origin (old rest)
+const PICK_BASE_ROT := Vector3(18.0, -14.0, 6.0)
 var pick_vm: Node3D              ## pickaxe viewmodel (right hand + haft + head)
 var pick_swinging := false
 var pick_t := 0.0
 var pick_hit_done := false
+var pick_start_rot := Vector3.ZERO   ## pose captured when a chop begins
+var pick_start_pos := Vector3.ZERO
 var vein_hint_cd := 0.0          ## rate-limits the "needs a pickaxe" nudge
 
 ## --- War Axe (weapon 4): a heavy one-handed cleaver. Slower and harder-
@@ -326,13 +346,19 @@ const AXE_HIT_AT := 0.52         ## damage lands AT the visual impact
 const AXE_STAMINA := 15.0
 const AXE_RANGE := 2.8
 const AXE_DMG_MULT := 1.35       ## × base_damage (STR rides along)
-const AXE_REST_POS := Vector3(0.34, -0.36, -0.50)
-const AXE_REST_ROT := Vector3(22.0, -16.0, 8.0)
+## Carried UPRIGHT like the sword; swings blend out of the vertical carry
+## into arcs authored on the old forward-tilted base (see pickaxe note).
+const AXE_REST_POS := Vector3(0.34, -0.32, -0.48)
+const AXE_REST_ROT := Vector3(80.0, -10.0, 6.0)
+const AXE_BASE_POS := Vector3(0.34, -0.36, -0.50)    ## swing-arc origin (old rest)
+const AXE_BASE_ROT := Vector3(22.0, -16.0, 8.0)
 var axe_vm: Node3D               ## axe viewmodel (right hand + haft + head)
 var axe_swinging := false
 var axe_t := 0.0
 var axe_hit_done := false
 var axe_side := 0                ## alternates: 0 = overhead chop, 1 = cleave
+var axe_start_rot := Vector3.ZERO    ## pose captured when a swing begins
+var axe_start_pos := Vector3.ZERO
 
 ## --- Bestiary (Tab page 4): what you've slain and what you've LEARNED. ---
 ## A mob's row stays ??? until your first kill of it; each material's matchup
@@ -665,6 +691,7 @@ func _build_hud() -> void:
 	_build_spawn_menu()
 	_build_tab_menu()
 	_build_settings_menu()
+	_build_creative_menu()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -718,7 +745,7 @@ func _input(event: InputEvent) -> void:
 						jump_queued = true
 			KEY_F:
 				if menu_open == "":
-					_try_mount_toggle()
+					_try_interact()
 			KEY_ALT:
 				if current_weapon == "sword":
 					sheathed = not sheathed
@@ -733,8 +760,13 @@ func _input(event: InputEvent) -> void:
 				if menu_open == "" and kd_phase == "" and _drop_target != null \
 						and is_instance_valid(_drop_target):
 					_pickup_dropped(_drop_target)
+				elif menu_open == "" and kd_phase == "" and _bed_target != null \
+						and is_instance_valid(_bed_target):
+					_pack_bedroll(_bed_target)
 			KEY_M:
 				_toggle_menu("spawn")
+			KEY_G:
+				_toggle_menu("creative")
 			KEY_5:
 				if menu_open == "":  ## number keys switch pages while a menu is up
 					get_tree().reload_current_scene()  ## quick restart of the whole world
@@ -802,13 +834,17 @@ func _physics_process(delta: float) -> void:
 	## of the hit landing counts as a perfect guard.)
 	if blocking and not was_blocking:
 		block_held_time = 0.0
-		if sheathed:
-			sheathed = false  ## raising a guard pulls the steel — and the shield off your back
+		## Raising a guard pulls the steel — EXCEPT in the dark with the
+		## shield already up: there you block behind the shield while the
+		## sword stays sheathed (the torch keeps burning in the same fist).
+		if sheathed and not (_in_dark and _offhand_is_shield()):
+			sheathed = false
 	elif blocking:
 		block_held_time += delta
 	else:
 		block_held_time = 999.0
 
+	_update_darkness()
 	_update_hunch(delta)
 
 	## Space, resolved here where the physics space is queryable: a grabbable
@@ -943,6 +979,58 @@ func _any_enemy_mad_at_me() -> bool:
 	return false
 
 
+func _update_darkness() -> void:
+	## Edge-triggered like the hunch: entering the dark pulls the torch out
+	## (with the shield when you own both); stepping back into the light
+	## restores whatever you carried before — unless you chose otherwise
+	## with Q while it was dark.
+	var dark := global_position.y < -3.0
+	if not dark:
+		var w := get_tree().get_first_node_in_group("world")
+		if w != null and w.has_method("is_dark_out"):
+			dark = bool(w.call("is_dark_out"))
+	if dark == _in_dark:
+		return
+	_in_dark = dark
+	if dark:
+		_dark_prev_names = [_oh_name(int(equipment.get("offhand", -1))),
+			_oh_name(int(equipment.get("offhand2", -1)))]
+		_dark_manual = false
+		var shield_i := -1
+		var torch_i := -1
+		for i in range(inventory.size()):
+			if String(inventory[i].slot) != "offhand":
+				continue
+			if shield_i == -1 and String(inventory[i].name).contains("Shield"):
+				shield_i = i
+			elif torch_i == -1 and String(inventory[i].name).contains("Torch"):
+				torch_i = i
+		if torch_i != -1:
+			if shield_i != -1:
+				equipment["offhand"] = shield_i
+				equipment["offhand2"] = torch_i
+			else:
+				equipment["offhand"] = torch_i
+				equipment["offhand2"] = -1
+			_add_log_msg("Dark — the torch comes out", Color(1.0, 0.75, 0.35))
+	elif not _dark_manual and _dark_prev_names.size() == 2:
+		equipment["offhand"] = _find_offhand_by_name(_dark_prev_names[0])
+		equipment["offhand2"] = _find_offhand_by_name(_dark_prev_names[1])
+
+
+func _oh_name(idx: int) -> String:
+	return String(inventory[idx].name) if idx >= 0 and idx < inventory.size() else ""
+
+
+func _find_offhand_by_name(nm: String) -> int:
+	if nm == "":
+		return -1
+	for i in range(inventory.size()):
+		if String(inventory[i].slot) == "offhand" and String(inventory[i].name) == nm:
+			return i
+	return -1
+
+
 func _update_hunch(delta: float) -> void:
 	## THE HUNCH: a prickle on the back of the neck. The instant something out
 	## there turns hostile the blade — and the shield with it — clears the
@@ -1012,6 +1100,77 @@ func _update_mounted(delta: float) -> void:
 	_update_body_arms(delta)
 	_update_hud(delta)
 	_update_log(delta)
+
+
+func _try_interact() -> void:
+	## F: dismounting always wins; then a bed within reach; then mounting.
+	if mount != null or kd_phase != "" or climbing:
+		_try_mount_toggle()
+		return
+	for b in get_tree().get_nodes_in_group("beds"):
+		if b is Node3D and (b as Node3D).global_position.distance_to(global_position) < 2.4:
+			_sleep()
+			return
+	_try_mount_toggle()
+
+
+func _pack_bedroll(bed: Node3D) -> void:
+	## Look + E: the bed folds into the backpack. Put it down again from the
+	## inventory (click the Bedroll item) — camp anywhere the ground allows.
+	bed.queue_free()
+	_give_item("Bedroll", 1, 4.0)
+	_push_gain("Bedroll", 1)
+	_bed_target = null
+
+
+func _place_bedroll(idx: int) -> void:
+	## Click the Bedroll item: it unrolls on the ground just ahead of you.
+	var fwd := -camera.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.001:
+		fwd = -transform.basis.z
+	fwd = fwd.normalized()
+	var spot := global_position + fwd * 1.9
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(spot + Vector3.UP * 2.5, spot + Vector3.DOWN * 8.0)
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty() or (hit.normal as Vector3).y < 0.55:
+		_add_log_msg("No flat ground for the bedroll here", Color(0.8, 0.8, 0.8))
+		return
+	var bed := Bedroll.new()
+	get_parent().add_child(bed)
+	bed.global_position = (hit.position as Vector3) + Vector3.UP * 0.02
+	bed.rotation.y = atan2(fwd.x, fwd.z) + PI
+	## Spend one from the pack.
+	var it := inventory[idx]
+	it.count = int(it.count) - 1
+	if int(it.count) <= 0:
+		_remove_inventory_index(idx)
+	_add_log_msg("Bedroll placed — F beside it to sleep", Color(0.85, 0.9, 1.0))
+	_refresh_inventory_ui()
+
+
+func _sleep() -> void:
+	## Sleep until dawn. The night is not wasted: the underground reseeds and
+	## re-carves while you dream (the SHIFTING CAVES — only the permanent
+	## entrance caves hold their shape). Wounds close, legs come back.
+	if _any_enemy_mad_at_me():
+		_add_log_msg("No sleep — something out there means you harm", Color(1.0, 0.62, 0.35))
+		return
+	if global_position.y < -1.5:
+		## The shift re-carves the deep — sleeping down there would entomb you.
+		## TODO(design): step 9's player stability bubble lifts this rule.
+		_add_log_msg("Too deep to sleep — the shifting earth would swallow you", Color(1.0, 0.62, 0.35))
+		return
+	var w := get_tree().get_first_node_in_group("world")
+	if w == null or not w.has_method("sleep_at_bed") or not bool(w.call("sleep_at_bed")):
+		_add_log_msg("The earth is still settling — rest again in a moment", Color(0.8, 0.8, 0.8))
+		return
+	health = max_health
+	stamina = max_stamina
+	health_show = 2.0
+	_add_log_msg("You sleep. Dawn comes — and the deep has moved.", Color(0.85, 0.9, 1.0))
 
 
 func _try_mount_toggle() -> void:
@@ -1664,18 +1823,63 @@ func _do_melee_hit() -> void:
 ## ===================== Pickaxe (weapon 3): mining =========================
 
 
+## Digging pays like Minecraft: every bite of bare rock has a depth-scaled
+## chance to knock an ore chunk loose, and the good metals live DEEP.
+## Endgame steel (dragonsteel/voidsteel) is NEVER dug from the ground — that
+## comes from the world above (drops, and one day dragons), per MATERIALS.md.
+## Rows: [max_depth, chance per bite, [[metal, weight]...]] — first row wins.
+const DIG_ORE_TABLES := [
+	[4.0, 0.06, [["bronze", 60.0], ["iron", 40.0]]],
+	[12.0, 0.10, [["iron", 45.0], ["bronze", 20.0], ["steel", 20.0], ["silver", 15.0]]],
+	[22.0, 0.12, [["iron", 20.0], ["steel", 25.0], ["silver", 25.0], ["cold_iron", 18.0], ["meteoric", 12.0]]],
+	[999.0, 0.15, [["silver", 18.0], ["cold_iron", 20.0], ["meteoric", 25.0], ["mithril", 21.0], ["adamant", 16.0]]],
+]
+
+
+func _roll_dig_ore(point: Vector3, normal: Vector3) -> void:
+	var depth := -point.y
+	for row: Array in DIG_ORE_TABLES:
+		if depth <= float(row[0]):
+			if randf() < float(row[1]):
+				var id := _weighted_metal(row[2] as Array)
+				var ore := PickupOrb.make_ore(id)
+				get_parent().add_child(ore)
+				ore.global_position = point + normal * 0.35
+				ore.burst_dir = normal * 1.8 \
+					+ Vector3(randf_range(-0.6, 0.6), randf_range(1.2, 2.0), randf_range(-0.6, 0.6))
+				_add_log_msg("The rock gives up %s ore!" % Materials.display_name(id), Color(0.85, 0.9, 1.0))
+			return
+
+
+func _weighted_metal(tbl: Array) -> String:
+	var total := 0.0
+	for e: Array in tbl:
+		total += float(e[1])
+	var pick := randf() * total
+	for e: Array in tbl:
+		pick -= float(e[1])
+		if pick <= 0.0:
+			return String(e[0])
+	return String(tbl[0][0])
+
+
 func _spawn_mine_debris(point: Vector3, normal: Vector3) -> void:
-	## Rocks fall when you mine: a few chips burst from every bite, and biting
-	## a CEILING (normal pointing down) shakes loose a big slab from overhead.
+	## Rocks fall when you mine: chips burst from every bite plus one honest
+	## CHUNK (the bigger bite radius shows its work), and biting a CEILING
+	## (normal pointing down) shakes loose a hazard slab from overhead.
 	var parent := get_parent()
-	var n := randi_range(2, 4)
+	var n := randi_range(3, 5)
 	for _i in range(n):
 		var v := normal * randf_range(1.2, 2.6) \
 			+ Vector3(randf_range(-1.0, 1.0), randf_range(0.4, 1.4), randf_range(-1.0, 1.0))
 		parent.add_child(RockDebris.make(point + normal * 0.12, v))
+	## The big chunk: harmless, heavy, thuds when it lands.
+	parent.add_child(RockDebris.make(point + normal * 0.25,
+		normal * randf_range(1.0, 1.8) + Vector3(randf_range(-0.6, 0.6), randf_range(0.8, 1.6), randf_range(-0.6, 0.6)),
+		true))
 	if normal.y < -0.35:
 		parent.add_child(RockDebris.make(point + Vector3(0, -0.15, 0),
-			Vector3(randf_range(-0.4, 0.4), -0.5, randf_range(-0.4, 0.4)), true))
+			Vector3(randf_range(-0.4, 0.4), -0.5, randf_range(-0.4, 0.4)), true, false, true))
 
 
 func _try_pick_swing() -> void:
@@ -1689,6 +1893,9 @@ func _try_pick_swing() -> void:
 	pick_swinging = true
 	pick_t = 0.0
 	pick_hit_done = false
+	if pick_vm:
+		pick_start_rot = pick_vm.rotation_degrees  ## melt out of the upright carry
+		pick_start_pos = pick_vm.position
 
 
 func _update_pickaxe(delta: float) -> void:
@@ -1720,8 +1927,14 @@ func _update_pickaxe(delta: float) -> void:
 			var drive := clampf(w / 0.30, 0.0, 1.0)      ## fast drive down...
 			var back := clampf((w - 0.30) / 0.70, 0.0, 1.0)
 			ang = lerpf(-46.0, 58.0, 1.0 - pow(1.0 - drive, 3.0)) - back * 58.0
-		pick_vm.rotation_degrees = PICK_REST_ROT + Vector3(ang, 0, 0)
-		pick_vm.position = PICK_REST_POS + Vector3(0, 0.10 * absf(ang) / 58.0 * signf(-ang), -0.06 * absf(ang) / 58.0)
+		## Arcs live on the old forward base — melt from the upright carry into
+		## them over the first fifth (the lowering IS the start of the chop).
+		var tgt_rot := PICK_BASE_ROT + Vector3(ang, 0, 0)
+		var tgt_pos := PICK_BASE_POS + Vector3(0, 0.10 * absf(ang) / 58.0 * signf(-ang), -0.06 * absf(ang) / 58.0)
+		var blend := clampf(u / 0.22, 0.0, 1.0)
+		blend = blend * blend * (3.0 - 2.0 * blend)
+		pick_vm.rotation_degrees = pick_start_rot.lerp(tgt_rot, blend)
+		pick_vm.position = pick_start_pos.lerp(tgt_pos, blend)
 		if pick_t >= PICK_TIME:
 			pick_swinging = false
 			pick_t = 0.0
@@ -1753,6 +1966,9 @@ func _try_axe_swing() -> void:
 	axe_t = 0.0
 	axe_hit_done = false
 	axe_side = 1 - axe_side  ## chop, cleave, chop, cleave...
+	if axe_vm:
+		axe_start_rot = axe_vm.rotation_degrees  ## melt out of the upright carry
+		axe_start_pos = axe_vm.position
 
 
 func _update_axe(delta: float) -> void:
@@ -1784,25 +2000,28 @@ func _update_axe(delta: float) -> void:
 			srot = Vector3(58.0, -6.0, 4.0)
 			spos = Vector3(-0.04, -0.18, -0.16)
 		else:
-			## Horizontal cleave: hauled across the right shoulder, swept flat
-			## right-to-left through the ribs.
-			wrot = Vector3(-18.0, 62.0, -66.0)
-			wpos = Vector3(0.16, 0.02, 0.06)
-			srot = Vector3(-6.0, -58.0, -74.0)
-			spos = Vector3(-0.22, -0.06, -0.12)
+			## Horizontal cleave: hauled back across the LEFT shoulder
+			## (backhand wind), swept flat left-to-right through the ribs.
+			wrot = Vector3(-18.0, -62.0, 66.0)
+			wpos = Vector3(-0.16, 0.02, 0.06)
+			srot = Vector3(-6.0, 58.0, 74.0)
+			spos = Vector3(0.22, -0.06, -0.12)
 		if u < AXE_WINDUP:
 			var w := u / AXE_WINDUP
 			w = w * w  ## heavy thing, slow to start moving
-			axe_vm.rotation_degrees = AXE_REST_ROT + wrot * w
-			axe_vm.position = AXE_REST_POS + wpos * w
+			## The haul-back sweeps straight out of the upright carry into the
+			## wind (arcs live on the old forward base).
+			axe_vm.rotation_degrees = axe_start_rot.lerp(AXE_BASE_ROT + wrot, w)
+			axe_vm.position = axe_start_pos.lerp(AXE_BASE_POS + wpos, w)
 		else:
 			var w := (u - AXE_WINDUP) / (1.0 - AXE_WINDUP)
 			var drive := clampf(w / 0.34, 0.0, 1.0)
 			drive = 1.0 - pow(1.0 - drive, 3.0)  ## whips out of the windup
 			var back := clampf((w - 0.42) / 0.58, 0.0, 1.0)
 			back = back * back * (3.0 - 2.0 * back)
-			var swing_rot := (AXE_REST_ROT + wrot).lerp(AXE_REST_ROT + srot, drive)
-			var swing_pos := AXE_REST_POS + wpos.lerp(spos, drive)
+			var swing_rot := (AXE_BASE_ROT + wrot).lerp(AXE_BASE_ROT + srot, drive)
+			var swing_pos := AXE_BASE_POS + wpos.lerp(spos, drive)
+			## Recovery eases home to the UPRIGHT carry, not the old slouch.
 			axe_vm.rotation_degrees = swing_rot.lerp(AXE_REST_ROT, back)
 			axe_vm.position = swing_pos.lerp(AXE_REST_POS, back)
 		if axe_t >= at:
@@ -1836,6 +2055,113 @@ func _do_axe_hit() -> void:
 			if e.has_method("take_damage") and _swing_reaches(e):
 				e.take_damage(base_damage * AXE_DMG_MULT)
 				cam_shake = maxf(cam_shake, 0.06)  ## the bite of contact
+	## And it's the forester's tool: the nearest tree in the arc takes the
+	## same swing — chips fly, the trunk shivers, the last bite fells it.
+	var best_tree: Node3D = null
+	var best_d := AXE_RANGE + 0.6
+	for t in get_tree().get_nodes_in_group("trees"):
+		if not (t is Node3D):
+			continue
+		var to_t: Vector3 = (t as Node3D).global_position - global_position
+		to_t.y = 0.0
+		var d := to_t.length()
+		if d <= AXE_RANGE + 0.5 and forward.dot(to_t.normalized()) > 0.35 and d < best_d:
+			best_tree = t
+			best_d = d
+	if best_tree != null:
+		_chop_tree(best_tree)
+
+
+func _chop_tree(tree: Node3D) -> void:
+	## One bite of the axe: chips burst from the cut (at the chopper, as
+	## tradition demands), the trunk shivers — and on the last bite, TIMBER.
+	cam_shake = maxf(cam_shake, 0.07)
+	var toward := global_position - tree.global_position
+	toward.y = 0.0
+	if toward.length_squared() < 0.01:
+		toward = Vector3(1, 0, 0)
+	toward = toward.normalized()
+	var cut := tree.global_position + toward * 0.35 + Vector3.UP * randf_range(0.9, 1.3)
+	for _i in range(randi_range(3, 5)):
+		var v := toward * randf_range(1.6, 3.0) \
+			+ Vector3(randf_range(-0.8, 0.8), randf_range(1.0, 2.2), randf_range(-0.8, 0.8))
+		get_parent().add_child(RockDebris.make(cut, v, false, true))
+	## The trunk LOSES the chunk: a pale heartwood notch on the struck side,
+	## biting visibly deeper with every swing — the divot the fall earns.
+	var notch := tree.get_meta("notch", null) as MeshInstance3D
+	if notch == null or not is_instance_valid(notch):
+		notch = MeshInstance3D.new()
+		var nb := BoxMesh.new()
+		nb.size = Vector3(0.42, 0.30, 0.42)
+		notch.mesh = nb
+		var nmat := StandardMaterial3D.new()
+		nmat.albedo_color = Color(0.44, 0.32, 0.17)  ## fresh-cut heartwood
+		nmat.roughness = 1.0
+		notch.material_override = nmat
+		tree.add_child(notch)
+		var lt := (tree.global_transform.basis.inverse() * toward).normalized()
+		notch.position = lt * 0.14 + Vector3(0, 1.08, 0)
+		notch.rotation_degrees = Vector3(45.0, randf_range(0.0, 360.0), 0.0)
+		tree.set_meta("notch", notch)
+	else:
+		notch.scale *= 1.28  ## each bite goes deeper
+	var chops := int(tree.get_meta("chops", 4)) - 1
+	tree.set_meta("chops", chops)
+	var axis := Vector3.UP.cross(-toward).normalized()
+	if axis.length_squared() < 0.5:
+		axis = Vector3.RIGHT
+	if chops > 0:
+		## The shiver: a quick lean away from the blow and back.
+		var base_basis := tree.basis
+		var tw := create_tween()
+		tw.tween_method(_tip_tree.bind(tree, axis, base_basis), 0.0, 0.035, 0.07)
+		tw.tween_method(_tip_tree.bind(tree, axis, base_basis), 0.035, 0.0, 0.11)
+	else:
+		_fell_tree(tree, -toward, axis)
+
+
+func _fell_tree(tree: Node3D, fall_dir: Vector3, axis: Vector3) -> void:
+	## TIMBER. Tips from the base away from the axe, accelerating like a real
+	## fall, crashes (chips + shake), rests a beat, sinks away. Yields wood.
+	tree.remove_from_group("trees")  ## no re-chopping a corpse
+	for c in tree.get_children():
+		if c is CollisionShape3D:
+			(c as CollisionShape3D).set_deferred("disabled", true)  ## never shoves you mid-fall
+	var base_basis := tree.basis
+	var tw := create_tween()
+	tw.tween_method(_tip_tree.bind(tree, axis, base_basis), 0.0, deg_to_rad(84.0), 1.5) \
+		.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(_tree_crash.bind(tree, fall_dir))
+	## A little bounce off the ground, then settle.
+	tw.tween_method(_tip_tree.bind(tree, axis, base_basis), deg_to_rad(84.0), deg_to_rad(80.0), 0.15)
+	tw.tween_method(_tip_tree.bind(tree, axis, base_basis), deg_to_rad(80.0), deg_to_rad(83.0), 0.13)
+	tw.tween_interval(4.0)
+	tw.tween_property(tree, "position:y", tree.position.y - 2.4, 1.0) \
+		.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(tree.queue_free)
+	var logs := randi_range(2, 4)
+	_give_item("Wood", logs, 1.5)
+	_push_gain("Wood", logs)
+	_add_log_msg("Timber!", Color(0.85, 0.75, 0.5))
+
+
+func _tip_tree(a: float, tree: Node3D, axis: Vector3, base_basis: Basis) -> void:
+	if is_instance_valid(tree):
+		tree.basis = Basis(axis, a) * base_basis
+
+
+func _tree_crash(tree: Node3D, fall_dir: Vector3) -> void:
+	## The canopy hits the dirt: a burst of chips along the fallen crown and
+	## a thud you can feel if you're anywhere near.
+	if not is_instance_valid(tree):
+		return
+	var h := float(tree.get_meta("height", 5.0))
+	var crash := tree.global_position + fall_dir * h * 0.7 + Vector3.UP * 0.4
+	cam_shake = maxf(cam_shake, clampf(0.26 - global_position.distance_to(crash) * 0.012, 0.05, 0.26))
+	for _i in range(randi_range(4, 6)):
+		var at := crash + Vector3(randf_range(-1.2, 1.2), 0, randf_range(-1.2, 1.2))
+		var v := Vector3(randf_range(-1.5, 1.5), randf_range(1.4, 2.8), randf_range(-1.5, 1.5))
+		get_parent().add_child(RockDebris.make(at, v, false, true))
 
 
 func _do_pick_hit() -> void:
@@ -1872,6 +2198,7 @@ func _do_pick_hit() -> void:
 		if region != null and region.carve_bite((rhit.position as Vector3) + forward * 0.22):
 			cam_shake = maxf(cam_shake, 0.12)
 			_spawn_mine_debris(rhit.position as Vector3, rhit.normal as Vector3)
+			_roll_dig_ore(rhit.position as Vector3, rhit.normal as Vector3)
 			return
 	## No rock — it's a poor weapon, but it IS a heavy spike of iron.
 	var fwd_flat := forward
@@ -2264,9 +2591,11 @@ func _update_hud(delta: float) -> void:
 	## Dropped-item gaze check + the "[E] Pick up" prompt.
 	_update_drop_target()
 	if pickup_prompt:
-		pickup_prompt.visible = _drop_target != null
+		pickup_prompt.visible = _drop_target != null or _bed_target != null
 		if _drop_target != null:
 			pickup_prompt.text = "[E]  Pick up %s" % _drop_target.display_name()
+		elif _bed_target != null:
+			pickup_prompt.text = "[E]  Pack up the bedroll   ·   [F]  Sleep"
 
 	## Fade logic: bars go bright when in use, dim (but never gone) when idle.
 	if absf(health - _last_health) > 0.01:
@@ -2320,6 +2649,8 @@ func _update_hud(delta: float) -> void:
 			panel = spawn_panel
 		elif menu_open == "settings":
 			panel = settings_panel
+		elif menu_open == "creative":
+			panel = creative_panel
 		if panel:
 			## Menus render MENU_SCALE (67%) bigger — clamped so the largest
 			## pages never spill off a small window. floor() keeps text crisp.
@@ -2421,6 +2752,7 @@ func _toggle_menu(which: String) -> void:
 	spawn_panel.visible = which == "spawn"
 	tab_panel.visible = which == "tab"
 	settings_panel.visible = which == "settings"
+	creative_panel.visible = which == "creative"
 	if which == "tab":
 		_set_tab_page(tab_page)
 	elif which == "settings":
@@ -2446,7 +2778,103 @@ func _close_menu() -> void:
 	spawn_panel.visible = false
 	tab_panel.visible = false
 	settings_panel.visible = false
+	creative_panel.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## ========================= Creative menu (G, dev) ==========================
+
+
+func _build_creative_menu() -> void:
+	## CREATIVE (dev): EVERY item in the game, one click away — the full metal
+	## catalogue (sword / 5-piece armor set / raw ore per metal, endgame
+	## included) plus every mundane item. M spawns mobs; G fills pockets.
+	creative_panel = PanelContainer.new()
+	creative_panel.visible = false
+	hud_layer.add_child(creative_panel)
+	var margin := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		margin.add_theme_constant_override(side, 14)
+	creative_panel.add_child(margin)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 6)
+	margin.add_child(vb)
+	var title := Label.new()
+	title.text = "Creative (dev) — every item in the game"
+	title.add_theme_font_size_override("font_size", 22)
+	vb.add_child(title)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 22)
+	vb.add_child(hb)
+
+	## Column 1: the metal catalogue.
+	var mcol := VBoxContainer.new()
+	mcol.add_theme_constant_override("separation", 3)
+	hb.add_child(mcol)
+	var mt := Label.new()
+	mt.text = "Metals — sword / armor set / ore"
+	mt.add_theme_font_size_override("font_size", 17)
+	mcol.add_child(mt)
+	for id: String in Materials.ORDER:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		mcol.add_child(row)
+		var nm := Label.new()
+		nm.text = Materials.display_name(id)
+		nm.custom_minimum_size = Vector2(96, 0)
+		row.add_child(nm)
+		var bs := Button.new()
+		bs.text = "Sword"
+		bs.focus_mode = Control.FOCUS_NONE
+		bs.pressed.connect(_armory_give.bind(id))
+		row.add_child(bs)
+		var ba := Button.new()
+		ba.text = "Armor"
+		ba.focus_mode = Control.FOCUS_NONE
+		ba.pressed.connect(_armory_give_armor.bind(id))
+		row.add_child(ba)
+		var bo := Button.new()
+		bo.text = "Ore"
+		bo.focus_mode = Control.FOCUS_NONE
+		bo.pressed.connect(_creative_give_ore.bind(id))
+		row.add_child(bo)
+
+	## Column 2: everything else that exists so far.
+	var icol := VBoxContainer.new()
+	icol.add_theme_constant_override("separation", 3)
+	hb.add_child(icol)
+	var it := Label.new()
+	it.text = "Items"
+	it.add_theme_font_size_override("font_size", 17)
+	icol.add_child(it)
+	for entry: Array in [
+		["Wooden Shield", 1, 6.0], ["Torch", 1, 1.0], ["Iron Pickaxe", 1, 3.5],
+		["Arrow", 20, 0.06], ["Bedroll", 1, 4.0], ["Wood", 5, 1.5],
+		["Boar Tusk", 1, 0.5], ["Old Bone", 1, 1.0],
+	]:
+		var b := Button.new()
+		b.text = "%s ×%d" % [String(entry[0]), int(entry[1])]
+		b.custom_minimum_size = Vector2(160, 0)
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(_creative_give_item.bind(String(entry[0]), int(entry[1]), float(entry[2])))
+		icol.add_child(b)
+
+	var hint := Label.new()
+	hint.text = "G / Esc to close  —  M spawns mobs  —  full sets get a one-click Equip in the Inventory"
+	hint.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(hint)
+
+
+func _creative_give_ore(id: String) -> void:
+	var nm := "%s Ore" % Materials.display_name(id)
+	_give_item(nm, 1, 2.0)
+	_push_gain(nm, 1)
+
+
+func _creative_give_item(nm: String, count: int, weight: float) -> void:
+	_give_item(nm, count, weight)
+	_push_gain(nm, count)
 
 
 ## ========================= Mob spawn menu (M) =============================
@@ -2819,6 +3247,25 @@ func _give_item_dict(d: Dictionary) -> void:
 		_refresh_inventory_ui()
 
 
+func _find_armor_index(mat_id: String, slot: String) -> int:
+	for i in range(inventory.size()):
+		var it := inventory[i]
+		if String(it.get("slot", "")) == slot and String(it.get("material", "")) == mat_id:
+			return i
+	return -1
+
+
+func _equip_set(mat_id: String) -> void:
+	## The whole kit goes on in one motion — helmet to boots.
+	for slot: String in Materials.ARMOR_SLOTS:
+		var idx := _find_armor_index(mat_id, slot)
+		if idx != -1:
+			equipment[slot] = idx
+	_apply_armor_visuals()
+	_add_log_msg("%s set equipped — head to toe" % Materials.display_name(mat_id), Color(0.85, 0.9, 1.0))
+	_refresh_inventory_ui()
+
+
 func _give_armor_set(mat_id: String) -> void:
 	## The full 5-piece kit of one material, straight into the pack.
 	for slot: String in Materials.ARMOR_SLOTS:
@@ -2967,6 +3414,7 @@ func _update_drop_target() -> void:
 	## Which dropped item is under the gaze? Close (<3.2m) and near the center
 	## of the view — the same "look at it" feel as aiming a swing.
 	_drop_target = null
+	_bed_target = null
 	if menu_open != "" or kd_phase != "":
 		return
 	var best := 0.92
@@ -2983,6 +3431,20 @@ func _update_drop_target() -> void:
 		if d > best:
 			best = d
 			_drop_target = di
+	if _drop_target != null:
+		return  ## loot wins the gaze — beds are bigger targets anyway
+	var bbest := 0.86
+	for n in get_tree().get_nodes_in_group("beds"):
+		if not (n is Node3D):
+			continue
+		var to := (n as Node3D).global_position + Vector3.UP * 0.15 - camera.global_position
+		var dist := to.length()
+		if dist > 3.0 or dist < 0.05:
+			continue
+		var d := fwd.dot(to.normalized())
+		if d > bbest:
+			bbest = d
+			_bed_target = n as Node3D
 
 
 ## ==================== Bestiary ledger (learn by doing) ====================
@@ -3201,6 +3663,11 @@ func _build_inventory_page() -> Control:
 		lbl.custom_minimum_size = Vector2(200, 0)
 		right.add_child(lbl)
 		inv_slot_labels[slot] = lbl
+	## One-click set equip: a button appears here for every material whose
+	## full 5-piece kit is in the pack.
+	inv_sets_box = VBoxContainer.new()
+	inv_sets_box.add_theme_constant_override("separation", 3)
+	right.add_child(inv_sets_box)
 	var hint := Label.new()
 	hint.text = "Click an item to equip / unequip\n(swords: click to wield; shield + torch\ncan share the offhand arm)\nQ over an item drops one at your feet\n1 / 2 / 3 / 4 switch pages — Esc closes"
 	hint.modulate = Color(1, 1, 1, 0.55)
@@ -3696,10 +4163,29 @@ func _refresh_inventory_ui() -> void:
 		var idx := int(equipment.get(slot, -1))
 		var nm: String = "—" if idx < 0 else String(inventory[idx].name)
 		(inv_slot_labels[slot] as Label).text = "%s:  %s" % [SLOT_NAMES[slot], nm]
+	## Full-set shortcuts: one button per complete 5-piece kit in the pack.
+	if inv_sets_box:
+		for c in inv_sets_box.get_children():
+			(c as Control).visible = false
+			c.queue_free()
+		for id: String in Materials.ORDER:
+			var have := 0
+			for slot: String in Materials.ARMOR_SLOTS:
+				if _find_armor_index(id, slot) != -1:
+					have += 1
+			if have == Materials.ARMOR_SLOTS.size():
+				var b := Button.new()
+				b.text = "Equip %s set (5 pc)" % Materials.display_name(id)
+				b.focus_mode = Control.FOCUS_NONE
+				b.pressed.connect(_equip_set.bind(id))
+				inv_sets_box.add_child(b)
 
 
 func _item_clicked(idx: int) -> void:
 	var it := inventory[idx]
+	if String(it.name) == "Bedroll":
+		_place_bedroll(idx)
+		return
 	if it.slot == "":
 		return  ## plain loot — nothing to equip. TODO(design): use/drop actions later
 	if String(it.slot) == "sword":
@@ -3773,6 +4259,8 @@ func _cycle_offhand() -> void:
 	var nxt: Array = modes[0] if pos == -1 else modes[(pos + 1) % modes.size()]
 	equipment["offhand"] = nxt[0]
 	equipment["offhand2"] = nxt[1]
+	if _in_dark:
+		_dark_manual = true  ## your call now — the darkness watch steps back
 	if int(nxt[0]) == -1:
 		_add_log_msg("Offhand: empty", Color(0.8, 0.8, 0.8))
 	elif int(nxt[1]) != -1:
@@ -3858,10 +4346,11 @@ func _update_offhand(delta: float) -> void:
 	if current_weapon == "bow":
 		want = -1   ## the left hand is on the bow grip — shield/torch lower away
 		want2 = -1
-	elif sheathed:
-		## The shield sheathes WITH the sword — it rides your back while the
-		## blade rides the hip. The torch stays up: light is welcome company
-		## even with the steel put away.
+	elif sheathed and not _in_dark:
+		## In daylight the shield sheathes WITH the sword — it rides your back
+		## while the blade rides the hip (torch stays up regardless). In the
+		## DARK the whole left arm stays out even with the sword away: shield
+		## raised, torch burning — the guard never drops down there.
 		if _idx_is(want2, "Shield"):
 			want2 = -1
 		if _idx_is(want, "Shield"):

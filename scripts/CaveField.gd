@@ -8,9 +8,9 @@ class_name CaveField
 ## Pure math + one PackedFloat32Array; no scene nodes live here.
 
 const VOX := 0.8                 ## meters per voxel (the "higher poly" knob)
-const CELLS_X := 80              ## 64 m
-const CELLS_Y := 54              ## y = -36 .. +7.2 — headroom for the entrance mound
-const CELLS_Z := 80
+const CELLS_X := 260             ## 208 m — the ENTIRE map: one continuous
+const CELLS_Y := 54              ##   underground, caves run wherever the noise
+const CELLS_Z := 260             ##   takes them. y = -36 .. +7.2
 const SX := CELLS_X + 1          ## sample grid (one more than cells)
 const SY := CELLS_Y + 1
 const SZ := CELLS_Z + 1
@@ -25,18 +25,27 @@ const MOUND_FWD := 5.0           ## cap sits OVER the throat's already-deep end
 const MOUTH_OPEN_R := 8.0        ## the chain may only cut the surface this
                                  ## close to the mouth (kills back-side holes)
 
-## Deep rows below this world-y are PLACEHOLDER rock at world build and only
-## get carved (threaded, off-screen) once the player actually enters — the
-## vast underneath loads itself while you're still in the throat.
+## Deep rows below this world-y are PLACEHOLDER rock for the first instants of
+## a run; the full underground carves itself on worker threads immediately at
+## load-in (and again on every sleep — the shifting caves).
 const DEEP_Y := -8.0
 const J_DEEP := int((DEPTH + DEEP_Y) / VOX)  ## sample rows < this are "deep"
 
+## THE SHIFTING CAVES (sleep): everything underground reseeds and re-carves —
+## EXCEPT inside the permanence bubble around each mouth (the "permanent
+## caves": entrance throats and their first chambers never move, and content
+## respects a no-spawn barrier around them).
+const PERM_R := 24.0             ## permanence bubble radius around each mouth
+const J_RESET_TOP := 43          ## reset touches rows below wy ≈ -1.6 only
+                                 ## (surface skin, mounds, grass never shift)
+
 var origin := Vector3.ZERO       ## min corner of the sample grid (x, -DEPTH, z)
 var data := PackedFloat32Array() ## SX*SY*SZ densities — THE cave, edits persist
-var mouth := Vector3.ZERO
-var dir := Vector3(1, 0, 0)
-var vast := 0.0                  ## 1.0 = a VAST system: fatter worms, far
-                                 ## bigger caverns, wider cracks (seeded roll)
+var mouths: Array[Vector3] = []  ## every entrance (worldgen picks 2; the M-menu
+var dirs: Array[Vector3] = []    ##   button can tear open more at runtime)
+var _chains: Array = []          ## per mouth: smoothed capsule chain (Array[Vector3])
+var _chain_min: Array[Vector3] = []  ## per-chain AABB (early-out for the sampler)
+var _chain_max: Array[Vector3] = []
 
 var _worm_a := FastNoiseLite.new()
 var _worm_b := FastNoiseLite.new()
@@ -44,21 +53,17 @@ var _worm_r := FastNoiseLite.new()   ## modulates tunnel radius: swell and pinch
 var _cheese := FastNoiseLite.new()
 var _crack_a := FastNoiseLite.new()
 var _crack_b := FastNoiseLite.new()
+var _vastn := FastNoiseLite.new()    ## SPATIAL vastness: some stretches of the
+                                     ## underground are grand halls, others tight
 var band := FastNoiseLite.new()      ## strata banding (the mesher reads this)
-var _mouth_pts: Array[Vector3] = []  ## the entry tunnel's smoothed capsule chain
-var _mouth_min := Vector3.ZERO       ## chain AABB (early-out for the sampler)
-var _mouth_max := Vector3.ZERO
 
 
-func setup(p_mouth: Vector3, p_dir: Vector3, seed_v: int, p_vast := 0.0) -> void:
-	mouth = p_mouth
-	dir = p_dir
-	vast = p_vast
-	var center := mouth + dir * 22.0
-	origin = Vector3(center.x - CELLS_X * VOX * 0.5, -DEPTH, center.z - CELLS_Z * VOX * 0.5)
+func setup(p_mouths: Array[Vector3], p_dirs: Array[Vector3], seed_v: int) -> void:
+	## ONE field under the whole map, centered on the world origin.
+	origin = Vector3(-CELLS_X * VOX * 0.5, -DEPTH, -CELLS_Z * VOX * 0.5)
 
 	for pair: Array in [[_worm_a, 0.030], [_worm_b, 0.031], [_worm_r, 0.013], [_cheese, 0.021],
-			[_crack_a, 0.052], [_crack_b, 0.054], [band, 0.09]]:
+			[_crack_a, 0.052], [_crack_b, 0.054], [_vastn, 0.0065], [band, 0.09]]:
 		var n := pair[0] as FastNoiseLite
 		n.noise_type = FastNoiseLite.TYPE_SIMPLEX
 		n.fractal_octaves = 2
@@ -71,20 +76,24 @@ func setup(p_mouth: Vector3, p_dir: Vector3, seed_v: int, p_vast := 0.0) -> void
 		n.domain_warp_amplitude = 14.0
 		n.domain_warp_frequency = 0.024
 
-	## The mouth tunnel: starts in open air OUTSIDE the mound (so it bores a
-	## walk-in archway through the mound's face at ground level), runs level
-	## through it, then dives to ~-11.5 m where the noise caves take over.
+	for m in range(p_mouths.size()):
+		_add_mouth_geometry(p_mouths[m], p_dirs[m])
+
+
+func _add_mouth_geometry(p_mouth: Vector3, p_dir: Vector3) -> void:
 	## The throat: an OPEN sunken ramp — starts at grade, descends under the
 	## sky for its first meters (a grass-walled cut in the ground), and is
 	## already ~2 m deep when it passes beneath the cap's stone brow. The cap
 	## only ever roofs rock that's genuinely below grade, so its shell stays
 	## thick and its back slope stays sealed.
+	mouths.append(p_mouth)
+	dirs.append(p_dir)
 	var ctrl: Array[Vector3] = [
-		mouth - dir * 7.0 + Vector3(0, 1.45, 0),
-		mouth - dir * 1.0 + Vector3(0, -0.2, 0),
-		mouth + dir * 5.0 + Vector3(0, -3.4, 0),
-		mouth + dir * 13.0 + Vector3(0, -7.6, 0),
-		mouth + dir * 21.0 + Vector3(0, -11.8, 0),
+		p_mouth - p_dir * 7.0 + Vector3(0, 1.45, 0),
+		p_mouth - p_dir * 1.0 + Vector3(0, -0.2, 0),
+		p_mouth + p_dir * 5.0 + Vector3(0, -3.4, 0),
+		p_mouth + p_dir * 13.0 + Vector3(0, -7.6, 0),
+		p_mouth + p_dir * 21.0 + Vector3(0, -11.8, 0),
 	]
 	## Round the elbows (two Chaikin corner-cut passes) so the tunnel floor
 	## bows smoothly — a hard kink between capsules makes a 45°+ face a
@@ -96,16 +105,41 @@ func setup(p_mouth: Vector3, p_dir: Vector3, seed_v: int, p_vast := 0.0) -> void
 			sm.append(ctrl[s].lerp(ctrl[s + 1], 0.75))
 		sm.append(ctrl[ctrl.size() - 1])
 		ctrl = sm
-	_mouth_pts = ctrl
-	## Chain bounding box (+ max radius) — lets the sampler skip the mouth
-	## SDF for the ~99% of the region nowhere near the entrance.
-	_mouth_min = ctrl[0]
-	_mouth_max = ctrl[0]
+	_chains.append(ctrl)
+	## Chain bounding box (+ max radius) — lets the sampler skip this mouth's
+	## SDF for the ~99% of the map nowhere near it.
+	var lo := ctrl[0]
+	var hi := ctrl[0]
 	for p in ctrl:
-		_mouth_min = _mouth_min.min(p)
-		_mouth_max = _mouth_max.max(p)
-	_mouth_min -= Vector3(3.0, 3.0, 3.0)
-	_mouth_max += Vector3(3.0, 3.0, 3.0)
+		lo = lo.min(p)
+		hi = hi.max(p)
+	_chain_min.append(lo - Vector3(3.0, 3.0, 3.0))
+	_chain_max.append(hi + Vector3(3.0, 3.0, 3.0))
+
+
+func add_mouth(p_mouth: Vector3, p_dir: Vector3) -> Array[Vector3i]:
+	## RUNTIME: tear a new entrance into the existing field (M-menu button).
+	## Recomputes the affected sample box (mound + chain footprint) and hands
+	## back its range so the region can remesh those chunks. This box is
+	## resampled fresh (player digs inside it are blasted away — the earth
+	## just tore open; the quake covers the paperwork).
+	_add_mouth_geometry(p_mouth, p_dir)
+	var ci := _chains.size() - 1
+	var lo_w: Vector3 = _chain_min[ci]
+	var hi_w: Vector3 = _chain_max[ci]
+	## Include the cap mound footprint + a margin.
+	var mc := p_mouth + p_dir * MOUND_FWD
+	lo_w = lo_w.min(mc - Vector3(MOUND_R + 2.0, 0.0, MOUND_R + 2.0))
+	hi_w = hi_w.max(mc + Vector3(MOUND_R + 2.0, MOUND_H + 2.0, MOUND_R + 2.0))
+	var lo := ((lo_w - origin) / VOX).floor()
+	var hi := ((hi_w - origin) / VOX).ceil()
+	var i0 := clampi(int(lo.x), 1, SX - 2)
+	var k0 := clampi(int(lo.z), 1, SZ - 2)
+	var i1 := clampi(int(hi.x), 1, SX - 2)
+	var k1 := clampi(int(hi.z), 1, SZ - 2)
+	for i in range(i0, i1 + 1):
+		_gen_rows(i, 1, SY, false, k0, k1 + 1)
+	return [Vector3i(i0, 1, k0), Vector3i(i1, SY - 1, k1)]
 
 
 func idx(i: int, j: int, k: int) -> int:
@@ -140,6 +174,37 @@ func start_deep_generation() -> int:
 	return WorkerThreadPool.add_group_task(_gen_deep_plane, SX, -1, true, "CaveFieldDeep")
 
 
+func reseed(seed_v: int) -> void:
+	## New bones for the underground — every carver rolls new dice. The strata
+	## banding keeps its seed (the rock TYPE doesn't change, just its shape).
+	for n: FastNoiseLite in [_worm_a, _worm_b, _worm_r, _cheese, _crack_a, _crack_b, _vastn]:
+		n.seed = seed_v
+		seed_v = seed_v * 31 + 17
+
+
+func start_reset_generation() -> int:
+	## The shift itself, NON-blocking: recompute every underground sample
+	## OUTSIDE the mouth permanence bubbles. Player digs outside the bubbles
+	## are swallowed by the shift — that's the price of a moving labyrinth.
+	return WorkerThreadPool.add_group_task(_reset_plane, SX, -1, true, "CaveFieldReset")
+
+
+func _reset_plane(i: int) -> void:
+	if i == 0 or i == SX - 1:
+		return  ## rim columns never change
+	var wx := origin.x + i * VOX
+	for k in range(1, SZ - 1):
+		var wz := origin.z + k * VOX
+		var protected := false
+		for m in mouths:
+			if Vector2(wx - m.x, wz - m.z).length() < PERM_R:
+				protected = true
+				break
+		if protected:
+			continue  ## the permanent caves hold their shape
+		_gen_rows(i, 1, J_RESET_TOP, false, k, k + 1)
+
+
 func _gen_deep_plane(i: int) -> void:
 	_gen_rows(i, 0, J_DEEP, true)
 
@@ -148,7 +213,7 @@ func _gen_plane(i: int) -> void:
 	_gen_rows(i, J_DEEP if shallow_only else 0, SY, false)
 
 
-func _gen_rows(i: int, row0: int, row1: int, preserve: bool) -> void:
+func _gen_rows(i: int, row0: int, row1: int, preserve: bool, kk0 := 0, kk1 := SZ) -> void:
 	var wx := origin.x + i * VOX
 	if data.size() > 0:  ## (guard keeps the original loop nesting intact)
 		for j in range(row0, row1):
@@ -156,10 +221,10 @@ func _gen_rows(i: int, row0: int, row1: int, preserve: bool) -> void:
 			## Base: flat ground plane — rock below y=0, sky above.
 			var base := -wy * 0.8
 			var depth := -wy
-			for k in range(SZ):
-				## Region rim columns are forced AIR so the mesher closes the
-				## block with real side walls (the slab overhangs this seam);
-				## the bottom row is forced ROCK — the world has a floor.
+			for k in range(kk0, kk1):
+				## Map-rim columns are forced AIR so the mesher closes the
+				## world with real edge walls; the bottom row is forced ROCK —
+				## the world has a floor.
 				if i == 0 or k == 0 or i == SX - 1 or k == SZ - 1:
 					data[(i * SY + j) * SZ + k] = -1.0
 					continue
@@ -167,79 +232,82 @@ func _gen_rows(i: int, row0: int, row1: int, preserve: bool) -> void:
 					data[(i * SY + j) * SZ + k] = 1.0
 					continue
 				var wz := origin.z + k * VOX
-				## Rim dip: the grass skin sinks a few cm as it slides in under
-				## the slab's 1.2 m overhang — the two surfaces never share a
-				## plane, so the border can't z-fight (that was the flicker).
-				var edge_m := float(mini(mini(i, SX - 1 - i), mini(k, SZ - 1 - k))) * VOX
-				var dip := 0.07 * clampf(1.0 - (edge_m - 0.8) / 3.0, 0.0, 1.0)
-				var d := base - dip * 0.8
-				## The entrance mound: rock heaped ABOVE the ground plane around
-				## the mouth, noise-wobbled so the silhouette reads as crag, not
-				## dome. (Grass skins its top automatically via the mesher.)
-				var mc := mouth + dir * MOUND_FWD
-				var mdx := wx - mc.x
-				var mdz := wz - mc.z
-				var mdist := sqrt(mdx * mdx + mdz * mdz)
-				if mdist < MOUND_R + 1.5:
-					var u := clampf(1.0 - mdist / MOUND_R, 0.0, 1.0)
-					u = u * u * (3.0 - 2.0 * u)
-					var h := MOUND_H * u + band.get_noise_3d(wx * 1.7, 0.0, wz * 1.7) * 0.5 * u
-					d = maxf(d, (h - wy) * 0.8)
-				## Carvers only wake below a ~2.2 m rock roof (the mouth is the
-				## one honest way in — until a pickaxe makes another).
+				var d := base
+				## Entrance mounds: rock heaped ABOVE the ground plane around
+				## each mouth, noise-wobbled so the silhouette reads as crag.
+				## (Grass skins their tops automatically via the mesher.)
+				for m in range(mouths.size()):
+					var mc: Vector3 = mouths[m] + dirs[m] * MOUND_FWD
+					var mdx := wx - mc.x
+					var mdz := wz - mc.z
+					var mdist := sqrt(mdx * mdx + mdz * mdz)
+					if mdist < MOUND_R + 1.5:
+						var u := clampf(1.0 - mdist / MOUND_R, 0.0, 1.0)
+						u = u * u * (3.0 - 2.0 * u)
+						var h := MOUND_H * u + band.get_noise_3d(wx * 1.7, 0.0, wz * 1.7) * 0.5 * u
+						d = maxf(d, (h - wy) * 0.8)
+				## Carvers only wake below a ~2.2 m rock roof (the mouths are
+				## the honest ways in — until a pickaxe makes another).
 				var guard := clampf((depth - 2.2) / 2.5, 0.0, 1.0)
 				if guard > 0.0:
+					## SPATIAL vastness: a slow noise decides which stretches
+					## of the underground are grand halls and which are tight
+					## worm-warrens — the caves change character as they run.
+					var vloc := clampf(_vastn.get_noise_2d(wx, wz) * 1.1 + 0.55, 0.0, 1.15)
 					var carve := 0.0
 					## Worm tunnels: near the crossing lines of two noises.
 					## Radius rides a third noise — swelling into halls,
 					## pinching to squeezes, entirely on its own.
 					var wa := _worm_a.get_noise_3d(wx, wy * 1.6, wz)
 					var wb := _worm_b.get_noise_3d(wx, wy * 1.6, wz)
-					var wr := 1.9 + vast * 1.4 + _worm_r.get_noise_3d(wx, wy, wz) * 1.5 \
+					var wr := 1.9 + vloc * 1.4 + _worm_r.get_noise_3d(wx, wy, wz) * 1.5 \
 						+ clampf((depth - 6.0) / 26.0, 0.0, 1.0) * 1.2
 					carve = maxf(carve, wr - sqrt(wa * wa + wb * wb) * 21.0)
 					## Cheese caverns: fat low-frequency blobs, deeper = bigger.
-					## Vast systems open them earlier, wider, and MUCH taller.
-					var cramp := clampf((depth - (8.0 - vast * 2.0)) / 7.0, 0.0, 1.0)
+					## Vast stretches open them earlier, wider, MUCH taller.
+					var cramp := clampf((depth - (8.0 - vloc * 2.0)) / 7.0, 0.0, 1.0)
 					if cramp > 0.0:
 						var cv := _cheese.get_noise_3d(wx, wy * 1.35, wz)
-						carve = maxf(carve, (cv - (0.38 - vast * 0.10)) * (17.0 + vast * 8.0) * cramp)
+						carve = maxf(carve, (cv - (0.38 - vloc * 0.10)) * (17.0 + vloc * 8.0) * cramp)
 					## Cracks: thin, tall seams — narrow but fitable, and they
 					## love connecting systems that never planned to meet.
 					var ca := _crack_a.get_noise_3d(wx, wy * 0.55, wz)
 					var cb := _crack_b.get_noise_3d(wx, wy * 0.55, wz)
-					carve = maxf(carve, 0.62 + vast * 0.15 - sqrt(ca * ca + cb * cb) * 24.0)
+					carve = maxf(carve, 0.62 + vloc * 0.15 - sqrt(ca * ca + cb * cb) * 24.0)
 					if carve > 0.0:
 						d = minf(d, -carve * guard)
-				## The mouth tunnel ignores the roof guard — it IS the opening.
-				## But near the surface it may ONLY cut within MOUTH_OPEN_R of
-				## the mouth: that's what keeps the throat's back half from
-				## tearing holes out of the ground (or the cap's back slope).
-				## (AABB early-out: the chain only lives near the entrance.)
-				if wx >= _mouth_min.x and wx <= _mouth_max.x \
-						and wy >= _mouth_min.y and wy <= _mouth_max.y \
-						and wz >= _mouth_min.z and wz <= _mouth_max.z:
-					var surf_ok := wy <= -1.7 \
-						or Vector2(wx - mouth.x, wz - mouth.z).length() <= MOUTH_OPEN_R
-					if surf_ok:
-						var md := _mouth_sdf(Vector3(wx, wy, wz))
-						if md > 0.0:
-							d = minf(d, -md)
+				## The mouth tunnels ignore the roof guard — they ARE the
+				## openings. But near the surface each may ONLY cut within
+				## MOUTH_OPEN_R of its own mouth: that keeps a throat's deeper
+				## half from tearing holes out of the ground behind its cap.
+				## (Per-chain AABB early-out: chains only live near entrances.)
+				for ci in range(_chains.size()):
+					var cmin: Vector3 = _chain_min[ci]
+					var cmax: Vector3 = _chain_max[ci]
+					if wx < cmin.x or wx > cmax.x or wy < cmin.y or wy > cmax.y \
+							or wz < cmin.z or wz > cmax.z:
+						continue
+					var mm: Vector3 = mouths[ci]
+					if wy > -1.7 and Vector2(wx - mm.x, wz - mm.z).length() > MOUTH_OPEN_R:
+						continue
+					var md := _chain_sdf(Vector3(wx, wy, wz), ci)
+					if md > 0.0:
+						d = minf(d, -md)
 				var id := (i * SY + j) * SZ + k
 				## preserve = deep pass: keep anything the player already dug
 				## out of the placeholder rock (their edits are always lower).
 				data[id] = minf(data[id], clampf(d, -4.0, 4.0)) if preserve else clampf(d, -4.0, 4.0)
 
 
-func _mouth_sdf(p: Vector3) -> float:
-	## Positive inside the entry tunnel (capsule chain: archway through the
-	## mound face, level walk-in, then the dive). No surface pit anymore —
-	## the mound IS the entrance landmark.
+func _chain_sdf(p: Vector3, ci: int) -> float:
+	## Positive inside mouth ci's entry tunnel (smoothed capsule chain: open
+	## sunken ramp, under the cap's brow, then the dive).
+	var pts: Array[Vector3] = _chains[ci]
 	var best := -999.0
-	var segs := _mouth_pts.size() - 1
+	var segs := pts.size() - 1
 	for s in range(segs):
-		var a := _mouth_pts[s]
-		var b := _mouth_pts[s + 1]
+		var a := pts[s]
+		var b := pts[s + 1]
 		var ab := b - a
 		var t := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
 		var r := lerpf(1.75, 2.05, (float(s) + t) / float(segs))  ## a low dark throat, opening as it dives
@@ -292,30 +360,35 @@ func is_rock(world: Vector3) -> bool:
 ## ===================== Reachability (content placement) ====================
 
 
-func reachable_air(max_nodes := 20000) -> Array[Vector3i]:
-	## Coarse BFS over air samples (stride 2) from just inside the mouth ramp —
-	## everywhere a walking/climbing player could plausibly reach. Drives where
-	## crystals, veins, and dwellers go, and finds the deep prize spot.
-	var start_w := mouth + dir * 8.0 + Vector3(0, -3.0, 0)
-	var sg := (start_w - origin) / VOX
-	var start := Vector3i(int(sg.x) & ~1, int(sg.y) & ~1, int(sg.z) & ~1)
-	## Hunt a nearby air sample if the exact start is rock.
-	var found := false
-	for r in range(0, 8, 2):
-		if found:
-			break
-		for off: Vector3i in [Vector3i(0, 0, 0), Vector3i(r, 0, 0), Vector3i(-r, 0, 0),
-				Vector3i(0, -r, 0), Vector3i(0, 0, r), Vector3i(0, 0, -r), Vector3i(0, r, 0)]:
-			var c := start + off
-			if _air_at(c):
-				start = c
-				found = true
+func reachable_air(max_nodes := 60000) -> Array[Vector3i]:
+	## Coarse BFS over air samples (stride 2), seeded from inside EVERY mouth
+	## ramp — everywhere a walking/climbing player could plausibly reach.
+	## Drives where crystals, veins, and dwellers go, and finds the deep prize.
+	var seen := {}
+	var queue: Array[Vector3i] = []
+	var out: Array[Vector3i] = []
+	for m in range(mouths.size()):
+		var start_w: Vector3 = mouths[m] + dirs[m] * 8.0 + Vector3(0, -3.0, 0)
+		var sg := (start_w - origin) / VOX
+		var start := Vector3i(int(sg.x) & ~1, int(sg.y) & ~1, int(sg.z) & ~1)
+		## Hunt a nearby air sample if the exact start is rock.
+		var found := false
+		for r in range(0, 8, 2):
+			if found:
 				break
-	if not found:
+			for off: Vector3i in [Vector3i(0, 0, 0), Vector3i(r, 0, 0), Vector3i(-r, 0, 0),
+					Vector3i(0, -r, 0), Vector3i(0, 0, r), Vector3i(0, 0, -r), Vector3i(0, r, 0)]:
+				var c := start + off
+				if _air_at(c):
+					start = c
+					found = true
+					break
+		if found and not seen.has(start):
+			seen[start] = true
+			queue.append(start)
+			out.append(start)
+	if queue.is_empty():
 		return []
-	var seen := {start: true}
-	var queue: Array[Vector3i] = [start]
-	var out: Array[Vector3i] = [start]
 	var head := 0
 	while head < queue.size() and out.size() < max_nodes:
 		var cur := queue[head]

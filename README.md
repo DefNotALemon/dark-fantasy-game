@@ -19,13 +19,15 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 | Space | Jump |
 | Left click | Sword: attack (flowing 1-2-3 combo) · Bow: hold to draw, release to loose · Pickaxe: chop (bites ore veins, digs cave rock) · War axe: alternating chop/cleave |
 | Right click | Sword: block · Bow: ease the string back down |
-| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full swings (overhead chop, horizontal cleave). No material matchups yet — honest iron |
+| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full swings (overhead chop, left-to-right cleave). No material matchups yet — honest iron. **It also fells trees**: chips fly off the trunk with every bite, the trunk shivers, and on the last bite the whole tree tips, crashes (chips + a thud you feel), and yields Wood |
 | Ctrl | Dash |
 | Space | Jump — or **climb**: if there's a grabbable ledge in front of you (up to ~2.6 m), Space mantles up onto it instead, with a pull-up animation. Works mid-air (grab a lip as you fall), costs a little stamina — spam it to scale cave walls or climb out of anywhere you're stuck (dig footholds with the pickaxe if the wall's too tall) |
-| F | Mount / dismount a saddled horse (WASD ride — camera-steered, Shift gallop, Space jump; LMB = saddle sword sweeps, left/right by where you look) |
+| F | Interact: **sleep** at a bed (the bedroll by spawn) — sleeps to dawn, full heal, and **the underground SHIFTS**: every cave re-carves except the permanent entrance caves (24 m bubbles around each mouth, with a no-spawn barrier). Otherwise: mount / dismount a saddled horse (WASD ride — camera-steered, Shift gallop, Space jump; LMB = saddle sword sweeps) |
 | Alt / Option | Sheathe / unsheathe sword — the shield stows on your back / draws with it. **The Hunch** (settings toggle, on by default): the blade auto-draws the instant something turns hostile and auto-sheathes after 6.7 quiet seconds |
 | Q | Cycle offhand: shield → torch → shield + torch (strapped to the same arm) → empty (only items you own) |
-| M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) — plus a dev button that **tears open a whole new cave region** ~30 m ahead (quake included; ~40% roll VAST) |
+| E | Pick up the dropped item under your gaze — or **pack up a bedroll** (becomes a backpack item, 4 wt; click it in the Inventory to unroll it on the ground ahead — camp anywhere on the surface) |
+| M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) — plus a dev button that **tears open a whole new cave mouth** ~30 m ahead (quake included) |
+| G | **Creative menu (dev)**: every item in the game — sword / 5-pc armor set / raw ore for all 10 metals, plus shield, torch, pickaxe, arrows, bedroll, wood, and the junk loot |
 | Tab | Menu: **1** Inventory · **2** Stats · **3** Progression · **4** Bestiary |
 | I | Straight to the Inventory page |
 | Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch) — or closes the open menu. All menus render 67% larger |
@@ -52,6 +54,14 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
   ceilings. Rocks physically fall from every bite (mining a ceiling drops a slab
   that HURTS — undercut at an angle). Dig a slow stubborn shaft all the way back
   up to the surface if you're lost, or down toward the glow of something better.
+- **Digging PAYS, Minecraft-style**: every bite of bare rock has a depth-scaled
+  chance to knock ore loose — bronze and iron near the surface, silver and cold
+  iron in the middle dark, meteoric/mithril/adamant only in the true deeps. The
+  endgame metals (dragonsteel, voidsteel) are **never** dug from the ground.
+  First ore of a new metal still forges its sword on the spot.
+- **Armor sets for every metal** (5 pieces: helmet/chest/bracers/greaves/boots)
+  — and any full set in your pack gets a **one-click "Equip set" button** in the
+  Inventory's Equipped column.
 - Going underground thickens the fog, kills the ambient light, and fades in a
   location title ("The Hollow Depths" / "The Dusk Forest"). (The old grassy-hill
   chamber caves are retired — Cave.gd stays on disk / in git history.)
@@ -108,6 +118,11 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
   The shield lifts to guard the view while you block (strapped or not); the
   **torch actually casts flickering light** (bring it into the caves). Sheathing
   stows the shield across your back — the torch stays lit in your hand.
+- **Darkness watch**: step into a cave (or into the night) and the torch comes
+  out on its own, sharing the arm with your shield. While it's dark, sheathing
+  only puts the SWORD away — shield and torch stay raised, and blocking works
+  from behind the shield without drawing steel. Back in the light, your old
+  loadout returns (unless you picked something yourself with Q in the dark).
 - **Mob spawn menu** (M): spawn any mob ~10 feet in front of you.
 - **Weapon materials** (docs/MATERIALS.md): every sword is made of one metal with
   real matchup damage vs creature families — silver shreds the undead and the

@@ -8,10 +8,10 @@ class_name CaveRegion
 ## real holes (all the way up to the surface if you have the patience).
 
 const CH := CaveMesher.CHUNK
-const BITE_R := 0.62             ## rock removed per pickaxe bite — "slowly"
+const BITE_R := 0.95             ## rock removed per pickaxe bite — honest shovelfuls
 
-var mouth := Vector3.ZERO
-var dir := Vector3(1, 0, 0)
+var mouths: Array[Vector3] = []  ## every entrance (World seeds 2; M-menu adds)
+var dirs: Array[Vector3] = []
 var cave_seed := 0
 
 var field: CaveField
@@ -32,7 +32,9 @@ var _bresults := []
 ## 2 = deep chunks meshing (threads) · 3 = fully loaded
 var _deep_state := 0
 var _deep_gid := -1
-var _vast := 0.0
+var _shifts := 0                 ## how many times sleep has moved the deep
+var _content_root: Node3D        ## resettable content (mobs/veins/deep crystals)
+								 ## — mouth dressing lives outside it, permanent
 
 
 func _ready() -> void:
@@ -47,10 +49,10 @@ func _ready() -> void:
 	## pinhole (collision has been two-sided all along; now the eye agrees).
 	_rock_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	## Every system is roomy underneath; ~40% roll properly VAST.
-	_vast = 1.0 if _rng.randf() < 0.4 else 0.6
+	## Vastness is SPATIAL now (a slow noise inside the field): the one map-wide
+	## underground swings between tight warrens and grand halls on its own.
 	field = CaveField.new()
-	field.setup(mouth, dir, cave_seed, _vast)
+	field.setup(mouths, dirs, cave_seed)
 	var t0 := Time.get_ticks_msec()
 	field.generate(true)  ## SHALLOW: surface skin + cap + throat only
 	_ncx = int(ceil(float(CaveField.CELLS_X) / CH))
@@ -79,26 +81,19 @@ func _ready() -> void:
 	if failed > 0:
 		push_warning("CaveRegion: %d chunk task(s) failed in threads; rebuilt serially" % failed)
 	_bresults.clear()
-	print("CaveRegion shell built in %d ms (%d chunks%s)" % [Time.get_ticks_msec() - t0, _chunks.size(), " — VAST" if _vast > 0.9 else ""])
-	_place_mouth_crystal()  ## the glow that marks the entrance — deep content waits
+	print("CaveRegion shell built in %d ms (%d chunks, %d mouths)" % [Time.get_ticks_msec() - t0, _chunks.size(), mouths.size()])
+	_content_root = Node3D.new()
+	add_child(_content_root)
+	for m in range(mouths.size()):
+		_dress_mouth(m)  ## crystal + daylight shaft — deep content waits
+	## The underground loads WITH the game: kick the deep carve right now
+	## (threaded, polled in _process) instead of waiting for an approach.
+	_deep_state = 1
+	_deep_gid = field.start_deep_generation()
 
 
 func _process(_delta: float) -> void:
 	match _deep_state:
-		0:
-			## Waiting at the door: approach the mouth (or drop below grade
-			## inside the region) and the deeps start carving themselves.
-			var p := get_tree().get_first_node_in_group("player") as Node3D
-			if p == null:
-				return
-			var pp := p.global_position
-			var inside_xz: bool = pp.x > field.origin.x + 2.0 \
-				and pp.x < field.origin.x + CaveField.CELLS_X * CaveField.VOX - 2.0 \
-				and pp.z > field.origin.z + 2.0 \
-				and pp.z < field.origin.z + CaveField.CELLS_Z * CaveField.VOX - 2.0
-			if Vector2(pp.x - mouth.x, pp.z - mouth.z).length() < 13.0 or (inside_xz and pp.y < -0.5):
-				_deep_state = 1
-				_deep_gid = field.start_deep_generation()
 		1:
 			if WorkerThreadPool.is_group_task_completed(_deep_gid):
 				WorkerThreadPool.wait_for_group_task_completion(_deep_gid)
@@ -128,7 +123,7 @@ func _process(_delta: float) -> void:
 				_spawn_dwellers(reach)
 				_deep_state = 3
 				set_process(false)
-				print("CaveRegion deeps loaded%s" % (" — VAST" if _vast > 0.9 else ""))
+				print("CaveRegion deeps loaded (%d reachable air nodes)" % reach.size())
 
 
 func _build_task(n: int) -> void:
@@ -163,7 +158,11 @@ func _apply_chunk(key: Vector3i, built: Dictionary) -> void:
 		_chunks[key] = {"body": body, "shape": shape, "mesh": mi}
 	var c: Dictionary = _chunks[key]
 	(c.mesh as MeshInstance3D).mesh = built.mesh
-	(c.shape as ConcavePolygonShape3D).set_faces(built.faces)
+	## DEFERRED: carve_bite runs inside the physics step (pickaxe hit), and
+	## rewriting a concave shape the player is STANDING ON mid-step is a
+	## known engine crash (digging straight down guaranteed it). After the
+	## step, it's safe.
+	(c.shape as ConcavePolygonShape3D).call_deferred("set_faces", built.faces)
 
 
 ## ============================== Digging ====================================
@@ -213,7 +212,12 @@ func _pick_spots(reach: Array[Vector3i], count: int, y_min: float, y_max: float,
 		var p := field.floor_point(s)
 		if p == Vector3.INF:
 			continue
-		if Vector2(p.x - mouth.x, p.z - mouth.z).length() < avoid_mouth:
+		var too_close := false
+		for mo in mouths:
+			if Vector2(p.x - mo.x, p.z - mo.z).length() < avoid_mouth:
+				too_close = true
+				break
+		if too_close:
 			continue
 		var ok := true
 		for q in picks:
@@ -227,27 +231,84 @@ func _pick_spots(reach: Array[Vector3i], count: int, y_min: float, y_max: float,
 
 func _place_crystals(reach: Array[Vector3i]) -> void:
 	## The caves' only native light — sparse pools of glow in the long dark.
-	for p in _pick_spots(reach, 14, -30.0, -3.5, 7.0, 6.0):
-		_crystal(p, _rng.randf() < 0.6)
+	## Counts scaled for the map-wide underground. Deep crystals are content:
+	## they shift away with the caves on every sleep (mouth crystals don't).
+	for p in _pick_spots(reach, 34, -30.0, -3.5, 9.0, 6.0):
+		_crystal(p, _rng.randf() < 0.6, _content_root)
 
 
-func _place_mouth_crystal() -> void:
-	## One welcoming cluster just inside the throat, so the mouth glows at
-	## night and reads as an entrance, not a shadow. (Placed at shell build —
-	## the deep content arrives later, when the deeps do.)
-	var gate := (mouth + dir * 3.0 - field.origin) / CaveField.VOX
+func _dress_mouth(m: int) -> void:
+	## Every entrance gets: a crystal just inside (the night marker) — and
+	## DAYLIGHT: a warm shaft pouring down the throat. A spotlight does the
+	## actual lighting; two nested additive cones make the visible god rays.
+	var mo: Vector3 = mouths[m]
+	var md: Vector3 = dirs[m]
+	var gate := (mo + md * 3.0 - field.origin) / CaveField.VOX
 	var gs := Vector3i(int(gate.x), int(gate.y) + 2, int(gate.z))
 	var gp := field.floor_point(gs)
 	if gp != Vector3.INF:
-		_crystal(gp + dir.cross(Vector3.UP) * 1.6, true)
+		_crystal(gp + md.cross(Vector3.UP) * 1.6, true)
+	## Daylight pours down the throat: a warm spot doing the actual lighting.
+	## (The visible god-ray beam cones were tried and dropped — too cheesy.)
+	var from := mo - md * 2.0 + Vector3(0, 2.8, 0)
+	var to := mo + md * 6.0 + Vector3(0, -3.8, 0)
+	var spot := SpotLight3D.new()
+	add_child(spot)
+	spot.global_position = from
+	spot.look_at(to)
+	spot.light_color = Color(1.0, 0.95, 0.78)
+	spot.light_energy = 3.2
+	spot.spot_range = (to - from).length() + 7.0
+	spot.spot_angle = 36.0
+	spot.spot_angle_attenuation = 1.6
+	spot.shadow_enabled = false
+
+
+func reset_underground() -> bool:
+	## THE SHIFT (sleep): the whole underground reseeds and re-carves on the
+	## worker threads — everything but the permanence bubbles around the
+	## mouths. Old content (mobs, veins, deep crystals) is swept away and
+	## reseeded once the new rock is real. False while a build is running.
+	if _deep_state == 1 or _deep_state == 2:
+		return false
+	_shifts += 1
+	field.reseed(cave_seed + _shifts * 104729)
+	if is_instance_valid(_content_root):
+		_content_root.queue_free()
+	_content_root = Node3D.new()
+	add_child(_content_root)
+	_deep_state = 1
+	_deep_gid = field.start_reset_generation()
+	set_process(true)
+	return true
+
+
+func add_mouth(p_mouth: Vector3, p_dir: Vector3) -> bool:
+	## RUNTIME (M-menu): tear a new entrance into the living field. Refused
+	## only while the deep threads are actively writing (a second, tops).
+	if _deep_state == 1 or _deep_state == 2:
+		return false
+	mouths.append(p_mouth)
+	dirs.append(p_dir)
+	var rng_range := field.add_mouth(p_mouth, p_dir)
+	if rng_range.size() == 2:
+		var lo: Vector3i = rng_range[0] - Vector3i(2, 2, 2)
+		var hi: Vector3i = rng_range[1] + Vector3i(1, 1, 1)
+		for cx in range(maxi(floori(lo.x / float(CH)), 0), mini(floori(hi.x / float(CH)), _ncx - 1) + 1):
+			for cy in range(maxi(floori(lo.y / float(CH)), 0), mini(floori(hi.y / float(CH)), _ncy - 1) + 1):
+				for cz in range(maxi(floori(lo.z / float(CH)), 0), mini(floori(hi.z / float(CH)), _ncz - 1) + 1):
+					_remesh_chunk(Vector3i(cx, cy, cz))
+	_dress_mouth(mouths.size() - 1)
+	return true
 
 
 func _place_veins(reach: Array[Vector3i]) -> void:
 	## Silver seams through the middle depths; meteoric guards the deepest
 	## reachable pocket (docs/MATERIALS.md sourcing, same rules as caves v1).
-	for p in _pick_spots(reach, _rng.randi_range(3, 5), -26.0, -8.0, 9.0):
+	## avoid_mouth = the NO-SPAWN BARRIER around the permanent entrance caves.
+	for p in _pick_spots(reach, _rng.randi_range(9, 13), -26.0, -8.0, 13.0, CaveField.PERM_R + 2.0):
 		var v := OreVein.make("silver")
-		add_child(v)
+		_content_root.add_child(v)
 		v.global_position = p
 		v.rotation_degrees = Vector3(0, _rng.randf() * 360.0, 0)
 	var deepest := Vector3.INF
@@ -257,7 +318,7 @@ func _place_veins(reach: Array[Vector3i]) -> void:
 			deepest = p
 	if deepest != Vector3.INF and deepest.y < -14.0 and _rng.randf() < 0.85:
 		var v := OreVein.make("meteoric")
-		add_child(v)
+		_content_root.add_child(v)
 		v.global_position = deepest
 		v.rotation_degrees = Vector3(0, _rng.randf() * 360.0, 0)
 
@@ -265,7 +326,7 @@ func _place_veins(reach: Array[Vector3i]) -> void:
 func _spawn_pack(center: Vector3, cls: Variant, count: int) -> void:
 	for _i in range(count):
 		var e: Enemy = cls.new()
-		add_child(e)
+		_content_root.add_child(e)
 		var a := _rng.randf() * TAU
 		var r := _rng.randf_range(0.5, 3.2)
 		e.global_position = center + Vector3(cos(a) * r, 1.2, sin(a) * r)
@@ -274,7 +335,8 @@ func _spawn_pack(center: Vector3, cls: Variant, count: int) -> void:
 func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 	## Packs at reachable pockets; deeper = meaner; the deepest big pocket is
 	## the champion's court (same tables as caves v1 — see CONTEXT.md).
-	var pockets := _pick_spots(reach, 6, -30.0, -5.0, 13.0, 15.0)
+	## avoid_mouth = the NO-SPAWN BARRIER: nothing spawns near permanent caves.
+	var pockets := _pick_spots(reach, 13, -30.0, -5.0, 17.0, CaveField.PERM_R + 2.0)
 	if pockets.is_empty():
 		return
 	pockets.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.y > b.y)
@@ -306,8 +368,11 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 				_spawn_pack(c, Ogre, _rng.randi_range(1, 2))
 
 
-func _crystal(pos: Vector3, with_light: bool) -> void:
+func _crystal(pos: Vector3, with_light: bool, parent: Node3D = null) -> void:
 	## Same glowing shard cluster the old caves used (Cave.gd heritage).
+	## parent = _content_root for shiftable deep crystals; default = permanent.
+	if parent == null:
+		parent = self
 	var col := Color(0.35, 0.85, 1.0) if _rng.randf() < 0.7 else Color(0.72, 0.42, 1.0)
 	if pos.y < -23.0:
 		col = Color(1.0, 0.55, 0.25)  ## the deeps burn ember
@@ -325,7 +390,7 @@ func _crystal(pos: Vector3, with_light: bool) -> void:
 		m.material_override = mat
 		m.position = pos + Vector3(_rng.randf_range(-0.35, 0.35), bm.size.y * 0.35, _rng.randf_range(-0.35, 0.35))
 		m.rotation_degrees = Vector3(_rng.randf_range(-18, 18), _rng.randf_range(0, 360), _rng.randf_range(-18, 18))
-		add_child(m)
+		parent.add_child(m)
 	if with_light:
 		var l := OmniLight3D.new()
 		l.light_color = col
@@ -333,4 +398,4 @@ func _crystal(pos: Vector3, with_light: bool) -> void:
 		l.omni_range = 9.0
 		l.shadow_enabled = false
 		l.position = pos + Vector3(0, 1.0, 0)
-		add_child(l)
+		parent.add_child(l)

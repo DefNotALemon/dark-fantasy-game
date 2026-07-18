@@ -161,7 +161,12 @@ static func _jitter(f: CaveField, c: Vector3i) -> Vector3:
 	if wy > -1.8 and fade > 0.0:
 		var wx := f.origin.x + (float(c.x) + 0.5) * CaveField.VOX
 		var wz := f.origin.z + (float(c.z) + 0.5) * CaveField.VOX
-		if Vector2(wx - f.mouth.x, wz - f.mouth.z).length() > 13.0:
+		var near_mouth := false
+		for m in f.mouths:
+			if Vector2(wx - m.x, wz - m.z).length() <= 13.0:
+				near_mouth = true
+				break
+		if not near_mouth:
 			fade *= clampf((-wy - 0.55) / 1.25, 0.0, 1.0)
 	if fade <= 0.0:
 		return Vector3.ZERO

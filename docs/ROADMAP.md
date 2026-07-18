@@ -92,7 +92,17 @@ Status keys: [x] done · [~] in progress · [ ] not started
       glowworms, breakdown), cavity tags for titles, squeeze camera-tuck,
       sealed-pocket secrets, perf pass. Old Cave.gd retired (kept on disk).
       Also the foundation for shifting caves below
-- [ ] Shifting caves (regenerate, stronger shake inside, off-screen rebuild)
+- [~] Shifting caves — FIRST PASS LIVE via SLEEP: a bedroll at spawn (F to
+      sleep until dawn, refused while anything's aggro'd or a build is mid-
+      flight); sleeping reseeds every carver and re-carves the whole
+      underground on worker threads, sweeps and respawns all deep content
+      (mobs/veins/crystals), quake + "The World Has Shifted". PERMANENCE
+      BUBBLES (24 m) around every mouth: entrance throats never move, player
+      digs inside them survive, and a NO-SPAWN BARRIER keeps content out of
+      them. The underground also fully generates at LOAD-IN now (threaded,
+      non-blocking) instead of waiting for an approach. Still to do: timed
+      shifts (every 1-2 game days without sleep), stronger shake inside,
+      stability bubble around the player mid-shift, entrance collapse cinematic
 - [ ] Camps that grow → raid villages/cities
 - [~] Random world events + titles — first pass: "The Hollow Depths / The Dusk
       Forest" fade in when entering/leaving the caves; Daybreak/Nightfall sky
@@ -166,11 +176,33 @@ Status keys: [x] done · [~] in progress · [ ] not started
       perfectly flat + exact slab grass away from the entrance (jitter now
       returns only with depth or near the mouth), and the skin dips 7 cm under
       the slab overhang at the rim so the border never z-fights
+- [x] MAP-WIDE UNDERGROUND: one 208 m CaveField under the whole world — the
+      voxel grass top replaced the slab entirely (no borders exist anymore,
+      dig anywhere), caves run under everything with SPATIAL vastness (slow
+      noise swings the underground between tight warrens and grand halls),
+      multiple mouths into one shared underground, runtime add_mouth for the
+      M-menu button (no ground surgery), content counts scaled up
+- [x] DARK SKY BELOW + GOD RAYS AT THE MOUTH: underground the fog owns the sky
+      (any glimpse reads gloom); every entrance pours a warm daylight shaft
+      down its throat — SpotLight + nested additive beam cones (the bright
+      thing underground is the way out)
+- [x] DIG-ORE: every pickaxe bite of bare rock rolls a depth-scaled ore chance
+      (richer + likelier the deeper you go; endgame metals excluded from the
+      ground per MATERIALS.md); ore bursts out as a pickup, first-of-metal
+      auto-forge still applies
+- [x] ONE-CLICK SET EQUIP: any complete 5-piece material kit in the pack shows
+      an "Equip X set" button in the Inventory
+- [x] CREATIVE MENU (G, dev): every item in the game — sword / armor set / ore
+      for all 10 metals + shield/torch/pickaxe/arrows/bedroll/wood/junk
 - [x] FALL DAMAGE: safe to ~6 m, scaling damage past it, hard landings (≥17.5
       m/s) fold into the knockdown, lethal falls kill; mid-air mantle zeroes it
 - [x] WAR AXE (weapon 4): heavy one-hand cleaver, ×1.35 damage, two alternating
-      authored swing animations (overhead chop / horizontal cleave), impact-
+      authored swing animations (overhead chop / left-to-right cleave), impact-
       timed arc hits; first non-sword melee weapon (step-4 styles groundwork)
+- [x] TREE FELLING with the axe: per-bite wood chips + trunk shiver, size-based
+      chop counts, timber fall animation (eased tip, canopy crash chips +
+      proximity shake, bounce, sink away), drops 2-4 Wood — first wood economy
+      hook for the step-7 building set
 - [x] SUNKEN ENTRANCE + DEFERRED DEEPS: entrance redone as an open descending
       ramp cut that dives under a low rock cap (only the cap top breaks the
       surface; surface cuts hard-limited to the mouth zone — no more back-side

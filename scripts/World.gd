@@ -40,6 +40,7 @@ func _ready() -> void:
 	_build_forest()
 	_build_rocks()
 	_build_caves()
+	_build_camp()
 	_spawn_player()
 	_spawn_enemies()
 	_build_titles()
@@ -67,10 +68,11 @@ func _process(delta: float) -> void:
 	_env.fog_density = lerpf(_env.fog_density, CAVE_FOG if _underground else BASE_FOG, k)
 	_env.ambient_light_energy = lerpf(_env.ambient_light_energy, want_ambient * _ambient_scale, k)
 	_env.fog_light_color = _env.fog_light_color.lerp(want_fog_col, k)
-	## Underground, the heavy cave fog must NOT swallow the sky: looking back
-	## up the throat, the daylight at the mouth stays bright — the light at
-	## the end of the tunnel. (On the surface the fog dresses the sky as before.)
-	_env.fog_sky_affect = lerpf(_env.fog_sky_affect, 0.0 if _underground else 1.0, k)
+	## Underground the sky goes DARK — the heavy cave fog fully covers it, so
+	## any glimpse of sky through a crack reads as gloom, not blue daylight.
+	## The brightness at a mouth comes from its own light shaft (god rays,
+	## CaveRegion._dress_mouth), not from the sky peeking through the fog.
+	_env.fog_sky_affect = lerpf(_env.fog_sky_affect, 1.0, k)
 
 	## Title fade: quick in, hold, ease out.
 	if _title_timer > 0.0:
@@ -171,10 +173,9 @@ func set_shadow_quality(level: int) -> void:
 
 func _pick_cave_sites() -> void:
 	## Cave mouths sit out in the forest with their openings facing the spawn;
-	## the systems dive OUTWARD (away from center), which keeps the two voxel
-	## regions naturally far apart. Each CaveRegion owns a 64×64 m block whose
-	## top layer IS the ground there, so the slab gets a region-sized hole; the
-	## holes' x-ranges must not overlap (the slab is x-strips).
+	## the throats dive OUTWARD (away from center). The underground itself is
+	## ONE map-wide voxel field now — mouths are just entrances into it, so
+	## the only rule left is breathing room between them.
 	var guard := 0
 	while _cave_sites.size() < CAVE_COUNT and guard < 400:
 		guard += 1
@@ -182,93 +183,48 @@ func _pick_cave_sites() -> void:
 		var rad := _rng.randf_range(30.0, 44.0)
 		var mouth := Vector3(cos(ang) * rad, 0, sin(ang) * rad)
 		var cdir := Vector3(signf(mouth.x), 0, 0) if absf(mouth.x) > absf(mouth.z) else Vector3(0, 0, signf(mouth.z))
-		var center := mouth + cdir * 22.0  ## region center (CaveField geometry)
-		var half := CaveField.CELLS_X * CaveField.VOX * 0.5
-		var rect := Rect2(center.x - half, center.z - half, half * 2.0, half * 2.0)
 		var ok := true
 		for site in _cave_sites:
 			if mouth.distance_to(site.mouth) < 60.0:
 				ok = false
-			var other_c := (site.mouth as Vector3) + (site.dir as Vector3) * 22.0
-			if center.distance_to(other_c) < 68.0:
-				ok = false  ## keep the underground regions clear of each other
-			if rect.position.x < (site.rect as Rect2).end.x + 2.0 and rect.end.x > (site.rect as Rect2).position.x - 2.0:
-				ok = false
 		if ok:
-			_cave_sites.append({"mouth": mouth, "dir": cdir, "rect": rect})
+			_cave_sites.append({"mouth": mouth, "dir": cdir})
 
 
 func _build_ground() -> void:
-	## The ground slab, assembled from x-strips so each cave's entry hole is a
-	## real opening (boxes can't be carved, so we tile around the holes).
-	## Idempotent: clears the previous strips first, so a newly torn-open cave
-	## can re-tile the world around its hole.
-	for b in _ground_bodies:
-		b.queue_free()
-	_ground_bodies.clear()
-	var w_half := WORLD_RADIUS * 1.3
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.16, 0.24, 0.14)  ## mossy forest floor
-	mat.roughness = 1.0
-
-	var holes: Array[Rect2] = []
-	for site in _cave_sites:
-		## Shrink each hole so the slab overhangs the region's rim seam (the
-		## outermost voxel column is air — the overhang hides that moat).
-		holes.append((site.rect as Rect2).grow(-1.2))
-	holes.sort_custom(func(a: Rect2, b: Rect2) -> bool: return a.position.x < b.position.x)
-
-	var xs: Array[float] = [-w_half]
-	for h in holes:
-		xs.append(h.position.x)
-		xs.append(h.end.x)
-	xs.append(w_half)
-
-	for i in range(xs.size() - 1):
-		var x0 := xs[i]
-		var x1 := xs[i + 1]
-		if x1 - x0 < 0.01:
-			continue
-		var hole := Rect2()
-		var has_hole := false
-		for h in holes:
-			if h.position.x <= x0 + 0.01 and h.end.x >= x1 - 0.01:
-				hole = h
-				has_hole = true
-				break
-		if has_hole:
-			_ground_slab(x0, x1, -w_half, hole.position.y, mat)
-			_ground_slab(x0, x1, hole.end.y, w_half, mat)
-		else:
-			_ground_slab(x0, x1, -w_half, w_half, mat)
+	## RETIRED as a slab: the map-wide CaveRegion's grass-skinned top IS the
+	## ground now (one surface, no borders, no seams, diggable anywhere).
+	## Nothing to build here — kept as a hook for future surface work.
+	pass
 
 
-var _ground_bodies: Array[StaticBody3D] = []  ## slab strips — rebuilt when a new cave tears open
+var _region: CaveRegion = null  ## THE underground — one field under the whole map
+
+
+func is_dark_out() -> bool:
+	## Underground, or night on the surface — anywhere a torch earns its keep.
+	## The player's darkness watch (auto-torch) asks this every frame.
+	return _underground or (_daynight != null and _daynight.is_night())
 
 
 func spawn_cave_at(mouth: Vector3, cdir: Vector3) -> bool:
-	## Tear a brand-new cave region open at runtime (M-menu dev button today;
-	## DESIGN.MD's "caves open up in the earth over time" tomorrow). Re-tiles
-	## the slab around the new hole. Refuses holes the x-strip slab can't cut
-	## (overlapping x-ranges) or spots off the slab.
+	## Tear a brand-new cave mouth open at runtime (M-menu dev button today;
+	## DESIGN.MD's "caves open up in the earth over time" tomorrow). The
+	## underground is one map-wide field now — a new mouth is just carved
+	## straight into it, no ground surgery needed.
 	mouth.y = 0.0
 	if cdir.length_squared() < 0.5:
 		cdir = Vector3(1, 0, 0)
-	var center := mouth + cdir * 22.0
-	var half := CaveField.CELLS_X * CaveField.VOX * 0.5
-	if absf(center.x) + half > WORLD_RADIUS * 1.3 - 2.0 or absf(center.z) + half > WORLD_RADIUS * 1.3 - 2.0:
-		return false  ## would hang off the edge of the world slab
-	var rect := Rect2(center.x - half, center.z - half, half * 2.0, half * 2.0)
+	if _region == null:
+		return false
+	if absf(mouth.x) > 88.0 or absf(mouth.z) > 88.0:
+		return false  ## too near the world's edge
 	for site in _cave_sites:
-		if rect.position.x < (site.rect as Rect2).end.x + 2.0 and rect.end.x > (site.rect as Rect2).position.x - 2.0:
-			return false  ## overlaps an existing region's x-range
-	_cave_sites.append({"mouth": mouth, "dir": cdir, "rect": rect})
-	_build_ground()  ## re-tile the slab with the new hole in it
-	var cave := CaveRegion.new()
-	cave.mouth = mouth
-	cave.dir = cdir
-	cave.cave_seed = 4457 + _cave_sites.size() * 7919 + int(absf(mouth.x) * 13.0 + absf(mouth.z) * 7.0)
-	add_child(cave)
+		if mouth.distance_to(site.mouth as Vector3) < 30.0:
+			return false  ## crowding an existing entrance
+	if not _region.add_mouth(mouth, cdir):
+		return false  ## deep threads mid-write — try again in a breath
+	_cave_sites.append({"mouth": mouth, "dir": cdir})
 	## The earth does not open politely (DESIGN.md: earthquake feedback).
 	if _player:
 		_player.cam_shake = maxf(float(_player.cam_shake), 0.5)
@@ -276,36 +232,42 @@ func spawn_cave_at(mouth: Vector3, cdir: Vector3) -> bool:
 	return true
 
 
-func _ground_slab(x0: float, x1: float, z0: float, z1: float, mat: StandardMaterial3D) -> void:
-	var body := StaticBody3D.new()
-	_ground_bodies.append(body)
-	body.position = Vector3((x0 + x1) * 0.5, -1, (z0 + z1) * 0.5)
-	add_child(body)
-	var size := Vector3(x1 - x0, 2, z1 - z0)
-	var col := CollisionShape3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = size
-	col.shape = shape
-	body.add_child(col)
-	var mesh := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mesh.mesh = bm
-	mesh.material_override = mat
-	body.add_child(mesh)
+func _build_camp() -> void:
+	## Your bedroll starts placed by the spawn clearing. F = sleep; look + E
+	## packs it into the backpack; click the item in the inventory to put it
+	## down anywhere (Bedroll.gd).
+	var bed := Bedroll.new()
+	add_child(bed)
+	bed.global_position = Vector3(2.8, 0.0, 2.4)
+	bed.rotation.y = deg_to_rad(24.0)
+
+
+func sleep_at_bed() -> bool:
+	## Sleep until dawn — and the earth USES the night: the whole underground
+	## reseeds and re-carves (except the permanent caves around each mouth).
+	## False if the previous build/shift is still running.
+	if _region == null or not _region.reset_underground():
+		return false
+	if _daynight:
+		_daynight.hour = 6.0  ## dawn
+	if _player:
+		_player.cam_shake = maxf(float(_player.cam_shake), 0.4)
+	_show_title("The World Has Shifted")
+	return true
 
 
 func _build_caves() -> void:
-	## Caves 2.0 (docs/CAVES_PLAN.md): each site becomes a voxel CaveRegion —
-	## organic noise caves, mineable rock, its own grass-skinned surface.
-	## (Cave.gd, the old tube builder, is retired but kept on disk for reference.)
-	for i in range(_cave_sites.size()):
-		var site := _cave_sites[i]
-		var cave := CaveRegion.new()
-		cave.mouth = site.mouth
-		cave.dir = site.dir
-		cave.cave_seed = 4457 + i * 7919
-		add_child(cave)
+	## Caves 2.0 (docs/CAVES_PLAN.md): ONE map-wide CaveRegion — the organic
+	## noise caves run under the entire world, its grass top IS the ground,
+	## every mouth is an entrance into the same underground.
+	## (Cave.gd, the old tube builder, is retired but kept on disk.)
+	var cave := CaveRegion.new()
+	for site in _cave_sites:
+		cave.mouths.append(site.mouth as Vector3)
+		cave.dirs.append(site.dir as Vector3)
+	cave.cave_seed = 4457
+	add_child(cave)
+	_region = cave
 
 
 ## =============================== Forest ===================================
@@ -325,6 +287,12 @@ func _make_tree(pos: Vector3) -> StaticBody3D:
 
 	var height := _rng.randf_range(3.5, 7.0)
 	var trunk_r := _rng.randf_range(0.18, 0.30)
+
+	## Choppable: the war axe fells these (Player._chop_tree) — chips fly per
+	## bite, big trees take a couple more, then TIMBER.
+	tree.add_to_group("trees")
+	tree.set_meta("chops", 3 + int(height / 2.6))  ## 4-5 bites by size
+	tree.set_meta("height", height)
 
 	## Trunk (low-poly cylinder).
 	var trunk := MeshInstance3D.new()
