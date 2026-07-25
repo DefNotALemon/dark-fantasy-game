@@ -52,11 +52,18 @@ class_name Enemy
 @export var duel_lean := 0.45            ## how far it rotates toward its movement while circling
 @export var telegraph_color := Color(0.95, 0.10, 0.05)
 
+## Climbing: EVERY creature can scale sheer rock when the chase demands it
+## (horses opt out — flight stays on the ground). Tuned per mob in _init.
+@export var can_climb := true
+@export var climb_speed := 2.8     ## claw-up pace: kobolds skitter, ogres haul
+
 enum State { CALM, AGITATED }
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 var health := 70.0
 var state: int = State.CALM
+var foe: Node3D = null       ## INFIGHTING: a live grudge against another
+                             ## creature overrides the player as the target
 var dying := false
 var confused := false   ## menu-spawned mobs: wander in lost circles, never
 						## aggro on proximity — snaps out of it when hit
@@ -80,6 +87,15 @@ var _throw_side := 1.0    ## which way a lunge flings the player (left/right)
 var _duel_hold := 0.0     ## duelist: pacing timer before darting in
 var _duel_side := 1.0     ## duelist: strafe direction while pacing
 var _shuffle_side := 1.0  ## which way it sidesteps around the player up close
+
+## Climbing state: a chase blocked by rock goes UP — cave shafts, pit sides,
+## the boulder you mantled onto to plink arrows from. Nowhere is safe now.
+var climbing := false
+var _climb_stuck := 0.0   ## how long we've been shoving a wall going nowhere
+var _climb_time := 0.0    ## bail-out clock: never claw at one wall forever
+var _climb_normal := Vector3.ZERO
+var _climb_scan_t := randf() * 0.25       ## proactive wall-read cadence (staggered)
+var _climb_patience := randf_range(0.8, 1.3)  ## per-mob nerve: some commit sooner
 
 ## --- Locomotion: shared walk animation + natural, imperfect movement ---
 var walk_t := 0.0             ## gait phase, driven by real ground speed
@@ -198,7 +214,7 @@ func _physics_process(delta: float) -> void:
 			move_and_slide()
 			return
 
-	if not is_on_floor():
+	if not is_on_floor() and not climbing:
 		velocity.y -= gravity * delta
 
 	if hit_flash > 0.0:
@@ -213,12 +229,25 @@ func _physics_process(delta: float) -> void:
 		melee_anim -= delta
 		if melee_hit_pending and MELEE_ANIM_TIME - melee_anim >= MELEE_HIT_AT:
 			melee_hit_pending = false
-			var mp := _get_player()
+			var mp := _target()
 			if mp:
 				var mto := mp.global_position - global_position
 				mto.y = 0.0
 				if mto.length() <= attack_range + 0.4 and mp.has_method("take_damage") and _can_hit(mp):
 					mp.take_damage(attack_damage, global_position, false, Vector3.INF, self)
+				## The swing doesn't care whose ribs it finds: any OTHER
+				## creature in the arc catches it too — and grudges are born
+				## there (see take_damage's infighting hook).
+				if mto.length() > 0.01:
+					var swing_dir := mto.normalized()
+					for oe in get_tree().get_nodes_in_group("enemies"):
+						if oe == self or oe == mp or not (oe is Enemy) or (oe as Enemy).dying:
+							continue
+						var ov: Vector3 = (oe as Node3D).global_position - global_position
+						ov.y = 0.0
+						if ov.length() <= attack_range + 0.2 and ov.length() > 0.01 \
+								and swing_dir.dot(ov.normalized()) > 0.55 and _can_hit(oe as Node3D):
+							(oe as Enemy).take_damage(attack_damage * 0.6, null, false, null, self)
 
 	_update_locomotion(delta)
 	_animate(delta)  ## subclasses pose their limbs (attack animations)
@@ -246,7 +275,7 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 
-	var player := _get_player()
+	var player := _target()  ## the player — or a creature this one now hates
 	var dist := 9999.0
 	var to_p := Vector3.ZERO
 	if player:
@@ -257,7 +286,18 @@ func _physics_process(delta: float) -> void:
 	## --- State transitions ---
 	## Waking needs line of sight too — a mob in the next chamber shouldn't
 	## start hunting you through the wall (it would just pace against the rock).
-	if state == State.CALM and player and dist < aggro_radius and not confused and _can_see(player):
+	## Tall grass is COVER: a player standing still (not sprinting) inside a
+	## hiding patch shrinks every calm mob's wake-up radius to a whisper —
+	## they'd have to nearly step on you (GrassSystem sets `grass_hidden`).
+	var eff_aggro := aggro_radius
+	if player != null and "grass_hidden" in player and bool(player.get("grass_hidden")) \
+			and not ("sprinting" in player and bool(player.get("sprinting"))):
+		## Upright in tall grass = harder to spot; CROUCHED = a shadow;
+		## PRONE = part of the ground itself.
+		var proned: bool = "prone" in player and bool(player.get("prone"))
+		var crouched: bool = "crouching" in player and bool(player.get("crouching"))
+		eff_aggro = aggro_radius * (0.22 if proned else (0.35 if crouched else 0.6))
+	if state == State.CALM and player and dist < eff_aggro and not confused and _can_see(player):
 		_set_agitated(true)
 	elif state == State.AGITATED and (player == null or dist > leash_radius):
 		_set_agitated(false)
@@ -267,6 +307,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		_do_combat(delta, player, to_p, dist)
 
+	_update_climb(delta, player, dist)
 	move_and_slide()
 
 
@@ -283,6 +324,7 @@ func _set_agitated(on: bool) -> void:
 		strong_active = false
 		strong_windup = 0.0
 		was_in_melee = false
+		climbing = false  ## calm creatures come back down to earth
 		_set_telegraph_glow(false)
 		_pick_wander()
 
@@ -333,9 +375,12 @@ func _update_locomotion(delta: float) -> void:
 	## subclasses (see Boar). _sway_t is the drift clock behind the imperfect,
 	## surging prowl in _do_combat.
 	var hspeed := Vector2(velocity.x, velocity.z).length()
-	var target := clampf(hspeed / maxf(chase_speed, 0.1), 0.0, 1.0) if is_on_floor() else 0.0
+	if climbing:
+		hspeed = absf(velocity.y)  ## on the wall the limbs claw at climb pace
+	var moving := is_on_floor() or climbing
+	var target := clampf(hspeed / maxf(chase_speed, 0.1), 0.0, 1.0) if moving else 0.0
 	_loco_amount = lerpf(_loco_amount, target, clampf(delta * 7.0, 0.0, 1.0))
-	if is_on_floor():
+	if moving:
 		walk_t += delta * (2.0 + minf(hspeed, 9.0) * 2.4) * gait_rate
 	_sway_t += delta
 	loco_bob_y = absf(sin(walk_t)) * bob_h * _loco_amount
@@ -416,6 +461,8 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 	attack_cd = maxf(0.0, attack_cd - delta)
 	if player == null:
 		return
+	if climbing:
+		return  ## hands full of rock — _update_climb drives the whole body
 
 	var dir := to_p.normalized()
 	if not strong_active:
@@ -533,6 +580,120 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 				_duel_side = 1.0 if randf() < 0.5 else -1.0
 
 
+func _update_climb(delta: float, target: Node3D, dist: float) -> void:
+	## THE WALLS ARE NOT SAFE. Any creature whose chase is pinned against
+	## sheer rock climbs it — straight up, hugging the face, hauling itself
+	## over the lip. A hit knocks it off (take_damage cuts the grip), calm
+	## mobs keep their feet on the ground, and no one claws at a dead end
+	## forever. Runs just before move_and_slide, so it overrides whatever
+	## _do_combat wanted the legs to do.
+	if not can_climb or dying:
+		climbing = false
+		return
+	if state != State.AGITATED or strong_active or strong_windup > 0.0:
+		climbing = false
+		_climb_stuck = 0.0
+		return
+	if climbing:
+		_climb_time += delta
+		if is_on_wall():
+			_climb_normal = get_wall_normal()
+		var over_lip := not is_on_wall()
+		var target_below := target != null \
+			and target.global_position.y < global_position.y - 0.6
+		if over_lip or target_below or _climb_time > 6.0:
+			climbing = false
+			if over_lip and _climb_time <= 6.0 and not target_below:
+				## Haul over the edge: a surge up-and-forward so the body LANDS
+				## on the ledge instead of scraping back down the face.
+				var fwd := -_climb_normal
+				fwd.y = 0.0
+				if fwd.length() > 0.01:
+					velocity = fwd.normalized() * maxf(chase_speed * 0.8, 2.2) \
+						+ Vector3.UP * 3.2
+			return
+		## Claw upward, pressed into the rock (the light inward push keeps
+		## is_on_wall() honest on bumpy voxel faces) — and DRIFT along the
+		## face toward the target's bearing, so the line up the wall angles
+		## like a hunter picking its route, not an elevator.
+		var drift := 0.0
+		var tangent := _climb_normal.cross(Vector3.UP)
+		if target != null and tangent.length_squared() > 0.01:
+			var to_t := target.global_position - global_position
+			to_t.y = 0.0
+			if to_t.length() > 0.4:
+				drift = clampf(to_t.normalized().dot(tangent), -1.0, 1.0)
+		velocity = Vector3.UP * climb_speed + tangent * drift * climb_speed * 0.45 \
+			- _climb_normal * 1.4
+		_face(-_climb_normal, delta, 9.0)
+		return
+	## Not climbing yet. Three honest ways onto a wall, most deliberate first:
+	## READ it (target above, rock ahead — commit like it was always the
+	## plan), LATCH it (leapt or fell against the face mid-air), or SHOVE it
+	## (plain blocked long enough that up is the only idea left).
+	var above := target != null \
+		and target.global_position.y > global_position.y + 0.9
+	_climb_scan_t -= delta
+	if above and dist > attack_range and _climb_scan_t <= 0.0:
+		_climb_scan_t = 0.22
+		var look := to_target_dir(target)
+		if look != Vector3.ZERO:
+			var space := get_world_3d().direct_space_state
+			var q := PhysicsRayQueryParameters3D.create(
+				global_position + Vector3.UP * 0.9,
+				global_position + Vector3.UP * 0.9 + look * 1.35)
+			q.exclude = [get_rid()]
+			var hit: Dictionary = space.intersect_ray(q)
+			if not hit.is_empty() and not (hit.collider is CharacterBody3D) \
+					and absf((hit.normal as Vector3).y) < 0.45:
+				climbing = true
+				_climb_time = 0.0
+				_climb_stuck = 0.0
+				_climb_normal = hit.normal as Vector3
+				## Grip from frame one: up + a press into the face, or the
+				## first slide separates us and the climb ends stillborn.
+				velocity = Vector3.UP * climb_speed - _climb_normal * 1.4
+				return
+	if not is_on_floor():
+		## Mid-air against the rock with the target waiting above? LATCH ON.
+		if above and is_on_wall():
+			climbing = true
+			_climb_time = 0.0
+			_climb_stuck = 0.0
+			_climb_normal = get_wall_normal()
+			velocity = Vector3.UP * climb_speed - _climb_normal * 1.4
+		else:
+			_climb_stuck = maxf(0.0, _climb_stuck - delta * 3.0)
+		return
+	if not is_on_wall():
+		_climb_stuck = maxf(0.0, _climb_stuck - delta * 3.0)
+		return
+	var want := Vector2(velocity.x, velocity.z).length()
+	var real := get_real_velocity()
+	var moved := Vector2(real.x, real.z).length()
+	var reachable := target != null and dist <= attack_range + 0.3 \
+		and absf(target.global_position.y - global_position.y) <= 1.5
+	if want > 0.8 and moved < want * 0.35 and not reachable:
+		_climb_stuck += delta
+		if _climb_stuck >= (0.35 if above else 1.2) * _climb_patience:
+			climbing = true
+			_climb_time = 0.0
+			_climb_stuck = 0.0
+			_climb_normal = get_wall_normal()
+			velocity = Vector3.UP * climb_speed - _climb_normal * 1.4
+	else:
+		_climb_stuck = maxf(0.0, _climb_stuck - delta * 3.0)
+
+
+func to_target_dir(target: Node3D) -> Vector3:
+	## Flat unit vector toward a target (ZERO when on top of each other).
+	if target == null:
+		return Vector3.ZERO
+	var d := target.global_position - global_position
+	d.y = 0.0
+	return d.normalized() if d.length() > 0.05 else Vector3.ZERO
+
+
 func _shuffle_around(delta: float, dir: Vector3, dist: float) -> void:
 	## The close-quarters strafe: never plant the feet — always circle the player
 	## at melee distance. Movement is mostly TANGENTIAL (a steady orbit), with a
@@ -566,6 +727,17 @@ func _get_player() -> Node3D:
 	return null
 
 
+func _target() -> Node3D:
+	## Who this creature is actually hunting: a living grudge (another
+	## creature that struck it) beats the player — until the foe dies,
+	## vanishes, or slips the leash.
+	if foe != null:
+		if not is_instance_valid(foe) or ("dying" in foe and bool(foe.get("dying"))) \
+				or global_position.distance_to(foe.global_position) > leash_radius:
+			foe = null
+	return foe if foe != null else _get_player()
+
+
 func _can_see(target: Node3D) -> bool:
 	## Line of sight: nothing solid between us and the target. Packmates don't
 	## block the view; walls, floors, and hills do.
@@ -589,9 +761,17 @@ func _can_hit(target: Node3D) -> bool:
 	return _can_see(target)
 
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, _from_pos = null, _strong = false, _throw = null, attacker: Node = null) -> void:
+	## (Extra args let the same call shape that hits the Player hit a creature
+	## — a mob whose target became another mob reuses its attack code as-is.)
 	if dying:
 		return
+	## INFIGHTING: struck by another creature — the grudge is MUTUAL. Both
+	## drop whatever they were doing and go for each other's throats.
+	if attacker is Enemy and attacker != self:
+		foe = attacker as Node3D
+		(attacker as Enemy).foe = self
+		_set_agitated(true)
 	if flinch_timer > 0.0 and parry_open <= 0.0:
 		return  ## still flinching from the last hit — can't be hit again yet
 	parry_open = 0.0  ## the counter-hit landed; normal flinch rules resume
@@ -604,6 +784,7 @@ func take_damage(amount: float) -> void:
 		strong_active = false
 		strong_windup = 0.0
 		was_in_melee = false
+		climbing = false  ## a hit cuts the grip: shoot the climber off the wall
 		melee_anim = 0.0
 		melee_hit_pending = false
 		_set_telegraph_glow(false)
@@ -784,10 +965,13 @@ func _spawn_pickups() -> void:
 	if not ("beast" in families):
 		var mat_id := Materials.roll_sword_drop(xp_tier)
 		if mat_id != "":
-			var sw := PickupOrb.make_sword(mat_id)
+			## A REAL blade in the dirt now — no walk-over magnet: look + E.
+			var sw := DroppedItem.make({"name": Materials.sword_name(mat_id),
+				"weight": 5.0, "count": 1, "slot": "sword", "material": mat_id})
 			parent.add_child(sw)
-			sw.global_position = origin
-			sw.burst_dir = _rand_burst()
+			sw.global_position = origin + Vector3(0, 0.6, 0)
+			var b := _rand_burst()
+			sw.velocity = Vector3(b.x * 1.6, 2.6, b.z * 1.6)
 
 
 func _drops_coins() -> bool:

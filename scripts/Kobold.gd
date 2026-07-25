@@ -25,6 +25,7 @@ func _init() -> void:
 	strong_max_range = 5.5
 	strong_from_melee = true
 	telegraph_color = Color(1.0, 0.55, 0.10)
+	climb_speed = 3.4   ## scaly little claws — skitters up rock like a lizard
 
 
 func _choose_strong(dist: float) -> void:

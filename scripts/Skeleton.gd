@@ -30,6 +30,7 @@ func _init() -> void:
 	strong_max_range = 2.6
 	strong_from_melee = true
 	telegraph_color = Color(0.85, 0.88, 1.0)
+	climb_speed = 2.5   ## bone fingers find every crack — steady, tireless
 	## Gait: a stiff, dead-legged shamble.
 	gait_rate = 0.8
 	stride_deg = 24.0

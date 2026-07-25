@@ -63,8 +63,18 @@ Status keys: [x] done · [~] in progress · [ ] not started
       never hit the horse you're riding; a horse dying under you still bucks
       you into the same knockdown. More wildlife later
 
-## Step 7 — Nature & buildings [ ]
-- [ ] Grass / trees (low-poly)
+## Step 7 — Nature & buildings [~]
+- [x] THIRD PERSON (V) + CROUCH (C): over-shoulder camera with animated
+      glide between modes (short press FP->TP right / swap shoulder in TP /
+      1.5 s hold back to FP), wall pull-in, persisted last setting; crouch =
+      slow low hunter's walk that makes tall grass TRUE cover (×0.35 wake radius)
+- [~] Grass — FIRST PASS LIVE ("Valheim architecture, TotK priorities"):
+      chunked MultiMesh faceted tufts sampled off the voxel surface, gust
+      waves + per-blade sway + bend-away-from-player shader, distance fade,
+      wither ring at cave mouths, rebuilds where you dig. TALL HIDING GRASS:
+      dense chest-high patches; standing in them (not sprinting) shrinks calm
+      mobs' aggro radius to 35% + "~ hidden ~" HUD. Trees still placeholder
+- [ ] Real trees (Blender pipeline, docs/TREES_PLAN.md)
 - [ ] Reusable building set (castle → townhouse, ~5 reused)
 
 ## Step 8 — World & survival basics [ ]
@@ -104,6 +114,55 @@ Status keys: [x] done · [~] in progress · [ ] not started
       shifts (every 1-2 game days without sleep), stronger shake inside,
       stability bubble around the player mid-shift, entrance collapse cinematic
 - [ ] Camps that grow → raid villages/cities
+- [x] CAVE-INTERIOR SEALING: the reachability walk can no longer hop rock
+      walls into sealed pockets (midpoint check — content only spawns in air
+      that truly connects to a mouth), pack members are validated against
+      solid rock (fold to pocket center), and a rescue pulls the player home
+      if their head spends a full second inside solid ("The earth spat you out")
+- [x] PRONE STANCE: C cycles stand/crouch/prone — crawl speed, eye at 0.45
+      with chin-forward framing, slow body-weight ease + settling roll (the
+      going-prone animation), deepest grass stealth tier (×0.22); plus an
+      out-of-bounds rescue teleport if you're ever stuck past the border
+- [x] SEALED MAP EDGE (invisible): four unseen 120 m collision walls just
+      inside the mesh boundary + the mantle refuses out-of-bounds landings —
+      you cannot climb, fall, or be thrown out of the map (no visible wall)
+- [x] ZONED UNDERGROUND: a district noise replaces the vastness chaos — the
+      caves now have deliberate anatomy: WARRENS (tight round walkable
+      tunnels, home of the cracks), GALLERIES (wide flat-lidded corridors),
+      HALLS (open caverns); borders blend, districts reshuffle on sleep
+- [x] ROLLING DEBRIS: rocks touch down into a ROLL — downhill pull vs
+      friction, so gentle ground stops them after a tumble, steep slopes keep
+      them going, and a cliff lip drops them back into free fall (chains
+      naturally down terraced cave walls); settle only on near-flat ground
+- [x] DEEP CONTENT BOOST: extra seam belt (7-10 silver + 2 meteoric) and 9
+      extra mean packs below -20 m — the wide galleries got their garrisons
+- [x] FIELD POLISH PASS (gen/deep/reset pipelines): 1-sample walls thicken
+      (see-through cracks between rocks sealed for good) and floating
+      single-sample rock shards dissolve (no tip-touching polygons)
+- [x] MINEABLE SURFACE BOULDERS: 3-4 pickaxe bites by size (chips per bite),
+      burst into rubble + 2-4 Rock pickups on the last
+- [x] LOADING BLACKOUTS + BED SEQUENCE: black curtain over startup until the
+      whole underground (and content) is real; sleeping = lie-down animation →
+      blackout while the deep re-carves → get-up animation; ALL input locked
+      during curtains and bed animations (no lag ever reaches the eye)
+- [x] ANTI-GLITCH CAMERA: near plane 0.02 + full-width head-sphere collider —
+      no more pressing the lens through cave walls to peek out of the world
+- [x] DEEP GALLERIES: the worm-tunnel depth ramp tripled + a pinch floor —
+      the true deeps run as wide round cylinders you could drive a cart through
+- [x] RIM WALL REMOVED: the map edge is open flat ground that simply ends
+      (caves still taper shut before it; outer shells + bottom stay unmineable)
+- [x] HORSE HEARTS: 3 hits to fell any horse, +1 heart per 3 unharmed seconds,
+      ♥♥♡ billboard pips over the head (deplete right-to-left, pop on hit,
+      fade when calm); bestiary HP reads 3
+- [x] METEOR FALLS (random event, ~3-8 min + dev button): burning streak down
+      the sky, lands away from the player/permanent caves, carves a REAL
+      crater, fuses a ball of 7 meteoric veins at its heart (Terraria's
+      meteor, but the ore spawns as a mineable BALL in the middle), rubble +
+      quake + "A Star Falls" + compass direction hint
+- [x] CREATURE INFIGHTING: melee arcs splash onto other creatures (×0.6);
+      creature-on-creature damage sets a MUTUAL grudge — both retarget and
+      brawl until death or leash; horses struck by creatures flee without
+      losing trust in you
 - [~] Random world events + titles — first pass: "The Hollow Depths / The Dusk
       Forest" fade in when entering/leaving the caves; Daybreak/Nightfall sky
       banners now ride the day/night clock (surface only)
@@ -186,6 +245,15 @@ Status keys: [x] done · [~] in progress · [ ] not started
       (any glimpse reads gloom); every entrance pours a warm daylight shaft
       down its throat — SpotLight + nested additive beam cones (the bright
       thing underground is the way out)
+- [x] INVENTORY 2.0: Diablo/Minecraft layout — equipped paper doll (hands +
+      armor + 2 empty accessory berths) with one-click set equip, 9×3 backpack
+      slot GRID (stacks; refuses when full; more backpacks later = more rows),
+      coin PURSE in 4 denominations (copper/silver/gold/platinum ×100 ladder,
+      shown as counts); dev Armory column retired into the G creative menu
+- [x] MANUAL PICKUPS: everything except coins/XP is now look+E — ores from
+      digging AND veins (first-of-metal auto-forge preserved), mob sword drops
+      lie in the dirt as real blades, landed mining rocks gatherable ("Rock"),
+      felled trees scatter Sticks around the crown crash
 - [x] DIG-ORE: every pickaxe bite of bare rock rolls a depth-scaled ore chance
       (richer + likelier the deeper you go; endgame metals excluded from the
       ground per MATERIALS.md); ore bursts out as a pickup, first-of-metal

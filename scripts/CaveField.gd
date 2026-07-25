@@ -53,8 +53,9 @@ var _worm_r := FastNoiseLite.new()   ## modulates tunnel radius: swell and pinch
 var _cheese := FastNoiseLite.new()
 var _crack_a := FastNoiseLite.new()
 var _crack_b := FastNoiseLite.new()
-var _vastn := FastNoiseLite.new()    ## SPATIAL vastness: some stretches of the
-                                     ## underground are grand halls, others tight
+var _zone := FastNoiseLite.new()     ## the DISTRICT map: one slow smooth noise
+                                     ## deals the underground into deliberate
+                                     ## zones — warrens / galleries / halls
 var band := FastNoiseLite.new()      ## strata banding (the mesher reads this)
 
 
@@ -63,13 +64,14 @@ func setup(p_mouths: Array[Vector3], p_dirs: Array[Vector3], seed_v: int) -> voi
 	origin = Vector3(-CELLS_X * VOX * 0.5, -DEPTH, -CELLS_Z * VOX * 0.5)
 
 	for pair: Array in [[_worm_a, 0.030], [_worm_b, 0.031], [_worm_r, 0.013], [_cheese, 0.021],
-			[_crack_a, 0.052], [_crack_b, 0.054], [_vastn, 0.0065], [band, 0.09]]:
+			[_crack_a, 0.052], [_crack_b, 0.054], [_zone, 0.012], [band, 0.09]]:
 		var n := pair[0] as FastNoiseLite
 		n.noise_type = FastNoiseLite.TYPE_SIMPLEX
 		n.fractal_octaves = 2
 		n.frequency = float(pair[1])
 		n.seed = seed_v
 		seed_v = seed_v * 31 + 17  ## every noise its own seed, all from one root
+	_zone.fractal_octaves = 1  ## district borders should be broad, not ragged
 	## Domain warp bends the tunnels so nothing runs straight.
 	for n: FastNoiseLite in [_worm_a, _worm_b, _cheese]:
 		n.domain_warp_enabled = true
@@ -165,21 +167,62 @@ func generate(p_shallow := false) -> void:
 		data.fill(1.0)  ## solid placeholder — real values overwrite the top rows
 	var gid := WorkerThreadPool.add_group_task(_gen_plane, SX, -1, true, "CaveField")
 	WorkerThreadPool.wait_for_group_task_completion(gid)
+	## Seal hairline walls + dissolve floating specks before anything meshes.
+	var pid := start_polish()
+	WorkerThreadPool.wait_for_group_task_completion(pid)
 
 
 func start_deep_generation() -> int:
 	## Phase 2, NON-blocking: kick threaded carving of the deep rows and hand
 	## back the group id (the region polls it). minf() in the writer preserves
 	## any holes the player already dug into the placeholder rock.
+	shallow_only = false  ## the deep becomes real — later passes cover all rows
 	return WorkerThreadPool.add_group_task(_gen_deep_plane, SX, -1, true, "CaveFieldDeep")
 
 
 func reseed(seed_v: int) -> void:
 	## New bones for the underground — every carver rolls new dice. The strata
 	## banding keeps its seed (the rock TYPE doesn't change, just its shape).
-	for n: FastNoiseLite in [_worm_a, _worm_b, _worm_r, _cheese, _crack_a, _crack_b, _vastn]:
+	for n: FastNoiseLite in [_worm_a, _worm_b, _worm_r, _cheese, _crack_a, _crack_b, _zone]:
 		n.seed = seed_v
 		seed_v = seed_v * 31 + 17
+
+
+func start_polish() -> int:
+	## Second pass over the carved field, threaded (center-writes only, so
+	## planes can run in parallel):
+	##   1) WALL THICKENING — air beside a 1-sample-thin rock wall fills in,
+	##      so no face is ever thinner than ~1.6 voxels: the see-through
+	##      pinch-cracks between rocks close for good.
+	##   2) DESPECKLE — a rock sample with no rock neighbours is a floating
+	##      shard touching the world at nothing but tips; it dissolves.
+	return WorkerThreadPool.add_group_task(_polish_plane, SX, -1, true, "CaveFieldPolish")
+
+
+func _polish_plane(i: int) -> void:
+	if i < 2 or i > SX - 3:
+		return
+	var j0 := J_DEEP if shallow_only else 2
+	for j in range(j0, J_RESET_TOP):
+		for k in range(2, SZ - 2):
+			var id := (i * SY + j) * SZ + k
+			var d := data[id]
+			if d > 0.0:
+				if data[((i - 1) * SY + j) * SZ + k] <= 0.0 and data[((i + 1) * SY + j) * SZ + k] <= 0.0 \
+						and data[(i * SY + j - 1) * SZ + k] <= 0.0 and data[(i * SY + j + 1) * SZ + k] <= 0.0 \
+						and data[(i * SY + j) * SZ + k - 1] <= 0.0 and data[(i * SY + j) * SZ + k + 1] <= 0.0:
+					data[id] = -0.2  ## floating speck — gone
+			else:
+				## Thin-wall check along each axis: rock right beside me whose
+				## far side is air again = a 1-sample wall — I become rock,
+				## and the wall is two samples thick from now on.
+				if (data[((i - 1) * SY + j) * SZ + k] > 0.0 and data[((i - 2) * SY + j) * SZ + k] <= 0.0) \
+						or (data[((i + 1) * SY + j) * SZ + k] > 0.0 and data[((i + 2) * SY + j) * SZ + k] <= 0.0) \
+						or (data[(i * SY + j - 1) * SZ + k] > 0.0 and data[(i * SY + j - 2) * SZ + k] <= 0.0) \
+						or (data[(i * SY + j + 1) * SZ + k] > 0.0 and data[(i * SY + j + 2) * SZ + k] <= 0.0) \
+						or (data[(i * SY + j) * SZ + k - 1] > 0.0 and data[(i * SY + j) * SZ + k - 2] <= 0.0) \
+						or (data[(i * SY + j) * SZ + k + 1] > 0.0 and data[(i * SY + j) * SZ + k + 2] <= 0.0):
+					data[id] = 0.3
 
 
 func start_reset_generation() -> int:
@@ -222,11 +265,13 @@ func _gen_rows(i: int, row0: int, row1: int, preserve: bool, kk0 := 0, kk1 := SZ
 			var base := -wy * 0.8
 			var depth := -wy
 			for k in range(kk0, kk1):
-				## Map-rim columns are forced AIR so the mesher closes the
-				## world with real edge walls; the bottom row is forced ROCK —
-				## the world has a floor.
-				if i == 0 or k == 0 or i == SX - 1 or k == SZ - 1:
-					data[(i * SY + j) * SZ + k] = -1.0
+				## THE WORLD'S EDGE: no wall — the ground runs flat and uncarved
+				## to the boundary and simply ENDS (step off and you fall; the
+				## safety net catches the player). Caves still taper shut well
+				## before here (carver edge fade), and the outer shells stay
+				## unmineable so nobody digs a hole out the side of the world.
+				if i <= 1 or k <= 1 or i >= SX - 2 or k >= SZ - 2:
+					data[(i * SY + j) * SZ + k] = clampf(base, -4.0, 4.0)
 					continue
 				if j == 0:
 					data[(i * SY + j) * SZ + k] = 1.0
@@ -247,33 +292,47 @@ func _gen_rows(i: int, row0: int, row1: int, preserve: bool, kk0 := 0, kk1 := SZ
 						var h := MOUND_H * u + band.get_noise_3d(wx * 1.7, 0.0, wz * 1.7) * 0.5 * u
 						d = maxf(d, (h - wy) * 0.8)
 				## Carvers only wake below a ~2.2 m rock roof (the mouths are
-				## the honest ways in — until a pickaxe makes another).
-				var guard := clampf((depth - 2.2) / 2.5, 0.0, 1.0)
+				## the honest ways in — until a pickaxe makes another). And
+				## they DIE OUT approaching the rim wall: every tunnel tapers,
+				## pinches, and ENDS naturally in solid rock before the edge —
+				## no chopped-off cave faces, nowhere to fall out of the world.
+				var edge_m := float(mini(mini(i, SX - 1 - i), mini(k, SZ - 1 - k))) * VOX
+				var guard := clampf((depth - 2.2) / 2.5, 0.0, 1.0) \
+					* clampf((edge_m - 6.0) / 14.0, 0.0, 1.0)
 				if guard > 0.0:
-					## SPATIAL vastness: a slow noise decides which stretches
-					## of the underground are grand halls and which are tight
-					## worm-warrens — the caves change character as they run.
-					var vloc := clampf(_vastn.get_noise_2d(wx, wz) * 1.1 + 0.55, 0.0, 1.15)
+					## THE ZONED UNDERGROUND — deliberate districts instead of
+					## everything-everywhere chaos. One slow smooth noise deals
+					## the map into three characters, parameters blending at
+					## the borders:
+					##   WARRENS ..... tight round tunnels, walkable, cracked
+					##   GALLERIES ... WIDE corridors squashed flat top+bottom
+					##   HALLS ....... where it truly opens up (the caverns)
+					var zv := _zone.get_noise_2d(wx, wz)
+					var gal := smoothstep(-0.2, 0.05, zv) * (1.0 - smoothstep(0.3, 0.55, zv))
+					var hall := smoothstep(0.3, 0.55, zv)
+					var warren := 1.0 - smoothstep(-0.2, 0.05, zv)
 					var carve := 0.0
 					## Worm tunnels: near the crossing lines of two noises.
-					## Radius rides a third noise — swelling into halls,
-					## pinching to squeezes, entirely on its own.
-					var wa := _worm_a.get_noise_3d(wx, wy * 1.6, wz)
-					var wb := _worm_b.get_noise_3d(wx, wy * 1.6, wz)
-					var wr := 1.9 + vloc * 1.4 + _worm_r.get_noise_3d(wx, wy, wz) * 1.5 \
-						+ clampf((depth - 6.0) / 26.0, 0.0, 1.0) * 1.2
+					## Galleries compress the noise VERTICALLY (flat lids and
+					## floors), widen the bore, and steady the radius wobble.
+					var ys := 1.6 + gal * 1.1
+					var wa := _worm_a.get_noise_3d(wx, wy * ys, wz)
+					var wb := _worm_b.get_noise_3d(wx, wy * ys, wz)
+					var deep_ramp := clampf((depth - 6.0) / 26.0, 0.0, 1.0)
+					var wr := 1.9 + gal * 1.8 + hall * 0.5 \
+						+ _worm_r.get_noise_3d(wx, wy, wz) * (1.5 - gal * 0.7) \
+						+ deep_ramp * 3.0
+					wr = maxf(wr, 2.0 + deep_ramp * 2.4)  ## never pinches shut down deep
 					carve = maxf(carve, wr - sqrt(wa * wa + wb * wb) * 21.0)
-					## Cheese caverns: fat low-frequency blobs, deeper = bigger.
-					## Vast stretches open them earlier, wider, MUCH taller.
-					var cramp := clampf((depth - (8.0 - vloc * 2.0)) / 7.0, 0.0, 1.0)
+					## Caverns belong to the HALLS (a whisper elsewhere).
+					var cramp := clampf((depth - 6.5) / 7.0, 0.0, 1.0) * (0.12 + hall * 0.88)
 					if cramp > 0.0:
 						var cv := _cheese.get_noise_3d(wx, wy * 1.35, wz)
-						carve = maxf(carve, (cv - (0.38 - vloc * 0.10)) * (17.0 + vloc * 8.0) * cramp)
-					## Cracks: thin, tall seams — narrow but fitable, and they
-					## love connecting systems that never planned to meet.
+						carve = maxf(carve, (cv - (0.38 - hall * 0.12)) * (17.0 + hall * 9.0) * cramp)
+					## Cracks thread the WARRENS — elsewhere they barely whisper.
 					var ca := _crack_a.get_noise_3d(wx, wy * 0.55, wz)
 					var cb := _crack_b.get_noise_3d(wx, wy * 0.55, wz)
-					carve = maxf(carve, 0.62 + vloc * 0.15 - sqrt(ca * ca + cb * cb) * 24.0)
+					carve = maxf(carve, 0.48 + warren * 0.16 - sqrt(ca * ca + cb * cb) * 24.0)
 					if carve > 0.0:
 						d = minf(d, -carve * guard)
 				## The mouth tunnels ignore the roof guard — they ARE the
@@ -325,14 +384,14 @@ func carve_sphere(center: Vector3, r: float, j_floor := 1) -> Array[Vector3i]:
 	## j_floor > 1 = the deep rows are mid-generation and briefly off limits.
 	var lo := ((center - Vector3(r, r, r)) - origin) / VOX
 	var hi := ((center + Vector3(r, r, r)) - origin) / VOX
-	## Rim columns and the bottom row are protected — the block stays sealed
-	## no matter how long you swing.
-	var i0 := maxi(int(floor(lo.x)), 1)
+	## The rim WALL (outer 2 shells) and the bottom row are protected — the
+	## world stays sealed no matter how long you swing.
+	var i0 := maxi(int(floor(lo.x)), 2)
 	var j0 := maxi(int(floor(lo.y)), j_floor)
-	var k0 := maxi(int(floor(lo.z)), 1)
-	var i1 := mini(int(ceil(hi.x)), SX - 2)
+	var k0 := maxi(int(floor(lo.z)), 2)
+	var i1 := mini(int(ceil(hi.x)), SX - 3)
 	var j1 := mini(int(ceil(hi.y)), SY - 1)
-	var k1 := mini(int(ceil(hi.z)), SZ - 2)
+	var k1 := mini(int(ceil(hi.z)), SZ - 3)
 	if i0 > i1 or j0 > j1 or k0 > k1:
 		return []
 	var changed := false
@@ -396,7 +455,10 @@ func reachable_air(max_nodes := 60000) -> Array[Vector3i]:
 		for n: Vector3i in [Vector3i(2, 0, 0), Vector3i(-2, 0, 0), Vector3i(0, 2, 0),
 				Vector3i(0, -2, 0), Vector3i(0, 0, 2), Vector3i(0, 0, -2)]:
 			var nxt := cur + n
-			if seen.has(nxt) or not _air_at(nxt):
+			## Midpoint check too: the stride-2 walk must never HOP a rock
+			## wall into a sealed pocket — content only ever spawns in air
+			## that genuinely connects to a mouth.
+			if seen.has(nxt) or not _air_at(nxt) or not _air_at(cur + n / 2):
 				continue
 			seen[nxt] = true
 			queue.append(nxt)

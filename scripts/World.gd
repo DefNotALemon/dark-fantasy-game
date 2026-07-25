@@ -34,38 +34,70 @@ var _ambient_scale := 1.0  ## RT lighting trades flat ambient for bounced light
 func _ready() -> void:
 	add_to_group("world")  ## the settings menu finds the lighting through this
 	_rng.seed = 20260630  ## fixed seed = same world each run (change for variety)
+	_build_blackout()  ## FIRST: the world builds behind a black curtain
 	_build_environment()
 	_pick_cave_sites()
 	_build_ground()
 	_build_forest()
 	_build_rocks()
 	_build_caves()
+	_build_border()
 	_build_camp()
 	_spawn_player()
 	_spawn_enemies()
 	_build_titles()
+	## Hold the curtain (and the player's hands) until the deep + content are
+	## fully real — no first-minute lag spikes reach the eye.
+	if _player:
+		_player.input_locked = true
 
 
 func _process(delta: float) -> void:
 	if _player == null or _env == null:
 		return
 
-	## Safety net: fell out of the world somehow — back to the spawn.
-	if _player.global_position.y < -40.0:
+	## Safety net: fell out of the world somehow — OR ended up beyond the
+	## border walls (old saves, climb edge cases) — back to the spawn.
+	if _player.global_position.y < -40.0 \
+			or absf(_player.global_position.x) > 103.5 or absf(_player.global_position.z) > 103.5:
 		_player.global_position = Vector3(0, 2, 0)
 		_player.velocity = Vector3.ZERO
 
-	## Underground detection drives the ambience shift + location titles.
+	## And never trapped INSIDE the rock (slipped through some sliver into
+	## the space between caves): a full second buried = pulled home.
+	if _region != null and _region.is_fully_loaded() and _player.global_position.y < 0.0 \
+			and _region.field.is_rock(_player.global_position + Vector3.UP * 0.9):
+		_in_rock_t += delta
+		if _in_rock_t > 1.0:
+			_in_rock_t = 0.0
+			_player.global_position = Vector3(0, 2, 0)
+			_player.velocity = Vector3.ZERO
+			_show_title("The earth spat you out")
+	else:
+		_in_rock_t = 0.0
+
+	## Underground detection still fires the location titles (a threshold is
+	## right for an EVENT)...
 	var below := _player.global_position.y < -3.0
 	if below != _underground:
 		_underground = below
 		_show_title("The Hollow Depths" if below else "The Dusk Forest")
 
-	## Surface targets ride the day/night clock; the caves ignore the sky.
-	var want_ambient := CAVE_AMBIENT if _underground else (_daynight.surf_ambient if _daynight else BASE_AMBIENT)
-	var want_fog_col := CAVE_FOG_COLOR if _underground else (_daynight.surf_fog if _daynight else BASE_FOG_COLOR)
-	var k := 1.0 - pow(0.15, delta)  ## framerate-independent smoothing
-	_env.fog_density = lerpf(_env.fog_density, CAVE_FOG if _underground else BASE_FOG, k)
+	## ...but the LIGHT never flips at a line: it rides DEPTH. Descending a
+	## throat dims by the meter — full daylight above -1.2, full cave gloom by
+	## -8.5, smoothstepped between — so the dark closes over you the way deep
+	## water does, and climbing out returns the sky shade by shade. A gentle
+	## ease then chases that blend, so even a straight fall down a shaft
+	## never snaps the eye. Surface targets still ride the day/night clock.
+	var depth_u := clampf((-1.2 - _player.global_position.y) / 7.3, 0.0, 1.0)
+	depth_u = depth_u * depth_u * (3.0 - 2.0 * depth_u)
+	var s_amb := _daynight.surf_ambient if _daynight else BASE_AMBIENT
+	var s_fog_col := _daynight.surf_fog if _daynight else BASE_FOG_COLOR
+	var want_ambient := lerpf(s_amb, CAVE_AMBIENT, depth_u)
+	var want_fog := lerpf(BASE_FOG, CAVE_FOG, depth_u)
+	var want_fog_col := s_fog_col.lerp(CAVE_FOG_COLOR, depth_u)
+	var k := 1.0 - pow(0.30, delta)  ## framerate-independent smoothing (unhurried)
+	_env.fog_density = lerpf(_env.fog_density, want_fog, k)
 	_env.ambient_light_energy = lerpf(_env.ambient_light_energy, want_ambient * _ambient_scale, k)
 	_env.fog_light_color = _env.fog_light_color.lerp(want_fog_col, k)
 	## Underground the sky goes DARK — the heavy cave fog fully covers it, so
@@ -73,6 +105,23 @@ func _process(delta: float) -> void:
 	## The brightness at a mouth comes from its own light shaft (god rays,
 	## CaveRegion._dress_mouth), not from the sky peeking through the fog.
 	_env.fog_sky_affect = lerpf(_env.fog_sky_affect, 1.0, k)
+
+	## Startup curtain: lift it only when the whole underground (and its
+	## content) is genuinely finished — the game begins already smooth.
+	if _loading and _region != null and _region.is_fully_loaded():
+		_loading = false
+		set_blackout(false, "")
+		if _player and _player.sleep_phase == "":
+			_player.input_locked = false
+
+	## Random events: now and then, the sky lets something go.
+	_meteor_t += delta
+	if _next_meteor <= 0.0:
+		_next_meteor = _rng.randf_range(180.0, 320.0)  ## first star mid-session
+	elif _meteor_t >= _next_meteor:
+		_meteor_t = 0.0
+		_next_meteor = _rng.randf_range(260.0, 460.0)
+		drop_meteor()
 
 	## Title fade: quick in, hold, ease out.
 	if _title_timer > 0.0:
@@ -199,6 +248,122 @@ func _build_ground() -> void:
 
 
 var _region: CaveRegion = null  ## THE underground — one field under the whole map
+var _meteor_t := 0.0            ## random event clock: falling stars
+var _next_meteor := 0.0
+var _loading := true            ## startup curtain still down
+var _in_rock_t := 0.0           ## seconds the player's head has been in solid rock
+var _blackout: ColorRect
+var _black_label: Label
+
+
+func _build_blackout() -> void:
+	## The loading curtain: pure black, over EVERYTHING (layer 80), with a
+	## quiet line of text. Used at startup and while sleep shifts the deep.
+	var layer := CanvasLayer.new()
+	layer.layer = 80
+	add_child(layer)
+	_blackout = ColorRect.new()
+	_blackout.color = Color(0, 0, 0, 1)
+	_blackout.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(_blackout)
+	_black_label = Label.new()
+	_black_label.text = "The Withering"
+	_black_label.add_theme_font_size_override("font_size", 30)
+	_black_label.modulate = Color(0.75, 0.78, 0.85, 0.85)
+	_black_label.set_anchors_preset(Control.PRESET_CENTER)
+	_black_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_blackout.add_child(_black_label)
+
+
+func set_blackout(on: bool, text := "") -> void:
+	if _blackout == null:
+		return
+	if text != "":
+		_black_label.text = text
+	if on:
+		_blackout.visible = true
+		_blackout.modulate = Color(1, 1, 1, 0.0)
+		var tw := create_tween()
+		tw.tween_property(_blackout, "modulate:a", 1.0, 0.3)
+	else:
+		var tw := create_tween()
+		tw.tween_property(_blackout, "modulate:a", 0.0, 0.7)
+		tw.tween_callback(func() -> void: _blackout.visible = false)
+
+
+func is_world_ready() -> bool:
+	return _region != null and _region.is_fully_loaded()
+
+
+func drop_meteor() -> void:
+	## A STAR FALLS (random event, also the M-menu dev button): picks a spot
+	## away from the player and the permanent caves, streaks a burning light
+	## down the sky, and hands the impact to the region — crater + a fused
+	## BALL of meteoric ore in the middle (Terraria's gift, our way).
+	var spot := Vector3.INF
+	for _try in range(40):
+		var ang := _rng.randf() * TAU
+		var rad := sqrt(_rng.randf()) * (WORLD_RADIUS - 8.0)
+		var p := Vector3(cos(ang) * rad, 0, sin(ang) * rad)
+		if _player and p.distance_to(_player.global_position) < 30.0:
+			continue  ## never on your head — it lands "off screen"
+		var ok := true
+		for site in _cave_sites:
+			if p.distance_to(site.mouth as Vector3) < 28.0:
+				ok = false  ## clear of the permanent caves
+		if ok:
+			spot = p
+			break
+	if spot == Vector3.INF:
+		return
+	## The streak: a burning star dragged down the sky into the ground.
+	var streak := Node3D.new()
+	add_child(streak)
+	var ball := MeshInstance3D.new()
+	var bm := SphereMesh.new()
+	bm.radius = 0.8
+	bm.height = 1.6
+	bm.radial_segments = 8
+	bm.rings = 4
+	ball.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.5, 0.15)
+	mat.emission_energy_multiplier = 6.0
+	mat.albedo_color = Color(0.25, 0.12, 0.06)
+	ball.material_override = mat
+	streak.add_child(ball)
+	var l := OmniLight3D.new()
+	l.light_color = Color(1.0, 0.55, 0.2)
+	l.light_energy = 4.0
+	l.omni_range = 30.0
+	l.shadow_enabled = false
+	streak.add_child(l)
+	streak.global_position = spot + Vector3(60.0, 90.0, 34.0)
+	var tw := create_tween()
+	tw.tween_property(streak, "global_position", spot + Vector3.UP * 0.6, 0.85) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(_meteor_impact.bind(spot, streak))
+
+
+func _meteor_impact(spot: Vector3, streak: Node3D) -> void:
+	if is_instance_valid(streak):
+		streak.queue_free()
+	if _region == null or not _region.meteor_strike(spot):
+		_next_meteor = 15.0  ## ground busy (deep threads) — the sky tries again shortly
+		_meteor_t = 0.0
+		return
+	if _player:
+		var d := _player.global_position.distance_to(spot)
+		_player.cam_shake = maxf(float(_player.cam_shake), clampf(0.62 - d * 0.004, 0.12, 0.62))
+		_player.call("_add_log_msg", "A star has fallen to the %s!" % _compass(spot - _player.global_position),
+			Color(1.0, 0.62, 0.28))
+	_show_title("A Star Falls")
+
+
+func _compass(v: Vector3) -> String:
+	var a := fposmod(rad_to_deg(atan2(-v.x, v.z)) + 22.5, 360.0)
+	return ["south", "south-west", "west", "north-west", "north", "north-east", "east", "south-east"][int(a / 45.0) % 8]
 
 
 func is_dark_out() -> bool:
@@ -256,6 +421,25 @@ func sleep_at_bed() -> bool:
 	return true
 
 
+func _build_border() -> void:
+	## INVISIBLE border walls just inside the mesh edge: collision only, no
+	## mesh — you cannot walk, fall, mantle, or be thrown out of the map.
+	## Tall enough that no climb ever finds their top.
+	var half := 103.0
+	for w in [[Vector3(half, 10, 0), Vector3(2, 120, half * 2 + 4)],
+			[Vector3(-half, 10, 0), Vector3(2, 120, half * 2 + 4)],
+			[Vector3(0, 10, half), Vector3(half * 2 + 4, 120, 2)],
+			[Vector3(0, 10, -half), Vector3(half * 2 + 4, 120, 2)]]:
+		var body := StaticBody3D.new()
+		body.position = w[0]
+		add_child(body)
+		var col := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = w[1]
+		col.shape = shape
+		body.add_child(col)
+
+
 func _build_caves() -> void:
 	## Caves 2.0 (docs/CAVES_PLAN.md): ONE map-wide CaveRegion — the organic
 	## noise caves run under the entire world, its grass top IS the ground,
@@ -281,61 +465,12 @@ func _build_forest() -> void:
 		add_child(_make_tree(pos))
 
 func _make_tree(pos: Vector3) -> StaticBody3D:
-	var tree := StaticBody3D.new()
+	## Trees are real objects now (ChopTree.gd): the axe eats a wedge out of
+	## the trunk, the trunk breaks at that wedge, the canopy comes apart on
+	## impact and the trunk splits into logs. All of that lives with the tree.
+	var tree := ChopTree.make(_rng)
 	tree.position = pos
 	tree.rotation.y = _rng.randf() * TAU
-
-	var height := _rng.randf_range(3.5, 7.0)
-	var trunk_r := _rng.randf_range(0.18, 0.30)
-
-	## Choppable: the war axe fells these (Player._chop_tree) — chips fly per
-	## bite, big trees take a couple more, then TIMBER.
-	tree.add_to_group("trees")
-	tree.set_meta("chops", 3 + int(height / 2.6))  ## 4-5 bites by size
-	tree.set_meta("height", height)
-
-	## Trunk (low-poly cylinder).
-	var trunk := MeshInstance3D.new()
-	var tm := CylinderMesh.new()
-	tm.top_radius = trunk_r * 0.7
-	tm.bottom_radius = trunk_r
-	tm.height = height
-	tm.radial_segments = 6
-	trunk.mesh = tm
-	trunk.position = Vector3(0, height * 0.5, 0)
-	var trunk_mat := StandardMaterial3D.new()
-	trunk_mat.albedo_color = Color(0.22, 0.15, 0.10).lerp(Color(0.30, 0.20, 0.13), _rng.randf())
-	trunk_mat.roughness = 1.0
-	trunk.material_override = trunk_mat
-	tree.add_child(trunk)
-
-	## Foliage: 3 stacked faceted cones for a low-poly conifer.
-	var foliage_mat := StandardMaterial3D.new()
-	foliage_mat.albedo_color = Color(0.10, 0.26, 0.13).lerp(Color(0.16, 0.34, 0.18), _rng.randf())
-	foliage_mat.roughness = 1.0
-	var layers := 3
-	for l in range(layers):
-		var cone := MeshInstance3D.new()
-		var cm := CylinderMesh.new()
-		var t := float(l) / float(layers - 1)
-		cm.top_radius = 0.0
-		cm.bottom_radius = lerp(2.0, 0.7, t) * _rng.randf_range(0.9, 1.1)
-		cm.height = 2.0
-		cm.radial_segments = 6
-		cone.mesh = cm
-		cone.material_override = foliage_mat
-		cone.position = Vector3(0, height * 0.62 + l * 1.35, 0)
-		tree.add_child(cone)
-
-	## Collision so you can't walk through trunks.
-	var col := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = max(0.4, trunk_r + 0.15)
-	cap.height = height
-	col.shape = cap
-	col.position = Vector3(0, height * 0.5, 0)
-	tree.add_child(col)
-
 	return tree
 
 func _build_rocks() -> void:
@@ -347,6 +482,11 @@ func _build_rocks() -> void:
 		rock.position = pos
 		add_child(rock)
 		var s := _rng.randf_range(0.8, 2.4)
+		## Mineable: the pickaxe chips it apart (Player._chop_boulder) —
+		## bigger boulders take more bites and shed more stone.
+		rock.add_to_group("boulders")
+		rock.set_meta("bites", 2 + int(s * 1.2))
+		rock.set_meta("size", s)
 		var col := CollisionShape3D.new()
 		var bshape := BoxShape3D.new()
 		bshape.size = Vector3(s, s * 1.2, s)
@@ -461,3 +601,80 @@ func _on_sky_title(text: String) -> void:
 	## Daybreak / Nightfall banners — only where you can actually see the sky.
 	if not _underground:
 		_show_title(text)
+
+
+## ============================== Save / load ================================
+## What the surface remembers. The caves are their own question (CaveRegion
+## saves a sphere of dug rock around wherever you were); up here it's the hour
+## of the day, which trees are still standing and how deep the axe got into
+## each one, where the logs and the loot came to rest, and every square of
+## grass the sword has been through.
+
+
+func save_state() -> Dictionary:
+	var trees: Array = []
+	for group in ["trees", "tree_stumps"]:
+		for t in get_tree().get_nodes_in_group(group):
+			if t is ChopTree:
+				trees.append((t as ChopTree).save_dict())
+	var logs: Array = []
+	for l in get_tree().get_nodes_in_group("carry_logs"):
+		if l is CarryLog:
+			logs.append((l as CarryLog).save_dict())
+	var dropped: Array = []
+	for d in get_tree().get_nodes_in_group("dropped_items"):
+		var di := d as DroppedItem
+		if di != null:
+			dropped.append({"item": di.item.duplicate(true), "pos": di.global_position})
+	var beds: Array = []
+	for b in get_tree().get_nodes_in_group("beds"):
+		if b is Node3D:
+			beds.append({"pos": (b as Node3D).global_position, "rot_y": (b as Node3D).rotation.y})
+	var out := {
+		"hour": _daynight.hour if _daynight else 17.0,
+		"trees": trees, "logs": logs, "dropped": dropped, "beds": beds,
+	}
+	if _region != null:
+		out["cave"] = _region.save_state()
+		if _region.grass() != null:
+			out["grass"] = _region.grass().save_state()
+	return out
+
+
+func apply_state(d: Dictionary) -> void:
+	if _daynight:
+		_daynight.hour = float(d.get("hour", 17.0))
+	## Sweep the surface clean, then lay the saved one back down.
+	for group in ["trees", "tree_stumps", "carry_logs", "dropped_items", "beds"]:
+		for n in get_tree().get_nodes_in_group(group):
+			(n as Node).queue_free()
+	for td in d.get("trees", []):
+		var t := ChopTree.from_dict(td as Dictionary)
+		t.position = (td as Dictionary).get("pos", Vector3.ZERO)
+		t.rotation.y = float((td as Dictionary).get("rot_y", 0.0))
+		add_child(t)
+	for ld in d.get("logs", []):
+		var l := CarryLog.from_dict(ld as Dictionary)
+		add_child(l)
+		l.global_position = (ld as Dictionary).get("pos", Vector3.ZERO)
+		l.rotation = (ld as Dictionary).get("rot", Vector3.ZERO)
+	for dd in d.get("dropped", []):
+		var di := DroppedItem.make(((dd as Dictionary).get("item", {}) as Dictionary).duplicate(true))
+		add_child(di)
+		di.global_position = (dd as Dictionary).get("pos", Vector3.ZERO)
+	for bd in d.get("beds", []):
+		var bed := Bedroll.new()
+		add_child(bed)
+		bed.global_position = (bd as Dictionary).get("pos", Vector3.ZERO)
+		bed.rotation.y = float((bd as Dictionary).get("rot_y", 0.0))
+	if _region != null:
+		if _region.grass() != null and d.has("grass"):
+			_region.grass().apply_state(d["grass"] as Dictionary)
+		if d.has("cave") and _region.apply_state(d["cave"] as Dictionary):
+			## The underground has to redraw itself from the saved seed and
+			## take your dig back. Hold the curtain the same way startup does —
+			## _process lifts it when the region is genuinely finished.
+			_loading = true
+			set_blackout(true, "Remembering the world...")
+			if _player:
+				_player.input_locked = true

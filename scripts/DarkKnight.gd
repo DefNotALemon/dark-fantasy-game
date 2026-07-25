@@ -31,6 +31,7 @@ func _init() -> void:
 	strong_min_range = 0.0
 	strong_max_range = 5.0
 	telegraph_color = Color(0.70, 0.30, 1.0)
+	climb_speed = 2.4   ## armor and all — the cursed don't tire on a wall
 	## Gait: measured, disciplined strides (the buckler arm stays planted).
 	gait_rate = 0.9
 	stride_deg = 26.0

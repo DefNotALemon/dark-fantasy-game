@@ -120,6 +120,7 @@ var _resting := false
 var _magnet := false
 var _accel := 0.0
 var _bob := 0.0
+var _refoot := randf_range(0.3, 0.6)  ## staggered footing re-checks at rest
 
 ## Coin state machine: "fall" -> (optionally "roll") -> "settle" -> "rest".
 var _phase := "fall"
@@ -164,6 +165,7 @@ func _physics_process(delta: float) -> void:
 		_bob += delta
 		global_position.y += sin(_bob * 3.0) * 0.05 * delta
 		_check_magnet()
+		_recheck_footing(delta)
 		return
 	_ballistic(delta)
 	var hit := _ground_check()
@@ -202,6 +204,7 @@ func _coin_process(delta: float) -> void:
 			_settle(delta)
 		_:
 			_check_magnet()
+			_recheck_footing(delta)
 
 
 func _bounce() -> void:
@@ -336,6 +339,24 @@ func _glance_off(who: Node3D) -> void:
 		away = Vector3(randf() - 0.5, 0.0, randf() - 0.5)
 	away = away.normalized()
 	_vel = away * randf_range(1.2, 2.2) + Vector3.UP * randf_range(1.5, 2.5)
+
+
+func _recheck_footing(delta: float) -> void:
+	## The floor a pickup rests on can be DUG away (or redrawn by a sleep
+	## shift). Re-check now and then; nothing solid below = fall again, all
+	## the way down to the true ground.
+	_refoot -= delta
+	if _refoot > 0.0:
+		return
+	_refoot = randf_range(0.3, 0.6)
+	var q := PhysicsRayQueryParameters3D.create(
+		global_position + Vector3.UP * 0.25, global_position + Vector3.DOWN * 0.7)
+	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		_resting = false
+		_phase = "fall"     ## coins tumble again; essence just drops
+		_bounces = 0
+		_vel = Vector3.ZERO
 
 
 func _check_magnet() -> void:

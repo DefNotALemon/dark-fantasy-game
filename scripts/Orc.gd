@@ -30,6 +30,7 @@ func _init() -> void:
 	strong_min_range = 2.5
 	strong_max_range = 7.0
 	telegraph_color = Color(0.95, 0.25, 0.05)
+	climb_speed = 2.7   ## muscles a wall the way it muscles everything else
 	## Gait: hard, eager strides.
 	gait_rate = 1.0
 	stride_deg = 30.0

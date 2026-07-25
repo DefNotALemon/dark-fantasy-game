@@ -27,6 +27,17 @@ var rideable := false         ## wild horses never take a rider
 var trust_broken := false     ## hurt it once and this is forever
 var skittish_radius := 8.0    ## wild horses bolt inside this (0 = calm near people)
 
+## --- The panic bolt: no horse goes willingly underground, and no horse
+## shields a rider forever. Ride one down a cave throat (or use up its last
+## heart) and it rears, hurls you off, and BOLTS — out of the dark first if
+## it must, then 8-13 honest meters past the spot where it found open ground
+## before it lets itself settle. Terror, not betrayal — trust survives. ---
+const CAVE_PANIC_Y := -2.2    ## this deep with a rider aboard = the ride is over
+var _surface_pos := Vector3.ZERO   ## last footing that still felt like daylight
+var _panic_t := 0.0                ## safety clock on a bolt (never runs forever)
+var _panic_from := Vector3.INF     ## stamped where hooves find open ground; the bolt ends past it
+var _panic_range := 10.0           ## 8-13 m, rolled fresh per panic
+
 ## --- Riding (rider = the Player while mounted; it feeds the reins each frame) ---
 var rider: CharacterBody3D = null
 var ride_input := Vector2.ZERO   ## camera-relative reins (x strafe, y forward)
@@ -50,7 +61,7 @@ var coat := Color(0.30, 0.20, 0.12)
 
 func _init() -> void:
 	display_name = "Horse"
-	max_health = 90.0
+	max_health = 3.0  ## horses count HITS, not damage: 3 hearts (see hearts below)
 	wander_speed = 1.7
 	chase_speed = 9.0        ## its "combat" is FLIGHT — and horses are fast
 	attack_range = 0.0       ## it never bites
@@ -58,6 +69,7 @@ func _init() -> void:
 	strong_damage = KICK_DAMAGE   ## the bestiary's "Fury" line = the kick
 	aggro_radius = 0.0       ## never hunts anyone
 	leash_radius = 26.0      ## how far it runs before settling back to graze
+	can_climb = false        ## flight stays on the ground — no wall-scaling horses
 	xp_tier = 1
 	families = ["beast"]
 	gait_rate = 1.15
@@ -68,6 +80,7 @@ func _init() -> void:
 func _ready() -> void:
 	super()
 	add_to_group("horses")
+	_surface_pos = global_position  ## horses spawn under open sky
 
 
 func request_jump() -> void:
@@ -77,6 +90,13 @@ func request_jump() -> void:
 func saddle_world() -> Vector3:
 	## Where the rider sits (world space).
 	return to_global(Vector3(0, 1.16, -0.05))
+
+
+func can_carry() -> bool:
+	## Willing AND able: saddled, trusting, hearts to spare, not mid-panic.
+	## (Player._try_mount_toggle asks before every mount — a bolting or
+	## spent horse needs its breath and its hearts back first.)
+	return rideable and not trust_broken and hearts > 0 and _panic_t <= 0.0
 
 
 ## ============================ Behaviour ===================================
@@ -105,10 +125,29 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 
+	if _panic_t > 0.0:
+		## Bolting: nothing else matters until it's out and CLEAR.
+		_panic_t -= delta
+		_do_panic_flee(delta)
+		_update_locomotion(delta)
+		_animate(delta)
+		move_and_slide()
+		if _panic_t <= 0.0 or _panic_cleared():
+			_panic_t = 0.0
+			_set_agitated(false)  ## far enough — settle, breathe, graze
+		return
+
 	super(delta)
 
 
 func _do_ridden(delta: float) -> void:
+	## Remember the last open-sky footing — and the moment a cave throat
+	## swallows the body, the ride is OVER: rear, throw, bolt for the light.
+	if is_on_floor() and global_position.y > -0.8:
+		_surface_pos = global_position
+	if global_position.y < CAVE_PANIC_Y:
+		_cave_panic()
+		return
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	elif _ride_jump:
@@ -171,6 +210,71 @@ func _do_kick(delta: float) -> void:
 		_set_agitated(true)  ## now RUN
 
 
+func _cave_panic() -> void:
+	## The dark closed over its ears — no reins can argue with this. The rider
+	## leaves the saddle the hard way; the horse takes the throat back up at a
+	## blind gallop and keeps running. Trust survives: terror, not betrayal.
+	var pl := rider
+	_buck_off()
+	_start_panic()
+	if pl != null and pl.has_method("notify"):
+		pl.notify("The horse rears — it will NOT go underground!", Color(1.0, 0.75, 0.35))
+
+
+func _start_panic() -> void:
+	## One bolt, two legs: get OUT (if underground), then get CLEAR — the run
+	## ends 8-13 m past wherever hooves found open ground again.
+	_panic_t = 14.0
+	_panic_range = randf_range(8.0, 13.0)
+	_panic_from = global_position if global_position.y > -1.2 else Vector3.INF
+
+
+func _panic_cleared() -> bool:
+	## Clear = above ground AND far enough from the doorstep it surfaced at.
+	if global_position.y < -1.2 or _panic_from == Vector3.INF:
+		return false
+	var flat := global_position - _panic_from
+	flat.y = 0.0
+	return flat.length() >= _panic_range
+
+
+func _do_panic_flee(delta: float) -> void:
+	if not is_on_floor():
+		velocity.y -= gravity * delta
+	if global_position.y < -1.2:
+		## Underground: gallop for the last remembered daylight footing.
+		var out := _surface_pos - global_position
+		out.y = 0.0
+		if out.length() > 1.2:
+			var d := out.normalized()
+			_steer(d * chase_speed, delta, 14.0)
+			_face(d, delta, 6.0)
+		else:
+			## Right under the remembered spot but still deep — charge straight
+			## on (the ramp bends; momentum finds it).
+			var ahead := -transform.basis.z
+			ahead.y = 0.0
+			if ahead.length() > 0.01:
+				_steer(ahead.normalized() * chase_speed, delta, 10.0)
+		return
+	## Open ground: stamp the doorstep the first time hooves find it, then put
+	## honest meters between horse and hole.
+	if _panic_from == Vector3.INF:
+		_panic_from = global_position
+	var away := global_position - _panic_from
+	away.y = 0.0
+	if away.length() < 0.5:
+		## Fresh out of the hole — bearing is ambiguous, so run from the rider
+		## (or just keep charging the way the body already points).
+		var pl := _get_player()
+		away = (global_position - pl.global_position) if pl != null else -transform.basis.z
+		away.y = 0.0
+	if away.length() > 0.01:
+		away = away.normalized()
+		_steer(away * chase_speed, delta, 12.0)
+		_face(away, delta, 6.0)
+
+
 func _do_wander(delta: float) -> void:
 	## Skittish: wild (and betrayed) horses bolt when someone presses in close.
 	var r := skittish_radius
@@ -217,24 +321,137 @@ func _start_kick() -> void:
 	strong_windup = 0.0
 
 
-func take_damage(amount: float) -> void:
-	## Horses don't stagger and trade blows — they retaliate ONCE and then run.
-	## Any harm from your hand breaks its trust forever (saddled ones included).
+## --- Hearts: a horse takes 3 HITS (any hit = one heart, damage numbers be
+## damned). Three unharmed seconds regrow one heart at a time. WHO sees the
+## tally depends on who should care: with a RIDER aboard it lives on the
+## rider's HUD (Player.mount_hearts — an enemy catching your mount shows up
+## right under your own bars); loose horses hurt by the WORLD pop the ♥♥♥
+## pips over the head. Your OWN strikes get no sympathy card — you know what
+## you did (the trust break message says the rest). ---
+var hearts := 3
+var _since_hit := 999.0
+var _hearts_lbl: Label3D = null
+var _hearts_show := 0.0
+
+
+func _process(delta: float) -> void:
 	if dying:
+		if _hearts_lbl != null:
+			_hearts_lbl.visible = false
 		return
-	confused = false
-	var was_trusted := rideable and not trust_broken
-	trust_broken = true
-	health -= amount
+	_since_hit += delta
+	if hearts < 3 and _since_hit >= 3.0:
+		hearts += 1
+		health = float(hearts)
+		_since_hit = 0.0
+		## Show the heart growing back wherever the tally already lives: the
+		## rider's HUD reads it by itself; the overhead pips only wake if
+		## they were already up (a world-hurt display cycle in progress).
+		if rider == null and _hearts_show > 0.0:
+			_hearts_show = maxf(_hearts_show, 1.6)
+		_update_hearts_ui()
+	if rider != null:
+		if _hearts_lbl != null:
+			_hearts_lbl.visible = false  ## the HUD carries it while ridden
+	elif _hearts_show > 0.0:
+		_hearts_show -= delta
+		if _hearts_lbl != null:
+			_hearts_lbl.visible = true
+			_hearts_lbl.modulate.a = clampf(_hearts_show / 0.6, 0.0, 1.0)
+	elif _hearts_lbl != null:
+		_hearts_lbl.visible = false
+
+
+func _take_heart_hit(from_player := false) -> void:
+	hearts -= 1
+	health = float(hearts)
+	_since_hit = 0.0
+	if rider != null:
+		## In the saddle the tally rides the rider's HUD — flash it awake.
+		if "mount_heart_flash" in rider:
+			rider.set("mount_heart_flash", 1.2)
+	elif not from_player:
+		## Overhead pips: for watching a horse weather the WORLD. Your own
+		## blade gets no display — the horse's opinion of you shows other ways.
+		_hearts_show = 4.0
+		_ensure_hearts_ui()
+	_update_hearts_ui()
 	hit_flash = 0.12
 	if body_mat:
 		body_mat.albedo_color = Color(0.9, 0.6, 0.55)
+
+
+func _ensure_hearts_ui() -> void:
+	if _hearts_lbl != null:
+		return
+	_hearts_lbl = Label3D.new()
+	_hearts_lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_hearts_lbl.no_depth_test = true
+	_hearts_lbl.font_size = 64
+	_hearts_lbl.pixel_size = 0.01
+	_hearts_lbl.outline_size = 18
+	_hearts_lbl.modulate = Color(1.0, 0.36, 0.42)
+	_hearts_lbl.position = Vector3(0, 2.15, 0)
+	add_child(_hearts_lbl)
+
+
+func _update_hearts_ui() -> void:
+	if _hearts_lbl != null:
+		## Filled hearts keep the left; the emptied ones stack in from the
+		## RIGHT — first hit hollows the rightmost.
+		_hearts_lbl.text = "♥".repeat(maxi(hearts, 0)) + "♡".repeat(3 - maxi(hearts, 0))
+
+
+func rider_shielded_hit() -> void:
+	## THE MOUNT IS THE GUARD (Player.take_damage routes here): a blow that
+	## lands on the rider costs the horse a HEART instead of rider health.
+	## Three of those and it has had ENOUGH — off you go, away it goes. It
+	## LIVES: hearts grow back, and shielding you breaks no trust.
+	if dying:
+		return
+	_take_heart_hit(false)
+	if hearts <= 0:
+		_enough_buck()
+
+
+func _enough_buck() -> void:
+	## The last heart spent under a rider: rear, throw, bolt — alive.
+	var pl := rider
+	_buck_off()
+	_start_panic()
+	if pl != null and pl.has_method("notify"):
+		pl.notify("The horse has had enough — it throws you and bolts!", Color(1.0, 0.75, 0.35))
+
+
+func take_damage(_amount: float, _from_pos = null, _strong = false, _throw = null, attacker: Node = null) -> void:
+	## Horses don't stagger and trade blows — they retaliate ONCE and then run.
+	## Harm from YOUR hand breaks its trust forever (saddled ones included);
+	## a goblin's club does NOT — the horse just bolts, and remembers nothing.
+	if dying:
+		return
+	confused = false
+	if attacker is Enemy:
+		## Predator, not master: pure flight — no trust lost, no kick duel.
+		_take_heart_hit(false)
+		if hearts <= 0:
+			if rider != null:
+				## Spent its last heart under you: bucked and gone, not dead.
+				_enough_buck()
+			else:
+				_die()
+			return
+		if rider == null:
+			_set_agitated(true)  ## loose horse: bolt (ridden ones keep the rider's reins)
+		return
+	var was_trusted := rideable and not trust_broken
+	trust_broken = true
+	_take_heart_hit(true)
 
 	var pl := _get_player()
 	if was_trusted and pl != null and pl.has_method("notify"):
 		pl.notify("The horse will never carry you again", Color(0.95, 0.55, 0.45))
 
-	if health <= 0.0:
+	if hearts <= 0:
 		if rider != null:
 			_buck_off()  ## it dies under you — you go down with it
 		_die()

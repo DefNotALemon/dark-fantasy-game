@@ -19,18 +19,20 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 | Space | Jump |
 | Left click | Sword: attack (flowing 1-2-3 combo) · Bow: hold to draw, release to loose · Pickaxe: chop (bites ore veins, digs cave rock) · War axe: alternating chop/cleave |
 | Right click | Sword: block · Bow: ease the string back down |
-| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full swings (overhead chop, left-to-right cleave). No material matchups yet — honest iron. **It also fells trees**: chips fly off the trunk with every bite, the trunk shivers, and on the last bite the whole tree tips, crashes (chips + a thud you feel), and yields Wood |
+| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full swings (overhead chop, left-to-right cleave). No material matchups yet — honest iron. **It also fells trees, properly**: every bite EATS a triangular wedge out of the trunk on the side you're standing (real geometry removed, pale heartwood laid open, deeper each swing), and when the wedge runs past the centre the trunk breaks *on that notch* — a stump stays rooted and everything above it goes over. When the crown hits dirt the canopy comes apart: every leaf breaks off and planes down to lie in the shape of the fallen crown, and the trunk splits into as many **logs** as the tree was metres tall |
 | Ctrl | Dash |
+| V | Camera: first person → **third person** over the right shoulder. Short press in third person **swaps shoulders**; **hold 1.5s** to glide back into first person. Every switch is animated, walls pull the camera in, and your last choice is remembered between runs |
+| C | **Stance cycle**: stand → crouch → **prone** → stand. Each step is slower, lower, and harder to spot — in tall grass calm enemies' wake radius is 60% upright, 35% crouched, **22% prone** (flat to the earth, chin over the grass line). Going prone settles slowly with a body-weight roll — that's the animation. Jumping or climbing stands you up |
 | Space | Jump — or **climb**: if there's a grabbable ledge in front of you (up to ~2.6 m), Space mantles up onto it instead, with a pull-up animation. Works mid-air (grab a lip as you fall), costs a little stamina — spam it to scale cave walls or climb out of anywhere you're stuck (dig footholds with the pickaxe if the wall's too tall) |
 | F | Interact: **sleep** at a bed (the bedroll by spawn) — sleeps to dawn, full heal, and **the underground SHIFTS**: every cave re-carves except the permanent entrance caves (24 m bubbles around each mouth, with a no-spawn barrier). Otherwise: mount / dismount a saddled horse (WASD ride — camera-steered, Shift gallop, Space jump; LMB = saddle sword sweeps) |
 | Alt / Option | Sheathe / unsheathe sword — the shield stows on your back / draws with it. **The Hunch** (settings toggle, on by default): the blade auto-draws the instant something turns hostile and auto-sheathes after 6.7 quiet seconds |
 | Q | Cycle offhand: shield → torch → shield + torch (strapped to the same arm) → empty (only items you own) |
-| E | Pick up the dropped item under your gaze — or **pack up a bedroll** (becomes a backpack item, 4 wt; click it in the Inventory to unroll it on the ground ahead — camp anywhere on the surface) |
+| E | Pick up the dropped item under your gaze — or **shoulder a log** from a felled tree (four is all a back will take; the load rides visibly on your shoulder and rolls off the moment you jump, climb, crouch, go prone, mount up, take a hit, or reach into your pack) — or **pack up a bedroll** (becomes a backpack item, 4 wt; click it in the Inventory to unroll it on the ground ahead — camp anywhere on the surface) |
 | M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) — plus a dev button that **tears open a whole new cave mouth** ~30 m ahead (quake included) |
 | G | **Creative menu (dev)**: every item in the game — sword / 5-pc armor set / raw ore for all 10 metals, plus shield, torch, pickaxe, arrows, bedroll, wood, and the junk loot |
 | Tab | Menu: **1** Inventory · **2** Stats · **3** Progression · **4** Bestiary |
 | I | Straight to the Inventory page |
-| Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch) — or closes the open menu. All menus render 67% larger |
+| Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch, **Save / Load**) — or closes the open menu. All menus render 67% larger |
 
 (Heavy/light builds and dodge are coming later — dropped from this slice for now.)
 
@@ -38,11 +40,19 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 - First-person movement with flowy momentum (eases into a stop), sprint, jump, stamina.
 - A visible first-person body + a hand holding the sword (look down to see them).
 - Three distinct, flowing swing animations chained as a 1-2-3 combo, with a stronger 3rd hit.
+- You start with the blade **sheathed** — a drawn sword should mean something.
 - Sheathe / unsheathe the sword on Alt (the blade moves to the hip, the shield to your
   back). **The Hunch**: sword + shield leap out on their own when anything turns hostile,
   and ride home after 6.7 calm seconds (toggle in settings). Raising a block also draws.
 - HP and stamina bars (top-left), dash (Ctrl) with a stamina cost and brief i-frames.
 - A small **forest world**: fog, dusk lighting, scattered low-poly trees and rocks.
+- **Living grass**: short faceted tufts carpet the ENTIRE surface (Valheim-lush;
+  paths come later) — gust waves roll the meadow, every blade sways, and the
+  grass **bends away from you** as you wade through. It withers grey near cave
+  mouths, and it's uprooted where you dig.
+- **Tall hiding grass**: dense chest-high patches you can vanish into — stand
+  (don't sprint) inside and calm enemies barely notice you ("~ hidden ~" shows
+  while you're concealed). Sneak past packs, or line up the first arrow.
 - **CAVES 2.0 — organic voxel caves** (full redo, docs/CAVES_PLAN.md): two 64×64 m
   regions of real underground. Worm tunnels swell into caverns and pinch into
   narrow-but-fitable cracks entirely on their own (Minecraft-1.18-style carvers,

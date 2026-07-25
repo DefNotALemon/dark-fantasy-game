@@ -30,6 +30,7 @@ func _init() -> void:
 	strong_min_range = 3.0
 	strong_max_range = 8.0
 	telegraph_color = Color(0.95, 0.35, 0.10)
+	climb_speed = 2.1   ## hauls its bulk up hand over hand — slow, unstoppable
 	## Gait: THE WADDLE — slow ponderous cadence, short wide steps, hips
 	## rolling side to side, the whole bulk pitching with every footfall.
 	gait_rate = 0.6

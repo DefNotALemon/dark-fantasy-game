@@ -43,6 +43,7 @@ func _init() -> void:
 	strong_max_range = 7.0
 	strong_hit_range = 2.0
 	telegraph_color = Color(0.95, 0.10, 0.05)
+	climb_speed = 2.0   ## hooves scrabbling — ugly to watch, but it gets up
 
 
 func _xp_orb_value() -> int:

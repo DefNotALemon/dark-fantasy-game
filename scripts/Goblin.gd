@@ -27,6 +27,7 @@ func _init() -> void:
 	strong_max_range = 6.0
 	strong_from_melee = true
 	telegraph_color = Color(0.55, 0.95, 0.15)
+	climb_speed = 3.2   ## a born raider — swarms up walls nearly as fast as a kobold
 
 
 func _choose_strong(dist: float) -> void:

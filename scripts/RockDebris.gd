@@ -14,10 +14,12 @@ var big := false
 var wood := false                ## a wood CHIP off a tree, not a rock
 var hazard := false              ## falls with intent — hurts whoever is under it
 var _spin := Vector3.ZERO
-var _landed := false
+var landed := false              ## resting on the ground — E can gather rocks
+var _rolling := false            ## on the ground but still moving downhill
 var _life := 0.0
 var _fade := 0.0
 var _hurt_done := false
+var _refoot := randf_range(0.3, 0.6)  ## staggered footing re-checks once landed
 
 
 static func make(at: Vector3, velocity: Vector3, is_big := false, is_wood := false, is_hazard := false) -> RockDebris:
@@ -31,6 +33,7 @@ static func make(at: Vector3, velocity: Vector3, is_big := false, is_wood := fal
 
 
 func _ready() -> void:
+	add_to_group("debris")  ## landed ROCKS are gatherable (look + E)
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
 	_spin = Vector3(rng.randf_range(-4.0, 4.0), rng.randf_range(-4.0, 4.0), rng.randf_range(-4.0, 4.0))
@@ -59,17 +62,74 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if _landed:
+	if landed:
 		_life += delta
-		if _life > (4.0 if not big else 7.0):
+		## The ground under a landed rock can be dug away (or a sleep shift
+		## redraws it): re-check the footing now and then and fall again.
+		_refoot -= delta
+		if _refoot <= 0.0:
+			_refoot = randf_range(0.3, 0.6)
+			var lq := PhysicsRayQueryParameters3D.create(
+				global_position + Vector3.UP * 0.25, global_position + Vector3.DOWN * 0.7)
+			if get_world_3d().direct_space_state.intersect_ray(lq).is_empty():
+				landed = false
+				_rolling = false
+				vel = Vector3.ZERO
+				return
+		## Rocks linger long enough to be gathered; wood chips are set dressing.
+		if _life > (4.0 if wood else (18.0 if not big else 24.0)):
 			_fade += delta
 			scale = Vector3.ONE * maxf(1.0 - _fade / 0.9, 0.001)
 			if _fade >= 0.9:
 				queue_free()
 		return
 
+	rotation += _spin * delta * (clampf(vel.length() * 0.6, 0.15, 1.0) if _rolling else 1.0)
+
+	if _rolling:
+		## ROLLING: gravity's slope component drives it, friction argues.
+		## Gentle ground talks it to a stop; STEEP ground keeps it going;
+		## losing the ground under it (a cliff lip) drops it back into a fall.
+		var space := get_world_3d().direct_space_state
+		var gq := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.35,
+			global_position + Vector3.DOWN * 0.7)
+		var ghit := space.intersect_ray(gq)
+		if ghit.is_empty():
+			_rolling = false  ## rolled off the edge — falling again
+			return
+		if ghit.collider is CharacterBody3D:
+			## Rolled onto someone's boots: kick off them and fall on — bodies
+			## never carry debris.
+			_rolling = false
+			var baway := global_position - (ghit.collider as Node3D).global_position
+			baway.y = 0.0
+			if baway.length() < 0.05:
+				baway = Vector3(randf() - 0.5, 0.0, randf() - 0.5)
+			vel = baway.normalized() * maxf(vel.length() * 0.5, 1.0) + Vector3.UP * 0.6
+			return
+		var n := ghit.normal as Vector3
+		global_position.y = (ghit.position as Vector3).y + 0.07
+		vel += (Vector3.DOWN - n * Vector3.DOWN.dot(n)) * 9.8 * delta  ## downhill pull
+		vel = vel.slide(n)
+		var sp := maxf(0.0, vel.length() - (4.2 if wood else 2.4) * delta)  ## friction
+		vel = vel.normalized() * sp if sp > 0.001 else Vector3.ZERO
+		## Don't roll through walls: a shoulder-check along the motion.
+		if sp > 0.05:
+			var wq := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.08,
+				global_position + Vector3.UP * 0.08 + vel * delta * 2.0)
+			var whit := space.intersect_ray(wq)
+			if not whit.is_empty() and (whit.normal as Vector3).y < 0.45:
+				vel = vel.bounce(whit.normal as Vector3) * 0.3
+		global_position += vel * delta
+		if sp < 0.18 and n.y > 0.75:
+			landed = true  ## down for good, on ground flat enough to hold it
+			if big:  ## a heavy thud — kick the camera if the player is close
+				var p := get_tree().get_first_node_in_group("player")
+				if p != null and (p as Node3D).global_position.distance_to(global_position) < 7.0:
+					p.set("cam_shake", maxf(float(p.get("cam_shake")), 0.16))
+		return
+
 	vel.y -= 9.8 * delta
-	rotation += _spin * delta
 
 	## A falling HAZARD slab hurts whoever is under it — usually the miner
 	## who cut it loose. TODO(design): should it crush enemies too?
@@ -81,8 +141,7 @@ func _physics_process(delta: float) -> void:
 				p.call("take_damage", BIG_DMG, global_position)
 
 	## Fly along the velocity and COLLIDE with the world: glance off walls,
-	## come to rest on the first walkable ground — every chip ends up lying
-	## on the floor somewhere, never sailing through rock or hovering.
+	## and touch down into a ROLL on the first walkable ground.
 	var space := get_world_3d().direct_space_state
 	var motion := vel * delta
 	var q := PhysicsRayQueryParameters3D.create(global_position,
@@ -90,15 +149,22 @@ func _physics_process(delta: float) -> void:
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
 		global_position += motion
+	elif hit.collider is CharacterBody3D:
+		## Bodies are not ground: clip off a shoulder and keep falling — no
+		## rock ever rides a head around.
+		var caway := global_position - (hit.collider as Node3D).global_position
+		caway.y = 0.0
+		if caway.length() < 0.05:
+			caway = Vector3(randf() - 0.5, 0.0, randf() - 0.5)
+		vel = caway.normalized() * maxf(vel.length() * 0.35, 1.2) + Vector3.UP * 0.8
+		global_position += vel * delta
 	else:
 		var n := hit.normal as Vector3
 		global_position = (hit.position as Vector3) + n * 0.05
 		if n.y > 0.45 and vel.y <= 0.5:
-			_landed = true  ## down for good
-			if big:  ## a heavy thud — kick the camera if the player is close
-				var p := get_tree().get_first_node_in_group("player")
-				if p != null and (p as Node3D).global_position.distance_to(global_position) < 7.0:
-					p.set("cam_shake", maxf(float(p.get("cam_shake")), 0.16))
+			## Touchdown: the impact eats most of the energy, the rest ROLLS.
+			_rolling = true
+			vel = vel.slide(n) * 0.55
 			return
 		## Wall or ceiling: bounce off, lose most of the energy, keep falling.
 		vel = vel.bounce(n) * 0.35

@@ -160,11 +160,13 @@ func _break_apart() -> void:
 	_spawn_chips(8)
 	var n := randi_range(ORE_PER_VEIN[0], ORE_PER_VEIN[1])
 	for _i in range(n):
-		var ore := PickupOrb.make_ore(mat_id)
+		## Manual pickup now: the chunk tumbles out and LIES there (look + E).
+		var ore := DroppedItem.make({"name": "%s Ore" % Materials.display_name(mat_id),
+			"weight": 2.0, "count": 1, "slot": "", "material": mat_id})
 		get_parent().add_child(ore)
 		ore.global_position = global_position + Vector3(0, 1.0, 0)
 		var a := randf() * TAU
-		ore.burst_dir = Vector3(cos(a) * 1.6, 0.8, sin(a) * 1.6)
+		ore.velocity = Vector3(cos(a) * 2.0, 2.4, sin(a) * 2.0)
 	var t := create_tween()
 	t.tween_interval(0.5)
 	t.tween_callback(queue_free)
