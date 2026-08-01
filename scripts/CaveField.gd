@@ -47,6 +47,18 @@ var _chains: Array = []          ## per mouth: smoothed capsule chain (Array[Vec
 var _chain_min: Array[Vector3] = []  ## per-chain AABB (early-out for the sampler)
 var _chain_max: Array[Vector3] = []
 
+## THE CATHEDRAL UNDERGROUND (authored shapes — the lab's winner, graduated):
+## big terrain-floored caverns joined by slope-capped tunnels, evaluated as
+## SDFs in _gen_rows with AABB early-outs. Re-authored on every reseed.
+var _cath_ell: Array = []        ## [center, radii] caverns
+var _cath_lo: Array = []         ## per-cavern AABB
+var _cath_hi: Array = []
+var _cath_caps: Array = []       ## [a, b, r] tunnels
+var _ccap_lo: Array = []
+var _ccap_hi: Array = []
+var _cath_floors: Array = []     ## [Vector2 xz, r, y] sediment discs
+var _cath_cols: Array = []       ## [Vector2 xz, r, y0, y1] rock columns
+
 var _worm_a := FastNoiseLite.new()
 var _worm_b := FastNoiseLite.new()
 var _worm_r := FastNoiseLite.new()   ## modulates tunnel radius: swell and pinch
@@ -80,6 +92,132 @@ func setup(p_mouths: Array[Vector3], p_dirs: Array[Vector3], seed_v: int) -> voi
 
 	for m in range(p_mouths.size()):
 		_add_mouth_geometry(p_mouths[m], p_dirs[m])
+	_author_cathedrals(seed_v)
+
+
+func _author_cathedrals(seed_v: int) -> void:
+	## Scatter the caverns (grand naves mid-depth, chapels shallow, crypts in
+	## the deeps), lay flat sediment floors, raise columns in the big ones,
+	## then join EVERYTHING into one connected system: a minimum-spanning
+	## tree of slope-capped tunnels plus a couple of loops, and a connector
+	## from every mouth-throat's end to its nearest cavern.
+	_cath_ell.clear()
+	_cath_lo.clear()
+	_cath_hi.clear()
+	_cath_caps.clear()
+	_ccap_lo.clear()
+	_ccap_hi.clear()
+	_cath_floors.clear()
+	_cath_cols.clear()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v * 131 + 7
+	var kinds: Array = [
+		[4, 13.0, 19.0, 6.0, 8.5, -20.0, -12.0],   ## grand naves
+		[6, 7.0, 11.0, 3.8, 5.5, -15.0, -7.0],     ## chapels
+		[3, 10.0, 15.0, 5.0, 7.5, -29.0, -23.0],   ## deep crypts
+	]
+	for kind: Array in kinds:
+		var placed := 0
+		var tries := 0
+		while placed < int(kind[0]) and tries < 90:
+			tries += 1
+			var rx := rng.randf_range(float(kind[1]), float(kind[2]))
+			var ry := rng.randf_range(float(kind[3]), float(kind[4]))
+			var rz := rx * rng.randf_range(0.75, 1.1)
+			var c := Vector3(rng.randf_range(-74.0 + rx, 74.0 - rx),
+				rng.randf_range(float(kind[5]), float(kind[6])),
+				rng.randf_range(-74.0 + rz, 74.0 - rz))
+			c.y = minf(c.y, -3.6 - ry)  ## the 2.2 m surface roof stays sacred
+			var ok := true
+			for n in range(_cath_ell.size()):
+				var o := _cath_ell[n][0] as Vector3
+				var orx := (_cath_ell[n][1] as Vector3).x
+				if Vector2(c.x - o.x, c.z - o.z).length() < (rx + orx) * 0.8 + 4.0:
+					ok = false
+					break
+			if not ok:
+				continue
+			placed += 1
+			_cath_ell.append([c, Vector3(rx, ry, rz)])
+			_cath_lo.append(c - Vector3(rx, ry, rz) - Vector3.ONE * 1.5)
+			_cath_hi.append(c + Vector3(rx, ry, rz) + Vector3.ONE * 1.5)
+			_cath_floors.append([Vector2(c.x, c.z), rx * 0.85, c.y - ry * 0.5])
+			if rx >= 11.0:
+				for _col in range(rng.randi_range(3, 5)):
+					var a := rng.randf() * TAU
+					var d := rng.randf_range(rx * 0.3, rx * 0.72)
+					_cath_cols.append([Vector2(c.x + cos(a) * d, c.z + sin(a) * d),
+						rng.randf_range(1.0, 1.8), c.y - ry - 1.0, c.y + ry + 1.0])
+	## The network: Prim's MST over the caverns, then two loop links.
+	if _cath_ell.size() >= 2:
+		var linked: Array[int] = [0]
+		var todo: Array[int] = []
+		for n in range(1, _cath_ell.size()):
+			todo.append(n)
+		while not todo.is_empty():
+			var best_a := -1
+			var best_b := -1
+			var best_d := 1e9
+			for a in linked:
+				for b in todo:
+					var dd := (_cath_ell[a][0] as Vector3).distance_to(_cath_ell[b][0] as Vector3)
+					if dd < best_d:
+						best_d = dd
+						best_a = a
+						best_b = b
+			_link_caverns(_cath_ell[best_a][0] as Vector3, _cath_ell[best_b][0] as Vector3, rng)
+			linked.append(best_b)
+			todo.erase(best_b)
+		for _extra in range(2):
+			var a2 := linked[rng.randi_range(0, linked.size() - 1)]
+			var b2 := linked[rng.randi_range(0, linked.size() - 1)]
+			if a2 != b2:
+				_link_caverns(_cath_ell[a2][0] as Vector3, _cath_ell[b2][0] as Vector3, rng)
+	## Every front door leads somewhere: throat end -> nearest cavern.
+	for ci in range(_chains.size()):
+		_connect_chain_to_cathedral(ci)
+
+
+func _link_caverns(a: Vector3, b: Vector3, rng: RandomNumberGenerator) -> void:
+	var mid := (a + b) * 0.5 + Vector3(rng.randf_range(-6, 6), 0, rng.randf_range(-6, 6))
+	var cap_dy := Vector2(mid.x - a.x, mid.z - a.z).length() * 0.36
+	mid.y = clampf(mid.y, minf(a.y, b.y) - cap_dy, maxf(a.y, b.y) + cap_dy)
+	mid.y = minf(mid.y, -4.6)
+	var r := rng.randf_range(2.3, 2.9)
+	var p1 := a.lerp(mid, 0.75)
+	var p2 := mid.lerp(b, 0.25)
+	_add_cath_cap(a, p1, r)
+	_add_cath_cap(p1, p2, r)
+	_add_cath_cap(p2, b, r)
+
+
+func _add_cath_cap(a: Vector3, b: Vector3, r: float) -> void:
+	_cath_caps.append([a, b, r])
+	var m := r + 1.5
+	_ccap_lo.append(Vector3(minf(a.x, b.x) - m, minf(a.y, b.y) - m, minf(a.z, b.z) - m))
+	_ccap_hi.append(Vector3(maxf(a.x, b.x) + m, maxf(a.y, b.y) + m, maxf(a.z, b.z) + m))
+
+
+func _connect_chain_to_cathedral(ci: int) -> void:
+	## The throat dives to ~-11.5 and the cathedral system takes it from
+	## there: one tunnel from the chain's end to the nearest cavern heart.
+	if _cath_ell.is_empty() or ci >= _chains.size():
+		return
+	var chain: Array[Vector3] = _chains[ci]
+	var tail: Vector3 = chain[chain.size() - 1]
+	var best := Vector3.INF
+	var best_d := 1e9
+	for e: Array in _cath_ell:
+		var d := tail.distance_to(e[0] as Vector3)
+		if d < best_d:
+			best_d = d
+			best = e[0] as Vector3
+	if best == Vector3.INF:
+		return
+	var mid := (tail + best) * 0.5
+	mid.y = minf(minf(tail.y, best.y) + 1.0, -5.0)
+	_add_cath_cap(tail, mid, 2.5)
+	_add_cath_cap(mid, best, 2.5)
 
 
 func _add_mouth_geometry(p_mouth: Vector3, p_dir: Vector3) -> void:
@@ -127,8 +265,14 @@ func add_mouth(p_mouth: Vector3, p_dir: Vector3) -> Array[Vector3i]:
 	## just tore open; the quake covers the paperwork).
 	_add_mouth_geometry(p_mouth, p_dir)
 	var ci := _chains.size() - 1
+	var caps_before := _cath_caps.size()
+	_connect_chain_to_cathedral(ci)
 	var lo_w: Vector3 = _chain_min[ci]
 	var hi_w: Vector3 = _chain_max[ci]
+	## The new connector tunnel is part of the tear — recompute its box too.
+	for n in range(caps_before, _cath_caps.size()):
+		lo_w = lo_w.min(_ccap_lo[n] as Vector3)
+		hi_w = hi_w.max(_ccap_hi[n] as Vector3)
 	## Include the cap mound footprint + a margin.
 	var mc := p_mouth + p_dir * MOUND_FWD
 	lo_w = lo_w.min(mc - Vector3(MOUND_R + 2.0, 0.0, MOUND_R + 2.0))
@@ -181,11 +325,13 @@ func start_deep_generation() -> int:
 
 
 func reseed(seed_v: int) -> void:
-	## New bones for the underground — every carver rolls new dice. The strata
-	## banding keeps its seed (the rock TYPE doesn't change, just its shape).
+	## New bones for the underground — the cathedral system re-authors itself
+	## whole (new caverns, new tunnels; the permanence bubbles still shield
+	## the mouths). Strata banding keeps its seed — rock TYPE doesn't shift.
 	for n: FastNoiseLite in [_worm_a, _worm_b, _worm_r, _cheese, _crack_a, _crack_b, _zone]:
 		n.seed = seed_v
 		seed_v = seed_v * 31 + 17
+	_author_cathedrals(seed_v)
 
 
 func start_polish() -> int:
@@ -300,41 +446,61 @@ func _gen_rows(i: int, row0: int, row1: int, preserve: bool, kk0 := 0, kk1 := SZ
 				var guard := clampf((depth - 2.2) / 2.5, 0.0, 1.0) \
 					* clampf((edge_m - 6.0) / 14.0, 0.0, 1.0)
 				if guard > 0.0:
-					## THE ZONED UNDERGROUND — deliberate districts instead of
-					## everything-everywhere chaos. One slow smooth noise deals
-					## the map into three characters, parameters blending at
-					## the borders:
-					##   WARRENS ..... tight round tunnels, walkable, cracked
-					##   GALLERIES ... WIDE corridors squashed flat top+bottom
-					##   HALLS ....... where it truly opens up (the caverns)
-					var zv := _zone.get_noise_2d(wx, wz)
-					var gal := smoothstep(-0.2, 0.05, zv) * (1.0 - smoothstep(0.3, 0.55, zv))
-					var hall := smoothstep(0.3, 0.55, zv)
-					var warren := 1.0 - smoothstep(-0.2, 0.05, zv)
+					## THE CATHEDRAL UNDERGROUND (the lab's winner, live):
+					## authored caverns with terrain floors and columns, joined
+					## by slope-capped tunnels — evaluated as SDFs with AABB
+					## early-outs, wobbled by one noise so no wall is geometric.
+					## `guard` still tapers everything shut near edges/surface.
 					var carve := 0.0
-					## Worm tunnels: near the crossing lines of two noises.
-					## Galleries compress the noise VERTICALLY (flat lids and
-					## floors), widen the bore, and steady the radius wobble.
-					var ys := 1.6 + gal * 1.1
-					var wa := _worm_a.get_noise_3d(wx, wy * ys, wz)
-					var wb := _worm_b.get_noise_3d(wx, wy * ys, wz)
-					var deep_ramp := clampf((depth - 6.0) / 26.0, 0.0, 1.0)
-					var wr := 1.9 + gal * 1.8 + hall * 0.5 \
-						+ _worm_r.get_noise_3d(wx, wy, wz) * (1.5 - gal * 0.7) \
-						+ deep_ramp * 3.0
-					wr = maxf(wr, 2.0 + deep_ramp * 2.4)  ## never pinches shut down deep
-					carve = maxf(carve, wr - sqrt(wa * wa + wb * wb) * 21.0)
-					## Caverns belong to the HALLS (a whisper elsewhere).
-					var cramp := clampf((depth - 6.5) / 7.0, 0.0, 1.0) * (0.12 + hall * 0.88)
-					if cramp > 0.0:
-						var cv := _cheese.get_noise_3d(wx, wy * 1.35, wz)
-						carve = maxf(carve, (cv - (0.38 - hall * 0.12)) * (17.0 + hall * 9.0) * cramp)
-					## Cracks thread the WARRENS — elsewhere they barely whisper.
-					var ca := _crack_a.get_noise_3d(wx, wy * 0.55, wz)
-					var cb := _crack_b.get_noise_3d(wx, wy * 0.55, wz)
-					carve = maxf(carve, 0.48 + warren * 0.16 - sqrt(ca * ca + cb * cb) * 24.0)
+					var in_cavern := -1
+					for n in range(_cath_ell.size()):
+						var lo := _cath_lo[n] as Vector3
+						var hi := _cath_hi[n] as Vector3
+						if wx < lo.x or wx > hi.x or wy < lo.y or wy > hi.y \
+								or wz < lo.z or wz > hi.z:
+							continue
+						var e: Array = _cath_ell[n]
+						var ec := e[0] as Vector3
+						var er := e[1] as Vector3
+						var v := Vector3((wx - ec.x) / er.x, (wy - ec.y) / er.y, (wz - ec.z) / er.z)
+						var sd := (1.0 - v.length()) * minf(er.x, minf(er.y, er.z))
+						if sd > carve:
+							carve = sd
+							in_cavern = n
+					for n in range(_cath_caps.size()):
+						var lo2 := _ccap_lo[n] as Vector3
+						var hi2 := _ccap_hi[n] as Vector3
+						if wx < lo2.x or wx > hi2.x or wy < lo2.y or wy > hi2.y \
+								or wz < lo2.z or wz > hi2.z:
+							continue
+						var cp: Array = _cath_caps[n]
+						carve = maxf(carve, -_capsule_d(Vector3(wx, wy, wz),
+							cp[0] as Vector3, cp[1] as Vector3, float(cp[2])))
 					if carve > 0.0:
+						## The rock-character wobble: walls breathe, floors don't.
+						carve += _worm_r.get_noise_3d(wx * 2.2, wy * 2.2, wz * 2.2) * 0.55
 						d = minf(d, -carve * guard)
+						## TERRAIN FLOORS: sediment fills the cavern's belly to
+						## a gently mounded walking line (band noise = mounds).
+						if in_cavern >= 0 and in_cavern < _cath_floors.size():
+							var fl: Array = _cath_floors[in_cavern]
+							var fxz := fl[0] as Vector2
+							if Vector2(wx - fxz.x, wz - fxz.y).length() < float(fl[1]):
+								var fy := float(fl[2]) + band.get_noise_2d(wx * 1.7, wz * 1.7) * 0.55
+								if wy < fy:
+									d = maxf(d, (fy - wy) * 1.5)
+						## COLUMNS: rock re-planted through the void.
+						for n in range(_cath_cols.size()):
+							var col: Array = _cath_cols[n]
+							if wy < float(col[2]) or wy > float(col[3]):
+								continue
+							var cxz := col[0] as Vector2
+							var cdx := wx - cxz.x
+							var cdz := wz - cxz.y
+							if absf(cdx) > 3.0 or absf(cdz) > 3.0:
+								continue
+							var rr := float(col[1]) * (1.0 + 0.35 * absf(sin(wy * 0.8)))
+							d = maxf(d, rr - sqrt(cdx * cdx + cdz * cdz))
 				## The mouth tunnels ignore the roof guard — they ARE the
 				## openings. But near the surface each may ONLY cut within
 				## MOUTH_OPEN_R of its own mouth: that keeps a throat's deeper
@@ -356,6 +522,13 @@ func _gen_rows(i: int, row0: int, row1: int, preserve: bool, kk0 := 0, kk1 := SZ
 				## preserve = deep pass: keep anything the player already dug
 				## out of the placeholder rock (their edits are always lower).
 				data[id] = minf(data[id], clampf(d, -4.0, 4.0)) if preserve else clampf(d, -4.0, 4.0)
+
+
+static func _capsule_d(p: Vector3, a: Vector3, b: Vector3, r: float) -> float:
+	var pa := p - a
+	var ba := b - a
+	var h := clampf(pa.dot(ba) / maxf(ba.dot(ba), 0.0001), 0.0, 1.0)
+	return (pa - ba * h).length() - r
 
 
 func _chain_sdf(p: Vector3, ci: int) -> float:

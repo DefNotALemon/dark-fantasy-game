@@ -365,7 +365,10 @@ func _crash(break_y: float) -> void:
 	_upper = null
 
 
-const LEAF_BLOWN := 0.16         ## the share of a canopy the wind actually takes
+const LEAF_BLOWN := 0.22         ## the share of a canopy the wind actually takes
+const LEAF_SPREAD := 1.7         ## how far past the cone's own radius leaves
+                                 ## come off — a canopy sheds wider than its
+                                 ## silhouette, and the litter should say so
 
 
 func _shed_leaves() -> void:
@@ -385,23 +388,28 @@ func _shed_leaves() -> void:
 		if not is_instance_valid(c):
 			continue
 		var cm := c.mesh as CylinderMesh
-		var rad: float = 1.4 if cm == null else cm.bottom_radius
-		var count := clampi(int(16.0 + rad * 16.0), 14, 46)
+		var rad: float = 1.4 if cm == null else cm.bottom_radius * LEAF_SPREAD
+		var count := clampi(int(22.0 + rad * 20.0), 20, 64)
 		var origin: Vector3 = c.global_position
 		for _i in range(count):
 			var a := randf() * TAU
-			var rr := sqrt(randf()) * rad
+			## Sample the whole disc, biased outward a little (not sqrt-uniform)
+			## so the print reaches the crown's EDGE instead of clumping at the
+			## trunk — a canopy is mostly rim.
+			var rr := pow(randf(), 0.62) * rad
 			var at := origin + c.global_transform.basis * Vector3(
-				cos(a) * rr, randf_range(-0.9, 0.9), sin(a) * rr)
+				cos(a) * rr, randf_range(-1.3, 1.3), sin(a) * rr)
 			var col := leaf_col.lerp(Color(0.36, 0.30, 0.14), randf() * 0.45)
-			## Barely any push: it comes off where it grew and drops there.
-			var v := Vector3(randf_range(-0.35, 0.35), randf_range(0.0, 0.8),
-				randf_range(-0.35, 0.35))
+			## A little outward push, scaled by how far out it already sat, so
+			## the shape INFLATES on the way down rather than smearing.
+			var out := Vector3(cos(a), 0.0, sin(a)) * (rr / maxf(rad, 0.01)) * randf_range(0.3, 1.1)
+			var v := out + Vector3(randf_range(-0.4, 0.4), randf_range(0.0, 0.9),
+				randf_range(-0.4, 0.4))
 			var fl := FallingLitter.make("leaf", at, v, col, randf_range(0.8, 1.35))
 			world.add_child(fl)
 			if randf() < LEAF_BLOWN:
-				fl.carry(gust + Vector3(randf_range(-0.35, 0.35), 0.0, randf_range(-0.35, 0.35)),
-					randf_range(2.0, 15.0), maxf(at.y, 0.6))
+				fl.carry(gust + Vector3(randf_range(-0.45, 0.45), 0.0, randf_range(-0.45, 0.45)),
+					randf_range(3.0, 15.0), maxf(at.y, 0.6))
 		c.visible = false
 		c.queue_free()
 	_cones.clear()

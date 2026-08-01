@@ -21,6 +21,10 @@ func _init() -> void:
 	leash_radius = 22.0
 	xp_tier = 1
 	families = ["humanoid"]
+	## Fights dirty, which includes knowing when to stop fighting.
+	nerve = 0.32
+	rout_speed = 0.58
+	rout_line = "breaks and scrambles away"
 	duelist = true   ## smart enough to pace and pick its moment
 	## Pounce triggers from mid-range; the flurry comes out at melee range.
 	strong_min_range = 2.5

@@ -22,6 +22,10 @@ func _init() -> void:
 	leash_radius = 28.0
 	xp_tier = 2
 	families = ["humanoid"]
+	## A duelist's pride holds a long time. Not forever.
+	nerve = 0.15
+	rout_speed = 0.50
+	rout_line = "gives ground and runs"
 	duelist = true
 	duel_range = 6.0
 	duel_hold_min = 0.15       ## barely pauses; always pressing in

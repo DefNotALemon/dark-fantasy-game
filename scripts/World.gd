@@ -316,34 +316,18 @@ func drop_meteor() -> void:
 			break
 	if spot == Vector3.INF:
 		return
-	## The streak: a burning star dragged down the sky into the ground.
-	var streak := Node3D.new()
-	add_child(streak)
-	var ball := MeshInstance3D.new()
-	var bm := SphereMesh.new()
-	bm.radius = 0.8
-	bm.height = 1.6
-	bm.radial_segments = 8
-	bm.rings = 4
-	ball.mesh = bm
-	var mat := StandardMaterial3D.new()
-	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.5, 0.15)
-	mat.emission_energy_multiplier = 6.0
-	mat.albedo_color = Color(0.25, 0.12, 0.06)
-	ball.material_override = mat
-	streak.add_child(ball)
-	var l := OmniLight3D.new()
-	l.light_color = Color(1.0, 0.55, 0.2)
-	l.light_energy = 4.0
-	l.omni_range = 30.0
-	l.shadow_enabled = false
-	streak.add_child(l)
-	streak.global_position = spot + Vector3(60.0, 90.0, 34.0)
-	var tw := create_tween()
-	tw.tween_property(streak, "global_position", spot + Vector3.UP * 0.6, 0.85) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_callback(_meteor_impact.bind(spot, streak))
+	## The fall is a PERFORMANCE now (MeteorFall.gd): a burning point ignites
+	## high over the map — visible day or night, dimmer against daylight —
+	## drifts down for ~23 s trailing pixel embers, then dives hard into the
+	## ground. The title fires at IGNITION so there's time to look up.
+	var m := MeteorFall.new()
+	m.target = spot
+	m.world = self
+	add_child(m)
+	if _player:
+		_player.call("_add_log_msg", "Something burns in the sky to the %s..."
+			% _compass(spot - _player.global_position), Color(1.0, 0.72, 0.38))
+	_show_title("A Star Falls")
 
 
 func _meteor_impact(spot: Vector3, streak: Node3D) -> void:
@@ -356,9 +340,8 @@ func _meteor_impact(spot: Vector3, streak: Node3D) -> void:
 	if _player:
 		var d := _player.global_position.distance_to(spot)
 		_player.cam_shake = maxf(float(_player.cam_shake), clampf(0.62 - d * 0.004, 0.12, 0.62))
-		_player.call("_add_log_msg", "A star has fallen to the %s!" % _compass(spot - _player.global_position),
+		_player.call("_add_log_msg", "The star has fallen to the %s!" % _compass(spot - _player.global_position),
 			Color(1.0, 0.62, 0.28))
-	_show_title("A Star Falls")
 
 
 func _compass(v: Vector3) -> String:

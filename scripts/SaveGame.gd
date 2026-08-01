@@ -17,7 +17,8 @@ extends RefCounted
 ## captured from the bed.
 
 const PATH := "user://save01.dat"
-const VERSION := 1
+const VERSION := 2          ## v2: equipment slots hold the ITEMS themselves
+const OLDEST_READABLE := 1  ## v1 (index-based equipment) migrates on load
 
 
 static func has_save() -> bool:
@@ -68,7 +69,8 @@ static func load_game(player: Node) -> String:
 	if not (raw is Dictionary):
 		return "That save file is unreadable"
 	var d := raw as Dictionary
-	if int(d.get("version", 0)) != VERSION:
+	var ver := int(d.get("version", 0))
+	if ver < OLDEST_READABLE or ver > VERSION:
 		return "That save is from another build"
 	var world := player.get_tree().get_first_node_in_group("world")
 	if world == null or not world.has_method("apply_state"):

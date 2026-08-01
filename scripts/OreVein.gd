@@ -8,7 +8,10 @@ class_name OreVein
 ## Built in code: OreVein.make("silver") -> add_child -> position it.
 
 const HITS_TO_BREAK := 4
-const ORE_PER_VEIN := [1, 2]     ## min/max ore chunks a vein yields
+const ORE_PER_VEIN := [2, 3]     ## min/max ore chunks a vein yields — it breaks
+                                 ## into a COUPLE of near-vein-sized pieces now
+                                 ## (DroppedItem._build_ore draws them as chunks
+                                 ## of this very rock, seams still glowing)
 
 var mat_id := "silver"
 var hits_left := HITS_TO_BREAK

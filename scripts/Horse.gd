@@ -33,10 +33,24 @@ var skittish_radius := 8.0    ## wild horses bolt inside this (0 = calm near peo
 ## it must, then 8-13 honest meters past the spot where it found open ground
 ## before it lets itself settle. Terror, not betrayal — trust survives. ---
 const CAVE_PANIC_Y := -2.2    ## this deep with a rider aboard = the ride is over
+## And long before that: a loose horse simply won't graze near a cave mouth.
+const CAVE_SHUN_R := 16.0     ## starts easing away once inside this
+const CAVE_SHUN_HARD := 8.0   ## this close, the walk gains some purpose
+var _mouths: Array = []       ## every entrance the world currently has
+var _mouth_t := 0.0           ## staggered re-ask (mouths can appear at runtime)
 var _surface_pos := Vector3.ZERO   ## last footing that still felt like daylight
 var _panic_t := 0.0                ## safety clock on a bolt (never runs forever)
 var _panic_from := Vector3.INF     ## stamped where hooves find open ground; the bolt ends past it
 var _panic_range := 10.0           ## 8-13 m, rolled fresh per panic
+
+## --- THE SCRAMBLE: a ridden horse takes rock faces. Press the reins INTO a
+## steep wall and it rears onto it and claws up at climb_speed — the reins
+## steer the drift along the face, easing off detaches, and the top-out is a
+## shoulders-first haul onto the ledge. ---
+var _scramble := false
+var _scramble_t := 0.0
+var _scramble_normal := Vector3.ZERO
+var _scramble_touched := false   ## hooves have actually met the stone
 
 ## --- Riding (rider = the Player while mounted; it feeds the reins each frame) ---
 var rider: CharacterBody3D = null
@@ -69,9 +83,19 @@ func _init() -> void:
 	strong_damage = KICK_DAMAGE   ## the bestiary's "Fury" line = the kick
 	aggro_radius = 0.0       ## never hunts anyone
 	leash_radius = 26.0      ## how far it runs before settling back to graze
-	can_climb = false        ## flight stays on the ground — no wall-scaling horses
+	## HORSES CLIMB NOW — an ugly, determined scramble, nothing like a gallop.
+	## Loose, it's a FLIGHT climb (climb_away: a close threat makes rock an
+	## exit, the drift angles away from the hunter, and getting above it is
+	## the whole point). Ridden, it's the SCRAMBLE (_try_scramble in
+	## _do_ridden): press the reins into a steep face and it takes it.
+	can_climb = true
+	climb_speed = 2.3        ## half a ton of horse hauls slow
+	climb_away = true
 	xp_tier = 1
 	families = ["beast"]
+	## Horses have their own flight (panic/bolt) — the rout must not double it.
+	nerve = 0.0
+	rout_speed = 0.5
 	gait_rate = 1.15
 	stride_deg = 30.0
 	bob_h = 0.07
@@ -110,6 +134,7 @@ func _physics_process(delta: float) -> void:
 	kick_cd = maxf(0.0, kick_cd - delta)
 	if _buck_t > 0.0:
 		_buck_t -= delta
+	_refresh_mouths(delta)  ## grazing AND flight both consult the hole list
 
 	if rider != null:
 		_do_ridden(delta)
@@ -166,6 +191,13 @@ func _do_ridden(delta: float) -> void:
 		if desired.length() > 0.01:
 			desired = desired.normalized()
 
+	## THE SCRAMBLE: reins pressed into a steep face = the horse takes it.
+	if _scramble:
+		_update_scramble(delta, desired)
+		return
+	if desired != Vector3.ZERO and _try_scramble(desired):
+		return
+
 	if desired != Vector3.ZERO:
 		_face(desired, delta, 2.6)  ## wide, committed turns
 		var align := fwd.dot(desired)
@@ -173,6 +205,66 @@ func _do_ridden(delta: float) -> void:
 		_steer(fwd * speed, delta, 10.0)
 	else:
 		_steer(Vector3.ZERO, delta, 8.0)
+
+
+func _try_scramble(dir: Vector3) -> bool:
+	## Is there a steep face where the reins are pointing, close enough and
+	## square enough to mean it? Then rear onto it.
+	if not is_on_floor() and not is_on_wall():
+		return false
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(
+		global_position + Vector3.UP * 1.1,
+		global_position + Vector3.UP * 1.1 + dir * 1.7)
+	q.exclude = [get_rid()]
+	var hit: Dictionary = space.intersect_ray(q)
+	if hit.is_empty() or hit.collider is CharacterBody3D:
+		return false
+	var n := hit.normal as Vector3
+	if absf(n.y) > 0.45:
+		return false  ## a walkable slope (or a ceiling) — legs handle those
+	if dir.dot(-n) < 0.55:
+		return false  ## glancing contact — you have to RIDE at it
+	_scramble = true
+	_scramble_t = 0.0
+	_scramble_touched = false
+	_scramble_normal = n
+	## Grip from frame one: up plus a hard press into the face.
+	velocity = Vector3.UP * climb_speed - n * 3.2
+	return true
+
+
+func _update_scramble(delta: float, desired: Vector3) -> void:
+	_scramble_t += delta
+	if is_on_wall():
+		_scramble_touched = true
+		_scramble_normal = get_wall_normal()
+	var pressing := desired != Vector3.ZERO and desired.dot(-_scramble_normal) > 0.15
+	## The rear-up can start a stride from the face — until the hooves have
+	## actually MET stone, losing contact means nothing (it hasn't arrived),
+	## and a scramble that never finds stone at all just gives up quietly.
+	if not _scramble_touched and _scramble_t > 1.2:
+		_scramble = false
+		return
+	var over_lip := _scramble_touched and not is_on_wall()
+	if over_lip or not pressing or _scramble_t > 8.0:
+		_scramble = false
+		if over_lip and pressing and _scramble_t <= 8.0:
+			## The haul-over: shoulders first onto the ledge, rider and all.
+			var fwd2 := -_scramble_normal
+			fwd2.y = 0.0
+			if fwd2.length() > 0.01:
+				velocity = fwd2.normalized() * 3.4 + Vector3.UP * 3.6
+		return
+	## Claw upward, pressed into the rock; the reins steer the drift along
+	## the face — angle your camera and the horse picks its line.
+	var tangent := _scramble_normal.cross(Vector3.UP)
+	var drift := clampf(desired.dot(tangent), -1.0, 1.0)
+	## Approaching hard until the stone is under hoof, then a steady press.
+	var press := 1.6 if _scramble_touched else 3.2
+	velocity = Vector3.UP * climb_speed + tangent * drift * climb_speed * 0.4 \
+		- _scramble_normal * press
+	_face(-_scramble_normal, delta, 6.0)
 
 
 func _do_kick(delta: float) -> void:
@@ -285,7 +377,63 @@ func _do_wander(delta: float) -> void:
 		if pl != null and global_position.distance_to(pl.global_position) < r and _can_see(pl):
 			_set_agitated(true)
 			return
+	## A hole in the ground is a thing to be somewhere ELSE from, and a horse
+	## works that out long before the ground opens under it. Grazing near a
+	## mouth it just... drifts off — an unbothered walk that happens to always
+	## point away. `_cave_panic` is what happens if one ever ends up down the
+	## throat regardless; this is what makes that almost never necessary.
+	if _shun_caves(delta):
+		return
 	super(delta)
+
+
+## --------------------- Caves are wrong (the drift) ------------------------
+
+
+func _refresh_mouths(delta: float) -> void:
+	## Re-ask the world now and then — the M-menu can tear a new mouth open
+	## right under a grazing herd, and the herd should notice.
+	_mouth_t -= delta
+	if _mouth_t > 0.0:
+		return
+	_mouth_t = randf_range(3.0, 6.0)
+	_mouths.clear()
+	for reg in get_tree().get_nodes_in_group("cave_regions"):
+		var ms: Variant = reg.get("mouths")
+		if ms is Array:
+			for m in (ms as Array):
+				_mouths.append(m as Vector3)
+
+
+func _shun_caves(delta: float) -> bool:
+	## True = the drift is driving this frame's steering.
+	if _mouths.is_empty():
+		return false
+	var best := Vector3.INF
+	var bd := 1e9
+	for m: Vector3 in _mouths:
+		var d := Vector2(global_position.x - m.x, global_position.z - m.z).length()
+		if d < bd:
+			bd = d
+			best = m
+	if best == Vector3.INF or bd > CAVE_SHUN_R:
+		return false
+	var flat := Vector3(global_position.x - best.x, 0.0, global_position.z - best.z)
+	if flat.length() < 0.05:
+		flat = Vector3(randf() - 0.5, 0.0, randf() - 0.5)
+	var away := flat.normalized()
+	## Closer means more insistent — but never more than a brisk walk. This is
+	## unease, not fear; the bolt is a different animal entirely.
+	var urgency := clampf((CAVE_SHUN_R - bd) / maxf(CAVE_SHUN_R - CAVE_SHUN_HARD, 0.01), 0.0, 1.0)
+	## And it still wanders while it goes, so it reads as a horse that drifted
+	## off rather than one being pushed by an invisible hand.
+	var drift := away.rotated(Vector3.UP, sin(_sway_t * 0.7) * 0.5)
+	_steer(drift * wander_speed * lerpf(0.9, 1.5, urgency), delta, 5.0)
+	_face(drift, delta, 4.0)
+	## Whatever it picks next, it picks from out here.
+	wander_dir = away
+	wander_timer = maxf(wander_timer, 1.5)
+	return true
 
 
 func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> void:
@@ -300,8 +448,31 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 	away.y = 0.0
 	if away.length() > 0.01:
 		away = away.normalized()
+		## Flight still refuses the holes: a spooked horse that would otherwise
+		## run straight down a throat bends its line around the mouth instead.
+		away = (away + _cave_repulse() * 1.2).normalized()
 		_steer(away * chase_speed, delta, 16.0)
 		_face(away, delta, 8.0)
+
+
+func _cave_repulse() -> Vector3:
+	## A unit-ish push directly away from the nearest mouth, strongest close in
+	## and zero past CAVE_SHUN_R. Flat on the ground plane.
+	if _mouths.is_empty():
+		return Vector3.ZERO
+	var best := Vector3.INF
+	var bd := 1e9
+	for m: Vector3 in _mouths:
+		var d := Vector2(global_position.x - m.x, global_position.z - m.z).length()
+		if d < bd:
+			bd = d
+			best = m
+	if best == Vector3.INF or bd > CAVE_SHUN_R:
+		return Vector3.ZERO
+	var flat := Vector3(global_position.x - best.x, 0.0, global_position.z - best.z)
+	if flat.length() < 0.05:
+		return Vector3.ZERO
+	return flat.normalized() * clampf((CAVE_SHUN_R - bd) / CAVE_SHUN_R, 0.0, 1.0)
 
 
 func _set_agitated(on: bool) -> void:

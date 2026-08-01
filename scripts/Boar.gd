@@ -19,6 +19,10 @@ func _init() -> void:
 	leash_radius = 20.0
 	xp_tier = 0
 	families = ["beast"]
+	## A hurt animal disengages — it never wanted this.
+	nerve = 0.30
+	rout_speed = 0.55
+	rout_line = "crashes off through the brush"
 	## Circles the player in a big, sweeping arc, leaning hard into the turn.
 	duelist = true
 	duel_range = 11.0

@@ -39,6 +39,7 @@ var _content_root: Node3D        ## resettable content (mobs/veins/deep crystals
 
 
 func _ready() -> void:
+	add_to_group("cave_regions")  ## horses ask us where the holes are (Horse.gd)
 	_rng.seed = cave_seed
 	_rock_mat = StandardMaterial3D.new()
 	_rock_mat.vertex_color_use_as_albedo = true
@@ -485,36 +486,18 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 
 
 func _crystal(pos: Vector3, with_light: bool, parent: Node3D = null) -> void:
-	## Same glowing shard cluster the old caves used (Cave.gd heritage).
+	## The glowing shard cluster (Cave.gd heritage) — now a real, MINEABLE
+	## object (`CrystalCluster.gd`, group "crystals"): the pickaxe shears
+	## shards off it one at a time and the light dims with every one taken.
 	## parent = _content_root for shiftable deep crystals; default = permanent.
 	if parent == null:
 		parent = self
 	var col := Color(0.35, 0.85, 1.0) if _rng.randf() < 0.7 else Color(0.72, 0.42, 1.0)
 	if pos.y < -23.0:
 		col = Color(1.0, 0.55, 0.25)  ## the deeps burn ember
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = col
-	mat.emission_enabled = true
-	mat.emission = col
-	mat.emission_energy_multiplier = 2.2
-	for _i in range(_rng.randi_range(2, 3)):
-		var m := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		var s := _rng.randf_range(0.18, 0.42)
-		bm.size = Vector3(s, s * _rng.randf_range(1.6, 2.6), s)
-		m.mesh = bm
-		m.material_override = mat
-		m.position = pos + Vector3(_rng.randf_range(-0.35, 0.35), bm.size.y * 0.35, _rng.randf_range(-0.35, 0.35))
-		m.rotation_degrees = Vector3(_rng.randf_range(-18, 18), _rng.randf_range(0, 360), _rng.randf_range(-18, 18))
-		parent.add_child(m)
-	if with_light:
-		var l := OmniLight3D.new()
-		l.light_color = col
-		l.light_energy = 1.2
-		l.omni_range = 9.0
-		l.shadow_enabled = false
-		l.position = pos + Vector3(0, 1.0, 0)
-		parent.add_child(l)
+	var c := CrystalCluster.make(col, _rng.randi_range(2, 3), with_light, _rng)
+	parent.add_child(c)
+	c.position = pos
 
 
 ## ============================== Save / load ================================

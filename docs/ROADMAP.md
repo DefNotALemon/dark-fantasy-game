@@ -110,9 +110,10 @@ Status keys: [x] done · [~] in progress · [ ] not started
       BUBBLES (24 m) around every mouth: entrance throats never move, player
       digs inside them survive, and a NO-SPAWN BARRIER keeps content out of
       them. The underground also fully generates at LOAD-IN now (threaded,
-      non-blocking) instead of waiting for an approach. Still to do: timed
-      shifts (every 1-2 game days without sleep), stronger shake inside,
-      stability bubble around the player mid-shift, entrance collapse cinematic
+      non-blocking) instead of waiting for an approach. Sleep now RE-AUTHORS
+      the whole cathedral network (fresh caverns/tunnels/columns each shift).
+      Still to do: timed shifts (every 1-2 game days without sleep), stronger
+      shake inside, stability bubble mid-shift, entrance collapse cinematic
 - [ ] Camps that grow → raid villages/cities
 - [x] CAVE-INTERIOR SEALING: the reachability walk can no longer hop rock
       walls into sealed pockets (midpoint check — content only spawns in air
@@ -130,6 +131,20 @@ Status keys: [x] done · [~] in progress · [ ] not started
       caves now have deliberate anatomy: WARRENS (tight round walkable
       tunnels, home of the cracks), GALLERIES (wide flat-lidded corridors),
       HALLS (open caverns); borders blend, districts reshuffle on sleep
+      (SUPERSEDED 2026-07-29 by the Cathedral — kept for history)
+- [x] THE CATHEDRAL UNDERGROUND (2026-07-29 — noise carvers + districts
+      retired): ~13 AUTHORED ellipsoid caverns in three kinds (grand columned
+      NAVES 13-19 m / mid HALLS / deep CRYPTS below −23) joined into one
+      looping network by a Prim-MST of slope-capped walkable capsule tunnels
+      + 2 loop links; every cavern floored with flat 2D-noise SEDIMENT
+      terrain (fightable ground, nave core spread ~0.85 m); tapered rock
+      columns; worm-noise wobble so nothing reads authored; per-shape AABB
+      early-outs; entrance chains auto-link into the network (runtime
+      add_mouth included); sleep re-authors everything. PIXEL ROCK RESTYLE
+      on both meshers: smooth edge-interpolated geometry (vertex jitter
+      retired), flat facets, colors quantized to ~1.1 m TEXELS + per-cell
+      value roll — "less real", pixel art draped over stone. Verified by
+      tools/cathedral_live_test.gd (12 checks) + smoke/save/lab regressions
 - [x] ROLLING DEBRIS: rocks touch down into a ROLL — downhill pull vs
       friction, so gentle ground stops them after a tumble, steep slopes keep
       them going, and a cliff lip drops them back into free fall (chains
@@ -192,7 +207,13 @@ Status keys: [x] done · [~] in progress · [ ] not started
       hover tooltips (live before→after numbers) + achievement page with hidden tiers
 - [ ] WIS gates sword tiers / sword arts (comes with steps 4–5)
 - [ ] CHA grows through conversation (needs NPCs, step 6)
-- [ ] Save/persistence so a level survives quitting (currently resets per run)
+- [x] Save/persistence — Settings SAVE/LOAD buttons (dev; SaveGame.gd v2,
+      migrates v1): full snapshot — player (pos/health/stamina/level/xp/
+      stats/progression tiers/bestiary/gold), inventory + Terraria equipment
+      + Q-wheel, world hour, ground logs, and the caves as seed + shift count
+      + a 30 m density SPHERE around the player (4 m blend rim) so a cave
+      camp survives while the rest regenerates to connect. FINAL DESIGN:
+      the real game saves ONLY on sleep — that trigger still to wire
 - [ ] Long-term scaling pass once higher-tier XP sources exist
 
 ## Step 11 — Customization & final art [ ]
@@ -301,6 +322,57 @@ Status keys: [x] done · [~] in progress · [ ] not started
       impact-timed bite; OreVein.gd rocks (4 hits, seam flash + chips + shake)
       burst into ore pickups; Cave.gd seeds silver veins through rooms and
       meteoric in the deepest; first ore of a metal auto-forges that sword
+
+### Batch of 2026-07-19 → 07-29
+- [x] SAVE/LOAD in Settings (dev buttons) — see step 10 for the full snapshot;
+      cave saves keep a 30 m sphere around you, the rest regenerates to connect
+- [x] GRASS ×2 / ×2.5 DENSITY + CUT-GRASS LITTER: severed blades pendulum down
+      like leaves and STAY (litter pool; later gusts may nudge a few)
+- [x] TREES FALL LIKE THE FOREST: chopping carves a real WEDGE NOTCH into the
+      trunk (spawned-cube notch retired) that deepens per swing until the tree
+      breaks at it; on GROUND IMPACT the crown sheds every leaf in the crown's
+      footprint (most stay, ~22% blow 2-15 m downwind, Ghost-of-Tsushima
+      style) and the trunk splits into round(height) LOGS
+- [x] CARRY LOGS: logs lie where they roll; look+E hoists up to 4 over the
+      shoulder; drawing an item, getting hit, jumping, climbing, crouching or
+      going prone spills them; logs persist through save/load
+- [x] STICKS are real forked stick sprites (cubes retired); sword starts
+      SHEATHED on load-in
+- [x] ENEMY ROUT: badly hurt enemies BREAK and hobble away slowly; flying/
+      climbing types scramble up and off
+- [x] CRYSTALS MINEABLE: light crystals break apart shard by shard, the glow
+      dimming as they go; DIG-ORE now pays EVERYWHERE but rarer overall
+- [x] COMMITTED STRIKE: Ctrl-dash DURING a swing = lunging power hit for a big
+      stamina bite; two new progression trees — THE COMMITTED STEP (DEX, land
+      them) and NOTHING LEFT TO LOSE (CON, land them below 30% health)
+- [x] HORSES SHUN CAVES (16 m soft / 8 m hard avoidance) and HORSES CLIMB —
+      including under saddle: ride into a steep face and the horse scrambles
+      up it (approach press + grace window + haul-over)
+- [x] LEFT-HAND TOGGLE (settings): mirrors the hands, the visible body and
+      every animation
+- [x] METEOR 2.0: a burning point hangs visible in the sky day or night
+      (dimmer by day), ~23 s slow descent, then the crash — same crater + ore
+- [x] ELEMENTAL BLADE + ARMOR FX — see step 5 (orange fire w/ burn DoT, white,
+      amber, purple void flow; pixel-particle effects)
+- [x] ORE PICKUPS LOOK LIKE ORE: mini-veins (~0.6 m), and veins BREAK into
+      2-3 near-vein-size chunks instead of pebbles
+- [x] ACTION CAMERA: lens + hands (head + body in 3rd person) ride the
+      animations — sword swings CARRY the view across and RAMP swing over
+      swing, the axe rolls in from the side, landed hits punch the lens
+- [x] OLD RUCKSACK: a visible pack on the back (bedroll straps onto it;
+      bedroll hard-capped at one) + RUMMAGE — opening the inventory drops the
+      eyes and reaches the hands into the pack
+- [x] AXE SWINGS FROM THE SIDE; B = drop button; HEALTH POTION (+40);
+      Q ITEM WHEEL (8 slots: tap Q in the inventory to add, hold Q to place);
+      the creeping sprint-disable bug fixed
+- [x] TERRARIA EQUIPMENT: every paper-doll slot is a real CONTAINER — items
+      move OUT of the grid INTO the slot and back; the Old Rucksack is a BACK
+      accessory slot that grants the extra rows (no pack worn = 9 pockets);
+      saves restore the doll exactly as left; first load spawns born-dressed
+- [x] THE CAVE LAB (M menu, New Cave 1-4): four rival generators as walk-in
+      massifs — Polished Worms / Halls & Passages / The Riverbed / The
+      Cathedral — dressed entrances + real spawns; the bake-off the
+      Cathedral WON (step 9)
 
 ---
 

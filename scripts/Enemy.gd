@@ -56,6 +56,22 @@ class_name Enemy
 ## (horses opt out — flight stays on the ground). Tuned per mob in _init.
 @export var can_climb := true
 @export var climb_speed := 2.8     ## claw-up pace: kobolds skitter, ogres haul
+@export var climb_away := false    ## FLIGHT climbers (horses): the wall is an
+								   ## EXIT, not a route to the target — the
+								   ## trigger is a close threat, the drift runs
+								   ## AWAY from it, and being above the threat
+								   ## is the goal rather than a reason to stop
+
+## THE ROUT — nerve is a stat. Hurt a creature past its `nerve` fraction of
+## health and it stops being a fight: it breaks, turns tail, and RUNS. Not at
+## chase speed — a broken thing runs badly, on a stumbling limp well under the
+## pace it hunted you at, so catching it is a choice you make rather than a
+## race you win. It won't swing, won't telegraph, and won't climb; it just
+## wants distance, and once it has enough it goes back to grazing.
+## nerve = 0.0 means it never breaks (bone doesn't panic; neither does plate).
+@export var nerve := 0.22          ## routs below this fraction of max health
+@export var rout_speed := 0.5      ## fraction of chase_speed while broken
+@export var rout_line := "breaks and runs"   ## shown once, in the log
 
 enum State { CALM, AGITATED }
 
@@ -63,7 +79,7 @@ var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9
 var health := 70.0
 var state: int = State.CALM
 var foe: Node3D = null       ## INFIGHTING: a live grudge against another
-                             ## creature overrides the player as the target
+							 ## creature overrides the player as the target
 var dying := false
 var confused := false   ## menu-spawned mobs: wander in lost circles, never
 						## aggro on proximity — snaps out of it when hit
@@ -124,6 +140,15 @@ var eye_mats: Array[StandardMaterial3D] = []
 var hit_flash := 0.0
 var flinch_timer := 0.0
 var retreat_timer := 0.0   ## after being caught mid-strong-attack: back off a moment
+var routing := false       ## nerve broke — it is running for its life
+var rout_t := 0.0          ## how long it has been running
+
+## --- BURNING (the fire metals): a meteoric or dragonsteel edge leaves the
+## wound ALIGHT — damage that keeps ticking after the blade has moved on,
+## shedding little embers off the body. Refreshes rather than stacks. ---
+var burn_t := 0.0
+var burn_dps := 0.0
+var _burn_tick := 0.0
 var parry_open := 0.0      ## parried: staggered AND vulnerable (flinch immunity waived)
 
 
@@ -203,6 +228,21 @@ func _physics_process(delta: float) -> void:
 	if dying:
 		move_and_slide()
 		return
+
+	## Fire doesn't care what the creature was doing — it ticks before the
+	## sleep check so a burning body burns even far from the player's eye.
+	if burn_t > 0.0:
+		burn_t -= delta
+		_burn_tick -= delta
+		if _burn_tick <= 0.0:
+			_burn_tick = 0.45
+			health -= burn_dps * 0.45
+			_shed_embers()
+			if health <= 0.0:
+				burn_t = 0.0
+				_die()
+				move_and_slide()
+				return
 
 	## Sleep far-off idle mobs (caves spawn dozens) to save CPU — they wake as
 	## soon as the player gets within range.
@@ -302,6 +342,12 @@ func _physics_process(delta: float) -> void:
 	elif state == State.AGITATED and (player == null or dist > leash_radius):
 		_set_agitated(false)
 
+	if routing:
+		## Broken. Nothing else it might have been doing matters — and it
+		## doesn't climb, because a panicking animal takes the ground.
+		_do_rout(delta, player, dist)
+		move_and_slide()
+		return
 	if state == State.CALM:
 		_do_wander(delta)
 	else:
@@ -309,6 +355,78 @@ func _physics_process(delta: float) -> void:
 
 	_update_climb(delta, player, dist)
 	move_and_slide()
+
+
+func apply_burn(dps: float, dur: float) -> void:
+	## The wound is alight. New fire refreshes the clock and keeps the
+	## hottest rate — it never stacks into an unearned execution.
+	if dying:
+		return
+	burn_dps = maxf(burn_dps, dps)
+	burn_t = maxf(burn_t, dur)
+
+
+func _shed_embers() -> void:
+	## Two pixel embers per tick, popping off the body and guttering out.
+	for _i in range(2):
+		var m := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3.ONE * randf_range(0.05, 0.09)
+		m.mesh = bm
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.25, 0.08, 0.02)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.45, 0.10).lerp(Color(1.0, 0.7, 0.25), randf())
+		mat.emission_energy_multiplier = 2.4
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.material_override = mat
+		add_child(m)
+		m.position = Vector3(randf_range(-0.4, 0.4), randf_range(0.4, 1.3), randf_range(-0.4, 0.4))
+		var tw := m.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(m, "position", m.position + Vector3(randf_range(-0.3, 0.3),
+			randf_range(0.5, 1.0), randf_range(-0.3, 0.3)), 0.5)
+		tw.tween_property(m, "scale", Vector3.ONE * 0.05, 0.5)
+		tw.chain().tween_callback(m.queue_free)
+
+
+func _break_and_run() -> void:
+	## Its nerve goes. Everything it was in the middle of is abandoned.
+	routing = true
+	rout_t = 0.0
+	strong_active = false
+	strong_windup = 0.0
+	was_in_melee = false
+	melee_anim = 0.0
+	melee_hit_pending = false
+	climbing = false
+	foe = null
+	_set_telegraph_glow(false)
+	var p := _get_player()
+	if p != null and p.has_method("_add_log_msg") \
+			and p.global_position.distance_to(global_position) < 26.0:
+		p._add_log_msg("The %s %s" % [display_name.to_lower(), rout_line], Color(0.80, 0.86, 0.72))
+
+
+func _do_rout(delta: float, player: Node3D, dist: float) -> void:
+	rout_t += delta
+	## It stops running when it has bought enough distance, or when it simply
+	## can't run any longer — and then it goes back to being part of the world.
+	if player == null or dist > leash_radius * 1.5 or rout_t > 20.0:
+		routing = false
+		_set_agitated(false)
+		return
+	var away := global_position - player.global_position
+	away.y = 0.0
+	if away.length() < 0.01:
+		away = Vector3(randf() - 0.5, 0.0, randf() - 0.5)
+	away = away.normalized()
+	## The limp: a wounded thing doesn't run smoothly, and it doesn't run
+	## FAST. Well under its own hunting pace — you can always run it down.
+	var sp := chase_speed * rout_speed * (0.82 + 0.18 * sin(rout_t * 7.0))
+	sp = minf(sp, wander_speed * 2.4)
+	_steer(away * sp, delta, 7.0)
+	_face(away, delta, 6.0)
 
 
 func _set_agitated(on: bool) -> void:
@@ -601,9 +719,9 @@ func _update_climb(delta: float, target: Node3D, dist: float) -> void:
 		var over_lip := not is_on_wall()
 		var target_below := target != null \
 			and target.global_position.y < global_position.y - 0.6
-		if over_lip or target_below or _climb_time > 6.0:
+		if over_lip or (target_below and not climb_away) or _climb_time > 6.0:
 			climbing = false
-			if over_lip and _climb_time <= 6.0 and not target_below:
+			if over_lip and _climb_time <= 6.0 and (climb_away or not target_below):
 				## Haul over the edge: a surge up-and-forward so the body LANDS
 				## on the ledge instead of scraping back down the face.
 				var fwd := -_climb_normal
@@ -623,6 +741,8 @@ func _update_climb(delta: float, target: Node3D, dist: float) -> void:
 			to_t.y = 0.0
 			if to_t.length() > 0.4:
 				drift = clampf(to_t.normalized().dot(tangent), -1.0, 1.0)
+				if climb_away:
+					drift = -drift  ## a fleeing climber angles AWAY across the face
 		velocity = Vector3.UP * climb_speed + tangent * drift * climb_speed * 0.45 \
 			- _climb_normal * 1.4
 		_face(-_climb_normal, delta, 9.0)
@@ -633,6 +753,10 @@ func _update_climb(delta: float, target: Node3D, dist: float) -> void:
 	## (plain blocked long enough that up is the only idea left).
 	var above := target != null \
 		and target.global_position.y > global_position.y + 0.9
+	if climb_away:
+		## Flight reads walls differently: what makes rock worth taking is a
+		## THREAT AT YOUR HEELS, not prey overhead.
+		above = target != null and dist < 8.0
 	_climb_scan_t -= delta
 	if above and dist > attack_range and _climb_scan_t <= 0.0:
 		_climb_scan_t = 0.22
@@ -806,6 +930,10 @@ func take_damage(amount: float, _from_pos = null, _strong = false, _throw = null
 			_set_agitated(true)  ## a normal hit just angers it
 	else:
 		_set_agitated(true)
+	## Nerve check: hurt past the point where the fight is still worth it and
+	## the creature simply stops fighting. Once broken, it stays broken.
+	if health > 0.0 and not routing and nerve > 0.0 and health <= max_health * nerve:
+		_break_and_run()
 	if health <= 0.0:
 		_die()
 

@@ -197,3 +197,45 @@ static func roll_sword_drop(xp_tier: int) -> String:
 		if pick <= 0:
 			return String(entry[0])
 	return String(table[0][0])
+
+
+## ===================== Blade & armor presence (fx) ========================
+## What a metal DOES to the air around it. The high metals are not just
+## stat rows — held in the hand they are light sources and weather:
+##   meteoric / dragonsteel — fire metals: orange lamplight, pixel flame
+##     shedding off blade and armor, and wounds that keep burning.
+##   mithril — a clean white light, like moonlight off snow.
+##   adamant — amber; old, heavy, warm.
+##   voidsteel — purple light and a slow pixel VOID crawling the steel.
+
+
+static func blade_fx(id: String) -> Dictionary:
+	## {} = an honest metal that just reflects. Otherwise:
+	## {light: Color, energy: float, range: float, fire: bool, void: bool}
+	match id:
+		"meteoric":
+			return {"light": Color(1.0, 0.50, 0.15), "energy": 1.1, "range": 3.0,
+				"fire": true, "void": false}
+		"dragonsteel":
+			return {"light": Color(1.0, 0.38, 0.08), "energy": 1.6, "range": 3.6,
+				"fire": true, "void": false}
+		"mithril":
+			return {"light": Color(0.95, 0.97, 1.0), "energy": 0.9, "range": 2.6,
+				"fire": false, "void": false}
+		"adamant":
+			return {"light": Color(1.0, 0.85, 0.45), "energy": 1.0, "range": 2.8,
+				"fire": false, "void": false}
+		"voidsteel":
+			return {"light": Color(0.60, 0.25, 0.95), "energy": 1.3, "range": 3.2,
+				"fire": false, "void": true}
+	return {}
+
+
+static func burn_for(id: String) -> Dictionary:
+	## Fire metals leave the wound BURNING: {dps, dur}, ticked by the enemy.
+	match id:
+		"meteoric":
+			return {"dps": 2.5, "dur": 3.0}
+		"dragonsteel":
+			return {"dps": 5.0, "dur": 4.0}
+	return {}

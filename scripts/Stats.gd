@@ -32,7 +32,7 @@ const BASE_HP := 100.0
 const BASE_STAM := 100.0
 const BASE_REGEN := 20.0
 const BASE_HEAL := 3.0   ## out-of-combat HP regen per second
-const BASE_CARRY := 60.0
+const BASE_CARRY := 90.0  ## was 60 — the old cap arrived so early it read as a sprint BUG
 const BASE_DAMAGE := 22.0
 
 var vals := {"con": BASE_STAT, "dex": BASE_STAT, "str": BASE_STAT, "wis": BASE_STAT, "cha": BASE_STAT}
@@ -69,6 +69,16 @@ const TREES: Array[Dictionary] = [
 		"id": "combo_master", "name": "Combo Master", "stat": "dex",
 		"desc": "Land the third strike of the flowing combo.",
 		"noun": "finishers", "tiers": [5, 15, 40, 100, 250, 500], "locked": false,
+	},
+	{
+		"id": "committed_step", "name": "The Committed Step", "stat": "dex",
+		"desc": "There is no taking it back once your feet have gone. Close the gap and swing in the same breath.",
+		"noun": "commitments", "tiers": [5, 15, 40, 90, 200, 450], "locked": false,
+	},
+	{
+		"id": "nothing_to_lose", "name": "Nothing Left to Lose", "stat": "con",
+		"desc": "Caution is a thing you can afford at full health. Drive a committed strike home while yours is nearly gone.",
+		"noun": "reckless strikes", "tiers": [3, 10, 25, 55, 110, 220], "locked": false,
 	},
 	{
 		"id": "perfect_guard", "name": "Perfect Guard", "stat": "str",

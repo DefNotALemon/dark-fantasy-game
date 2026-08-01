@@ -23,6 +23,9 @@ func _init() -> void:
 	## Armored plate over a cursed champion: steel's armor bonus and curse
 	## penalty STACK (×1.35 × ×0.8 ≈ ×1.08); silver/voidsteel shine here.
 	families = ["cursed", "armored"]
+	## Whatever is inside that plate does not know how to retreat.
+	nerve = 0.0
+	rout_speed = 0.5
 	duelist = true
 	duel_range = 6.0
 	duel_hold_min = 0.5

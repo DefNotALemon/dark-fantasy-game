@@ -7,7 +7,13 @@ class_name CaveMesher
 ## Also hands back the raw triangle soup for the chunk's collision shape.
 
 const CHUNK := 16                ## cells per chunk side
-const JITTER := 0.24             ## deterministic vertex shake — hewn, not gridded
+const PIX := 1.1                 ## color texel size (m) — the PIXELATED rock
+                                 ## texture: strata sampled on a coarse grid
+                                 ## with a per-cell value roll, so the walls
+                                 ## read as chunky pixel-art patches instead
+                                 ## of clean gradients. Geometry stays smooth
+                                 ## (edge-interpolated verts, no jitter) —
+                                 ## smooth to WALK, pixelated to LOOK AT.
 
 ## Palette (vertex colors; material uses them as albedo)
 const GRASS := Color(0.16, 0.24, 0.14)   ## matches the World ground slab
@@ -143,38 +149,12 @@ static func _cell_vert(f: CaveField, c: Vector3i) -> Vector3:
 			n += 1
 	if n == 0:
 		return Vector3.INF
+	## Pure edge interpolation, no jitter: the surface lands where the field
+	## says it is — floors you can WALK, silhouettes that don't shiver.
 	var local := (Vector3(c) + acc / float(n)) * CaveField.VOX
-	return f.origin + local + _jitter(f, c) * CaveField.VOX
+	return f.origin + local
 
 
-static func _jitter(f: CaveField, c: Vector3i) -> Vector3:
-	## The hewn-rock shake is an UNDERGROUND texture. On the open surface the
-	## region must be indistinguishable from the world slab it meets — same
-	## color (exact), same flatness, same lighting — so jitter fades to zero:
-	##   · toward the region rim (the seam itself), and
-	##   · anywhere near the surface AWAY from the entrance (the "giant patch"
-	##     was flat-but-faceted grass catching light differently than the slab).
-	## Relief only survives at the entrance zone and below ground.
-	var edge := mini(mini(c.x, CaveField.CELLS_X - 1 - c.x), mini(c.z, CaveField.CELLS_Z - 1 - c.z))
-	var fade := clampf((float(edge) * CaveField.VOX - 1.2) / 4.5, 0.0, 1.0)
-	var wy := f.origin.y + (float(c.y) + 0.5) * CaveField.VOX
-	if wy > -1.8 and fade > 0.0:
-		var wx := f.origin.x + (float(c.x) + 0.5) * CaveField.VOX
-		var wz := f.origin.z + (float(c.z) + 0.5) * CaveField.VOX
-		var near_mouth := false
-		for m in f.mouths:
-			if Vector2(wx - m.x, wz - m.z).length() <= 13.0:
-				near_mouth = true
-				break
-		if not near_mouth:
-			fade *= clampf((-wy - 0.55) / 1.25, 0.0, 1.0)
-	if fade <= 0.0:
-		return Vector3.ZERO
-	var s := float(c.x) * 12.9898 + float(c.y) * 78.233 + float(c.z) * 37.719
-	return Vector3(
-		fposmod(sin(s) * 43758.5453, 1.0) - 0.5,
-		fposmod(sin(s + 1.7) * 43758.5453, 1.0) - 0.5,
-		fposmod(sin(s + 4.2) * 43758.5453, 1.0) - 0.5) * (JITTER * fade)
 
 
 static func _strata_color(f: CaveField, p: Vector3, n: Vector3) -> Color:
@@ -187,10 +167,19 @@ static func _strata_color(f: CaveField, p: Vector3, n: Vector3) -> Color:
 	var depth := -p.y
 	if n.y > 0.55 and depth < 1.4:
 		return GRASS.srgb_to_linear()
+	## THE PIXEL TEXTURE: everything below samples at the CENTER of a coarse
+	## 3D texel (PIX m), plus a hashed per-texel value roll — neighbouring
+	## faces land in different cells and the rock breaks into blocky patches.
+	var q := Vector3(floor(p.x / PIX), floor(p.y / PIX), floor(p.z / PIX))
+	var qc := (q + Vector3.ONE * 0.5) * PIX
+	var qdepth := -qc.y
 	var c := ROCK
-	var bandv := f.band.get_noise_3d(p.x * 0.6, p.y * 2.2, p.z * 0.6)  ## horizontal-ish strata
-	c = c * (1.0 + bandv * 0.16)
-	c = c.lerp(FROST, clampf((depth - 3.0) / 9.0, 0.0, 1.0) * 0.22)
-	c = c.lerp(EMBER, clampf((depth - 23.0) / 9.0, 0.0, 1.0) * 0.55)
+	var bandv := f.band.get_noise_3d(qc.x * 0.6, qc.y * 2.2, qc.z * 0.6)  ## strata, texel-stepped
+	c = c * (1.0 + bandv * 0.20)
+	c = c.lerp(FROST, clampf((qdepth - 3.0) / 9.0, 0.0, 1.0) * 0.22)
+	c = c.lerp(EMBER, clampf((qdepth - 23.0) / 9.0, 0.0, 1.0) * 0.55)
+	## The per-texel roll (deterministic hash — the "pixels" never swim).
+	var h := fposmod(sin(q.x * 12.9898 + q.y * 78.233 + q.z * 37.719) * 43758.5453, 1.0)
+	c = c * (0.90 + h * 0.20)
 	c.a = 1.0
 	return c.srgb_to_linear()

@@ -20,6 +20,10 @@ func _init() -> void:
 	leash_radius = 20.0
 	xp_tier = 0
 	families = ["humanoid"]
+	## Fodder with a spear: the first serious wound ends its interest entirely.
+	nerve = 0.45
+	rout_speed = 0.62
+	rout_line = "squeals and bolts"
 	## Lunge triggers from mid-range; the tail spin comes out at melee range.
 	strong_min_range = 2.0
 	strong_max_range = 5.5

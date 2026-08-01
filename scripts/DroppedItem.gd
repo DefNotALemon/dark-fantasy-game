@@ -164,10 +164,46 @@ func _build_mesh() -> void:
 				_build_stick()
 			elif nm == "Wood" or nm == "Log":
 				_build_billet()
+			elif nm == "Crystal Shard":
+				_build_shard(Color(item.get("glow", Color(0.35, 0.85, 1.0))))
+			elif mat_id != "" and nm.ends_with(" Ore"):
+				_build_ore(mat_id)
+			elif nm == "Health Potion":
+				_build_potion()
+			elif nm == "Old Rucksack":
+				_build_rucksack()
 			else:
 				## Plain loot (tusks, bones, pickaxes...): a humble bundle.
 				_add_box(Vector3(0.16, 0.14, 0.16), col, Vector3(0, 0.05, 0))
 				_add_box(Vector3(0.19, 0.05, 0.05), Color(0.30, 0.24, 0.16), Vector3(0, 0.12, 0), Vector3(0, 25, 0))
+
+
+func _build_ore(mat_id: String) -> void:
+	## A PIECE OF THE VEIN, not a parcel: the same dark rock lump the standing
+	## vein is made of, shot through with the same glowing seam studs, at
+	## roughly half the parent's size — big enough to spot across a dark
+	## chamber by its own glint, unmistakably a chunk OF the thing you broke.
+	var m: Dictionary = Materials.get_mat(mat_id)
+	var seam_col: Color = m["color"]
+	var elem: Dictionary = m["element"]
+	var glow_col: Color = seam_col if elem.is_empty() else Color(elem["color"])
+	var rock_col := Color(0.16, 0.15, 0.17)
+	## The rock: two tilted lumps, vein-shaped, about half a vein tall.
+	_add_box(Vector3(0.62, 0.50, 0.62), rock_col,
+		Vector3(0, 0.25, 0), Vector3(randf_range(-9, 9), randf() * 360.0, randf_range(-9, 9)))
+	_add_box(Vector3(0.44, 0.36, 0.44), rock_col,
+		Vector3(randf_range(-0.12, 0.12), 0.52, randf_range(-0.12, 0.12)),
+		Vector3(randf_range(-15, 15), randf() * 360.0, randf_range(-15, 15)))
+	## The seams: bright studs punched through the faces, glowing the metal's
+	## color (elemental metals burn their element's color, like the vein).
+	for _i in range(randi_range(4, 6)):
+		var a := randf() * TAU
+		var h := randf_range(0.12, 0.55)
+		var r := 0.30 if h < 0.44 else 0.21
+		_add_box(Vector3.ONE * randf_range(0.09, 0.14), seam_col,
+			Vector3(cos(a) * r, h, sin(a) * r),
+			Vector3(randf_range(-20, 20), randf() * 360.0, randf_range(-20, 20)),
+			true, glow_col)
 
 
 func _add_branch(len_v: float, rad: float, col: Color, pos: Vector3, rot: Vector3) -> MeshInstance3D:
@@ -202,6 +238,35 @@ func _build_stick() -> void:
 	_add_branch(0.13, 0.011, wood.lightened(0.06), Vector3(0.05, 0.031, 0.08), Vector3(80, 61, 0))
 	## The break: pale heartwood at the butt.
 	_add_branch(0.02, 0.026, Color(0.52, 0.39, 0.21), Vector3(0, 0.028, -0.31), Vector3(90, 0, 0))
+
+
+func _build_shard(glow_col: Color) -> void:
+	## A piece of the cave's light, lying in the dirt still burning. It keeps
+	## the colour of the cluster it came off — blue, violet, or ember deep down.
+	_add_box(Vector3(0.10, 0.26, 0.10), glow_col, Vector3(0, 0.11, 0),
+		Vector3(18, 24, -12), false, glow_col)
+	_add_box(Vector3(0.07, 0.15, 0.07), glow_col, Vector3(0.08, 0.07, 0.04),
+		Vector3(-26, -40, 20), false, glow_col)
+
+
+func _build_potion() -> void:
+	## The red draught: a squat glass flask, liquid glowing faintly through it,
+	## corked, lying where it was dropped. Reads across a dark room.
+	var red := Color(0.85, 0.12, 0.14)
+	_add_box(Vector3(0.13, 0.15, 0.13), red, Vector3(0, 0.075, 0),
+		Vector3(0, randf() * 360.0, 0), false, red * 0.5)                       ## the body
+	_add_box(Vector3(0.055, 0.07, 0.055), Color(0.65, 0.75, 0.78), Vector3(0, 0.185, 0))  ## the neck
+	_add_box(Vector3(0.065, 0.035, 0.065), Color(0.42, 0.30, 0.18), Vector3(0, 0.235, 0)) ## the cork
+
+
+func _build_rucksack() -> void:
+	## The old rucksack, off a back for once: worn leather, rolled flap,
+	## front pocket, one strap flopped loose on the ground.
+	var leath := Color(0.30, 0.22, 0.14)
+	_add_box(Vector3(0.30, 0.34, 0.14), leath, Vector3(0, 0.17, 0), Vector3(-8, randf() * 360.0, 4))
+	_add_box(Vector3(0.32, 0.11, 0.15), Color(0.38, 0.33, 0.24), Vector3(0, 0.36, 0), Vector3(-14, 0, 4))
+	_add_box(Vector3(0.20, 0.14, 0.05), leath.darkened(0.12), Vector3(0, 0.10, 0.09), Vector3(-8, 0, 4))
+	_add_box(Vector3(0.05, 0.03, 0.26), leath.darkened(0.2), Vector3(0.16, 0.02, 0.10), Vector3(0, 30, 0))
 
 
 func _build_billet() -> void:

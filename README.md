@@ -19,20 +19,21 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 | Space | Jump |
 | Left click | Sword: attack (flowing 1-2-3 combo) · Bow: hold to draw, release to loose · Pickaxe: chop (bites ore veins, digs cave rock) · War axe: alternating chop/cleave |
 | Right click | Sword: block · Bow: ease the string back down |
-| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full swings (overhead chop, left-to-right cleave). No material matchups yet — honest iron. **It also fells trees, properly**: every bite EATS a triangular wedge out of the trunk on the side you're standing (real geometry removed, pale heartwood laid open, deeper each swing), and when the wedge runs past the centre the trunk breaks *on that notch* — a stump stays rooted and everything above it goes over. When the crown hits dirt the canopy comes apart: every leaf breaks off and planes down to lie in the shape of the fallen crown, and the trunk splits into as many **logs** as the tree was metres tall |
-| Ctrl | Dash |
+| 1 / 2 / 3 / 4 | Weapon: sword / bow / pickaxe / **war axe** (while no menu is open). The axe is a heavy one-handed cleaver — ~35% harder-hitting than the sword, slower, no combo: two alternating full SIDE swings (forehand right-to-left, backhand back across — a feller's strokes at trunk height). No material matchups yet — honest iron. **It also fells trees, properly**: every bite EATS a triangular wedge out of the trunk on the side you're standing (real geometry removed, pale heartwood laid open, deeper each swing), and when the wedge runs past the centre the trunk breaks *on that notch* — a stump stays rooted and everything above it goes over. When the crown hits dirt the canopy comes apart: every leaf breaks off and planes down to lie in the shape of the fallen crown, and the trunk splits into as many **logs** as the tree was metres tall |
+| Ctrl | Dash — **or COMMIT**: press it during a sword swing (or swing during a dash) with an enemy in front of you and the step goes into the cut instead of your footwork. The blow lands at ×2.05 with ~a metre of extra reach, and costs 30 stamina *on top of* the swing, paid whether or not it connects. With nothing ahead, or nothing left in the tank, Ctrl is still just a dodge |
 | V | Camera: first person → **third person** over the right shoulder. Short press in third person **swaps shoulders**; **hold 1.5s** to glide back into first person. Every switch is animated, walls pull the camera in, and your last choice is remembered between runs |
 | C | **Stance cycle**: stand → crouch → **prone** → stand. Each step is slower, lower, and harder to spot — in tall grass calm enemies' wake radius is 60% upright, 35% crouched, **22% prone** (flat to the earth, chin over the grass line). Going prone settles slowly with a body-weight roll — that's the animation. Jumping or climbing stands you up |
 | Space | Jump — or **climb**: if there's a grabbable ledge in front of you (up to ~2.6 m), Space mantles up onto it instead, with a pull-up animation. Works mid-air (grab a lip as you fall), costs a little stamina — spam it to scale cave walls or climb out of anywhere you're stuck (dig footholds with the pickaxe if the wall's too tall) |
-| F | Interact: **sleep** at a bed (the bedroll by spawn) — sleeps to dawn, full heal, and **the underground SHIFTS**: every cave re-carves except the permanent entrance caves (24 m bubbles around each mouth, with a no-spawn barrier). Otherwise: mount / dismount a saddled horse (WASD ride — camera-steered, Shift gallop, Space jump; LMB = saddle sword sweeps) |
+| F | Interact: **sleep** at a bed (the bedroll by spawn) — sleeps to dawn, full heal, and **the underground SHIFTS**: every cave re-carves except the permanent entrance caves (24 m bubbles around each mouth, with a no-spawn barrier). Otherwise: mount / dismount a saddled horse (WASD ride — camera-steered, Shift gallop, Space jump; LMB = saddle sword sweeps; **ride INTO a steep rock face and the horse SCRAMBLES up it** — reins steer the line, ease off to let go) |
 | Alt / Option | Sheathe / unsheathe sword — the shield stows on your back / draws with it. **The Hunch** (settings toggle, on by default): the blade auto-draws the instant something turns hostile and auto-sheathes after 6.7 quiet seconds |
-| Q | Cycle offhand: shield → torch → shield + torch (strapped to the same arm) → empty (only items you own) |
+| Q | **The ITEM WHEEL** (8 slots): hold Q and drag toward a slot, release to use it — swords wield, shield/torch take the arm, the bedroll unrolls, the potion goes down. In the Inventory: tap Q over an item to add it to the wheel, **hold Q** to choose exactly which slot it rides |
 | E | Pick up the dropped item under your gaze — or **shoulder a log** from a felled tree (four is all a back will take; the load rides visibly on your shoulder and rolls off the moment you jump, climb, crouch, go prone, mount up, take a hit, or reach into your pack) — or **pack up a bedroll** (becomes a backpack item, 4 wt; click it in the Inventory to unroll it on the ground ahead — camp anywhere on the surface) |
-| M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) — plus a dev button that **tears open a whole new cave mouth** ~30 m ahead (quake included) |
+| B | **Drop**: in the Inventory, sheds the hovered item at your feet |
+| M | Mob spawn menu (spawns ~10 ft ahead, confused — won't attack until hit) — plus a dev button that **tears open a whole new cave mouth** ~30 m ahead (quake included), and the **CAVE LAB**: New Cave 1-4 raise four rival cave generators as walk-in rock massifs ~45 m ahead (Polished Worms / Halls & Passages / The Riverbed / The Cathedral — all diggable, all pixel-skinned like the real caves now, all with REAL cave spawns inside and dressed daylight entrances; one lab stands at a time) |
 | G | **Creative menu (dev)**: every item in the game — sword / 5-pc armor set / raw ore for all 10 metals, plus shield, torch, pickaxe, arrows, bedroll, wood, and the junk loot |
-| Tab | Menu: **1** Inventory · **2** Stats · **3** Progression · **4** Bestiary |
+| Tab | Menu: **1** Inventory · **2** Stats · **3** Progression · **4** Bestiary — the Inventory is **Terraria rules**: click a pack item to equip it (it MOVES into its slot), click a worn slot on the doll to take it off. The **Old Rucksack** is worn on its own **Back** slot and IS your grid: worn = 27 slots, bare back = 9. You start dressed, and saves put everything back exactly where you left it |
 | I | Straight to the Inventory page |
-| Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch, **Save / Load**) — or closes the open menu. All menus render 67% larger |
+| Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch, **Main Hand** — mirror the whole kit for lefties — and **Save / Load**) — or closes the open menu. All menus render 67% larger |
 
 (Heavy/light builds and dodge are coming later — dropped from this slice for now.)
 
@@ -53,13 +54,17 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 - **Tall hiding grass**: dense chest-high patches you can vanish into — stand
   (don't sprint) inside and calm enemies barely notice you ("~ hidden ~" shows
   while you're concealed). Sneak past packs, or line up the first arrow.
-- **CAVES 2.0 — organic voxel caves** (full redo, docs/CAVES_PLAN.md): two 64×64 m
-  regions of real underground. Worm tunnels swell into caverns and pinch into
-  narrow-but-fitable cracks entirely on their own (Minecraft-1.18-style carvers,
-  flat-shaded surface-nets rock, strata colors, grass-skinned surface). Crystals
-  light the galleries, silver seams run the middle depths, meteoric waits at the
-  deepest reachable floor, and dweller packs get meaner the deeper you go — a
-  dark knight holds the bottom.
+- **CAVES 2.0 — the CATHEDRAL underground** (docs/CAVES_PLAN.md): one map-wide
+  voxel underground, now carved by the Cathedral generator that won the cave-lab
+  bake-off. ~13 authored caverns — grand columned naves, mid halls, deep crypts —
+  joined into one looping network of walkable capsule tunnels, every cavern
+  floored with flat sediment terrain you can actually fight on, all roughed by
+  noise so nothing reads man-made. Every sleep re-authors the whole network.
+  The rock wears a NEW PIXEL SKIN: smooth walkable geometry, but colors are
+  quantized into chunky ~1 m texels — deliberately "less real", like pixel art
+  draped over stone. Crystals light the naves, silver seams run the middle
+  depths, meteoric waits at the deepest reachable floor, and dweller packs get
+  meaner the deeper you go — a dark knight holds the bottom.
 - **The pickaxe DIGS**: bites carve real holes in cave rock — walls, floors,
   ceilings. Rocks physically fall from every bite (mining a ceiling drops a slab
   that HURTS — undercut at an angle). Dig a slow stubborn shaft all the way back

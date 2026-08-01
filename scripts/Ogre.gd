@@ -22,6 +22,10 @@ func _init() -> void:
 	leash_radius = 26.0
 	xp_tier = 3
 	families = ["humanoid"]
+	## Too big to be afraid until it is very, very hurt — and too heavy to run well.
+	nerve = 0.12
+	rout_speed = 0.42
+	rout_line = "lumbers away bellowing"
 	duelist = true
 	duel_range = 6.5
 	duel_hold_min = 0.6        ## paces a touch quicker now

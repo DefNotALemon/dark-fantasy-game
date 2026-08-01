@@ -22,6 +22,9 @@ func _init() -> void:
 	leash_radius = 26.0
 	xp_tier = 2
 	families = ["undead"]
+	## Bone has no nerve to break. It fights until it is scattered.
+	nerve = 0.0
+	rout_speed = 0.5
 	duelist = true
 	strong_throws = true         ## its heavy blows knock you aside
 	strong_throw_power = 6.0     ## a stumble, not a launch
