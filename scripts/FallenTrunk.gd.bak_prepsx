@@ -1,0 +1,306 @@
+class_name FallenTrunk
+extends RigidBody3D
+
+## ===========================================================================
+## The trunk on its way down, and where it lies afterwards.
+## docs/TREES_v2_SPEC.md §8b
+##
+## It takes the WHOLE TREE with it — the carved trunk, its bark, and every limb
+## still attached. Those limbs are real colliders, so a felled tree lands on its
+## own branches and rests propped a little off the ground, like the real thing.
+## The limbs caught underneath snap on impact and drop as sticks.
+##
+## It only hurts what it actually TOUCHES, and it only pins you if it came down
+## on top of you rather than beside you.
+##
+## Once it is lying still, chopping it BUCKS it: one log per bite.
+## ===========================================================================
+
+const CRUSH_DAMAGE := 46.0         ## a mature trunk across the back
+const PIN_ARMOR_TIER := 3          ## wear this or better and it only knocks you down
+const PIN_SECONDS := 7.0           ## how long until it rolls off you
+const PIN_ABOVE := 0.55            ## it must be THIS far above you to pin you
+const BUCK_LENGTH := 2.0           ## metres of trunk per log (spec §8b)
+const MIN_FALL_TIME := 1.6         ## it may not "settle" before it has fallen
+const TOPPLE_PUSH := 3.2           ## impulse at the top, per kg of trunk
+const UNDER_LIMB := -0.05          ## a limb this far under the trunk axis is crushed
+
+const BARK := {
+	"maple": Color(0.145, 0.120, 0.105), "birch": Color(0.66, 0.66, 0.62),
+	"oak": Color(0.125, 0.105, 0.092), "pine": Color(0.135, 0.105, 0.088),
+	"fir": Color(0.115, 0.100, 0.092),
+}
+
+var species := "maple"
+var trunk_len := 8.0
+var trunk_r := 0.3
+var logs_left := 3
+var settled := false
+
+var _crashed := false
+var _age := 0.0
+var _pinned_player: Node3D = null
+var _pin_t := 0.0
+var _mesh: MeshInstance3D
+var _model: Node3D                 ## the whole felled tree, if one was handed over
+var _limbs: Array = []             ## [{mesh, shape, centre}] — props that can snap
+
+
+static func make(at: Vector3, fall_dir: Vector3, length: float, radius: float,
+		species_id: String, logs: int) -> FallenTrunk:
+	var t := FallenTrunk.new()
+	t.species = species_id
+	t.trunk_len = length
+	t.trunk_r = radius
+	t.logs_left = maxi(logs, 1)
+	t.position = at
+	t.set_meta("fall_dir", fall_dir)
+	return t
+
+
+func adopt(model: Node3D) -> void:
+	## Take the standing tree's own geometry down with us: the notch stays cut,
+	## the bark stays on, and the limbs come along still attached.
+	_model = model
+
+
+func _ready() -> void:
+	add_to_group("fallen_trunks")
+	add_to_group("choppable")
+	mass = clampf(trunk_len * trunk_r * 120.0, 60.0, 900.0)
+	contact_monitor = true
+	max_contacts_reported = 6
+	continuous_cd = true
+
+	## Stand it up where the tree stood: the body's origin is the MIDDLE of the
+	## cylinder, so it has to sit half a trunk above the stump or the log spawns
+	## buried to the waist.
+	position.y += trunk_len * 0.5
+	var base := -trunk_len * 0.5      ## local Y of the old tree's foot
+
+	if _model != null:
+		add_child(_model)
+		_model.position = Vector3(0, base, 0)
+		_build_limb_props(base)
+	else:
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = trunk_r * 0.72
+		cyl.bottom_radius = trunk_r
+		cyl.height = trunk_len
+		cyl.radial_segments = 10
+		_mesh = MeshInstance3D.new()
+		_mesh.mesh = cyl
+		_mesh.material_override = _bark_material(trunk_r, trunk_len)
+		add_child(_mesh)
+
+	var cs := CollisionShape3D.new()
+	var shape := CylinderShape3D.new()
+	shape.radius = trunk_r
+	shape.height = trunk_len
+	cs.shape = shape
+	add_child(cs)
+
+	## Then shove the TOP of it over. A real trunk hinges on its stump, and a
+	## push applied high does that far more convincingly than spinning the whole
+	## body about its centre.
+	var dir: Vector3 = get_meta("fall_dir", Vector3.FORWARD)
+	dir.y = 0.0
+	if dir.length_squared() < 0.01:
+		dir = Vector3.FORWARD
+	dir = dir.normalized()
+	call_deferred("_start_topple", dir)
+
+	body_entered.connect(_on_body_entered)
+
+
+func _start_topple(dir: Vector3) -> void:
+	## Deferred so the body is in the physics world before it gets hit.
+	apply_impulse(dir * mass * TOPPLE_PUSH, Vector3.UP * trunk_len * 0.42)
+	angular_velocity += dir.cross(Vector3.UP).normalized() * -0.7
+
+
+func _build_limb_props(base: float) -> void:
+	## One collider per limb. This is what holds a felled tree off the ground —
+	## a bare cylinder lies flat and dead; a real one rests on its own branches.
+	var parts: Node = _model
+	if _model.get_child_count() == 1 and _model.get_child(0).get_child_count() > 0:
+		parts = _model.get_child(0)
+	for child in parts.get_children():
+		var mi := child as MeshInstance3D
+		if mi == null or mi.mesh == null or not mi.name.begins_with("Branch"):
+			continue
+		var aabb := mi.mesh.get_aabb()
+		var reach := aabb.size.length()
+		if reach < 1.0:
+			continue                      ## twigs don't hold a tree up
+		var cs := CollisionShape3D.new()
+		var sp := SphereShape3D.new()
+		## Small props. Fat ones turned the tree into a tripod that stood there
+		## at twenty degrees off vertical instead of coming down — a felled tree
+		## rests ON its limbs, it does not get held up by them.
+		sp.radius = clampf(reach * 0.09, 0.10, 0.38)
+		cs.shape = sp
+		cs.position = mi.position + aabb.get_center() + Vector3(0, base, 0)
+		add_child(cs)
+		_limbs.append({"mesh": mi, "shape": cs, "centre": cs.position})
+
+
+func _physics_process(delta: float) -> void:
+	## THE BUG THAT KEPT TREES STANDING: this used to freeze the body the instant
+	## it was slow — which on frame one, before gravity had touched it, was
+	## immediately. The trunk froze bolt upright and never fell.
+	_age += delta
+	if _age < MIN_FALL_TIME:
+		return
+	if not settled and linear_velocity.length() < 0.3 and angular_velocity.length() < 0.35:
+		settled = true
+		freeze = true     ## stop simulating a log that has finished falling
+
+	if _pinned_player != null:
+		_pin_t += delta
+		if _pin_t >= PIN_SECONDS:
+			_release_pin()
+
+
+func _on_body_entered(body: Node) -> void:
+	if not _crashed:
+		_crashed = true
+		for p in get_tree().get_nodes_in_group("player"):
+			if p.has_method("tree_crash_shake"):
+				p.tree_crash_shake(global_position)
+		_snap_limbs_underneath()
+
+	## Only what the trunk ACTUALLY TOUCHES gets hurt. This used to sweep a
+	## radius on impact and flatten everyone standing near the crash — which is
+	## why felling a tree knocked you down every single time, wherever you were.
+	var n3 := body as Node3D
+	if n3 == null or not is_instance_valid(n3):
+		return
+	if not (n3.is_in_group("player") or n3.is_in_group("enemies")):
+		return
+	if n3.has_method("take_damage"):
+		n3.take_damage(CRUSH_DAMAGE, global_position, true)
+	_try_pin(n3)
+
+
+func _snap_limbs_underneath() -> void:
+	## Whatever was caught between the trunk and the ground breaks. The limbs
+	## that survive keep their colliders and hold the trunk up off the dirt.
+	var axis := global_transform.basis.y.normalized()
+	for L in _limbs.duplicate():
+		var p: Vector3 = L["centre"]
+		var perp := p - axis * p.dot(axis)          ## offset from the centre-line
+		var world_perp := global_transform.basis * perp
+		if world_perp.y > UNDER_LIMB:
+			continue                                ## sticking up or out — it lives
+		_snap_limb(L)
+
+
+func _snap_limb(L: Dictionary) -> void:
+	_limbs.erase(L)
+	var mi := L["mesh"] as MeshInstance3D
+	var cs := L["shape"] as CollisionShape3D
+	var at := global_position
+	if is_instance_valid(mi):
+		at = mi.global_position
+		mi.visible = false
+	if is_instance_valid(cs):
+		cs.queue_free()
+	var world := get_parent()
+	if world == null:
+		return
+	for _i in range(randi_range(1, 2)):
+		var s := DroppedItem.make({"name": "Stick", "weight": 0.3, "count": 1, "slot": ""})
+		world.add_child(s)
+		s.global_position = at + Vector3(randf_range(-0.4, 0.4), 0.25, randf_range(-0.4, 0.4))
+		s.velocity = Vector3(randf_range(-1.4, 1.4), randf_range(0.8, 1.8), randf_range(-1.4, 1.4))
+
+
+func _try_pin(who: Node3D) -> void:
+	## It can only pin you if it came down ON you. A trunk that lands alongside
+	## knocks you flat at worst; it does not hold you there.
+	if _pinned_player != null or not who.is_in_group("player"):
+		return
+	if global_position.y < who.global_position.y + PIN_ABOVE:
+		return
+	var tier := 0
+	if who.has_method("armor_tier"):
+		tier = int(who.call("armor_tier"))
+	if tier >= PIN_ARMOR_TIER:
+		return                      ## plate holds; the knockdown is enough
+	if who.has_method("pin_under"):
+		who.call("pin_under", self, PIN_SECONDS)
+		_pinned_player = who
+		_pin_t = 0.0
+
+
+func _release_pin() -> void:
+	if _pinned_player != null and is_instance_valid(_pinned_player) \
+			and _pinned_player.has_method("release_pin"):
+		_pinned_player.call("release_pin")
+	_pinned_player = null
+	_pin_t = 0.0
+	## it rolls off — a shove away from whoever was under it
+	freeze = false
+	settled = false
+	apply_central_impulse(Vector3(randf_range(-1.0, 1.0), 0.4, randf_range(-1.0, 1.0)) * mass * 0.05)
+
+
+func free_pinned() -> void:
+	## Someone else rolled it off you. (Co-op hook — see spec §8b.)
+	_release_pin()
+
+
+## ---------------------------------------------------------------- bucking ---
+
+func chop_hit(_toward_chopper: Vector3, _aim := Vector3.INF) -> bool:
+	## One bite of the axe on a downed trunk cuts one log free.
+	if not settled:
+		return false
+	logs_left -= 1
+	_spawn_log()
+	trunk_len = maxf(trunk_len - BUCK_LENGTH, 0.0)
+	if logs_left <= 0 or trunk_len < BUCK_LENGTH * 0.5:
+		_scatter_last()
+		queue_free()
+		return true
+	_resize()
+	return false
+
+
+func _resize() -> void:
+	if _mesh != null and _mesh.mesh is CylinderMesh:
+		(_mesh.mesh as CylinderMesh).height = trunk_len
+	for c in get_children():
+		var cs := c as CollisionShape3D
+		if cs != null and cs.shape is CylinderShape3D:
+			(cs.shape as CylinderShape3D).height = trunk_len
+
+
+func _spawn_log() -> void:
+	var world := get_parent()
+	var cl := CarryLog.make(BUCK_LENGTH * 0.9, trunk_r, BARK.get(species, Color(0.2, 0.16, 0.13)))
+	world.add_child(cl)
+	cl.global_position = global_position + Vector3.UP * 0.2 \
+		+ (global_transform.basis * Vector3.UP) * trunk_len * 0.4
+	cl.toss(Vector3(randf_range(-1.2, 1.2), randf_range(0.4, 1.1), randf_range(-1.2, 1.2)))
+
+
+func _scatter_last() -> void:
+	var world := get_parent()
+	for _i in range(randi_range(1, 3)):
+		var s := DroppedItem.make({"name": "Stick", "weight": 0.3, "count": 1, "slot": ""})
+		world.add_child(s)
+		s.global_position = global_position + Vector3(randf_range(-0.8, 0.8), 0.3,
+			randf_range(-0.8, 0.8))
+		s.velocity = Vector3(randf_range(-1.5, 1.5), randf_range(1.0, 2.0), randf_range(-1.5, 1.5))
+
+
+func _bark_material(r: float, along: float) -> Material:
+	## One shared ShaderMaterial per species would tile wrongly on differently
+	## sized logs, so this takes a duplicate and sets the tiling for THIS piece.
+	var base: Material = TreeV2.materials_for(species)[0]
+	var m: ShaderMaterial = (base as ShaderMaterial).duplicate()
+	m.set_shader_parameter("tiling", Vector2(maxf(TAU * r * 1.6, 0.5), maxf(along * 1.6, 0.5)))
+	m.set_shader_parameter("sway", 0.0)      ## it is on the ground; it does not sway
+	return m

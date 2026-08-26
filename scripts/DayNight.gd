@@ -11,7 +11,10 @@ class_name DayNight
 ## nightfall (~20:36) fire the world-event titles through title_cb.
 
 const DAY_SECONDS := 1200.0     ## 20 real minutes per 24 game hours
-const START_HOUR := 17.0        ## boot into the signature dusk
+## Boot straight into the pink hour. (Was 17.0, which under the old sun wheel
+## was the signature dusk; with the arc pinned to dawn/nightfall above, 19.7 is
+## where that light lives now. One number — put it back if you miss it.)
+const START_HOUR := 19.7
 const DAWN_HOUR := 6.0
 const NIGHTFALL_HOUR := 20.6
 
@@ -20,6 +23,12 @@ var sky_mat: ProceduralSkyMaterial      ## set by World before add_child
 var title_cb: Callable                  ## World's title hook (skips underground)
 
 var hour := START_HOUR
+## Days since the world began. One season is 24 of these, one year 96
+## (Wind.DAYS_PER_SEASON) — this is what makes autumn ever arrive.
+var day := 0.0
+## How fast the clock runs. 1.0 is the authored 20-minute day; 0.0 freezes the
+## sun where it stands. The sky menu (' key) drives this — nothing else should.
+var time_scale := 1.0
 var sun: DirectionalLight3D
 var moon: DirectionalLight3D
 
@@ -59,7 +68,13 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	var prev := hour
-	hour = fmod(hour + delta * (24.0 / DAY_SECONDS), 24.0)
+	hour = fmod(hour + delta * time_scale * (24.0 / DAY_SECONDS), 24.0)
+	## Midnight rolled over: another day on the calendar, and the season with it.
+	if hour < prev:
+		day += 1.0
+		Wind.publish_season(day)
+		if title_cb.is_valid() and int(day) % int(Wind.DAYS_PER_SEASON) == 0:
+			title_cb.call(Wind.season_name(day))
 	if title_cb.is_valid():
 		if _crossed(prev, hour, DAWN_HOUR):
 			title_cb.call("Daybreak")
@@ -113,7 +128,25 @@ func _apply() -> void:
 
 	## Sun + moon ride one great wheel: 06:00 sunrise, 12:00 overhead, the moon
 	## always directly opposite. The procedural sky draws the sun disc for free.
-	var ang := (hour - 6.0) / 24.0 * TAU
+	## The arc used to be a plain 24-hour wheel, which crossed the horizon at
+	## 18:00 — an hour and a half before the 19.5 dusk keyframe and 2.6 hours
+	## before NIGHTFALL_HOUR. With a procedural sky nobody could see the
+	## mismatch; with shaders/sky.gdshader, which reads the sun's real
+	## elevation, the sky went black while the fog was still orange.
+	##
+	## So the arc is pinned to the day this game actually authored: the sun
+	## crosses the horizon exactly at DAWN_HOUR and again at NIGHTFALL_HOUR,
+	## and rides highest halfway between (13:18). Long summer days, and the
+	## pink hour now lands on the orange keyframe where it belongs.
+	var ang := 0.0
+	var day_len := NIGHTFALL_HOUR - DAWN_HOUR
+	if hour >= DAWN_HOUR and hour < NIGHTFALL_HOUR:
+		ang = PI * (hour - DAWN_HOUR) / day_len
+	else:
+		var nh := hour - NIGHTFALL_HOUR
+		if nh < 0.0:
+			nh += 24.0
+		ang = PI + PI * nh / (24.0 - day_len)
 	if sun:
 		sun.rotation = Vector3(-ang, deg_to_rad(-115.0), 0.0)
 		sun.light_energy = float(s[5])

@@ -1,0 +1,346 @@
+{
+  "bit_depth": 16,
+  "calls": {
+    "barred_owl": {
+      "bytes": 151264,
+      "category": "call",
+      "file": "barred_owl.wav",
+      "loop": false,
+      "note": "'Who-cooks-for-you, who-cooks-for-you-ALL' \u2014 8 hoots in two phrases, last one drawn out.",
+      "seconds": 3.429
+    },
+    "bear_growl": {
+      "bytes": 107292,
+      "category": "call",
+      "file": "bear_growl.wav",
+      "loop": false,
+      "note": "Low rumbling growl with chaotic subharmonics.",
+      "seconds": 2.432
+    },
+    "bear_huff": {
+      "bytes": 52612,
+      "category": "call",
+      "file": "bear_huff.wav",
+      "loop": false,
+      "note": "Three explosive breathy huffs plus a jaw-pop click.",
+      "seconds": 1.192
+    },
+    "beaver_slap": {
+      "bytes": 39242,
+      "category": "call",
+      "file": "beaver_slap.wav",
+      "loop": false,
+      "note": "One sharp tail slap: crack, low water body, spray and rising bubbles.",
+      "seconds": 0.889
+    },
+    "blackflies": {
+      "bytes": 264644,
+      "category": "bed",
+      "file": "blackflies.wav",
+      "loop": true,
+      "note": "Nagging insect whine bed \u2014 detuned 600 Hz buzz, doppler drift, 6 s seamless loop.",
+      "seconds": 6.0
+    },
+    "blue_jay_scream": {
+      "bytes": 50682,
+      "category": "call",
+      "file": "blue_jay_scream.wav",
+      "loop": false,
+      "note": "Two harsh descending screeches.",
+      "seconds": 1.148
+    },
+    "bullfrog": {
+      "bytes": 71838,
+      "category": "call",
+      "file": "bullfrog.wav",
+      "loop": false,
+      "note": "'Jug-o-rum' \u2014 three low pulsed notes.",
+      "seconds": 1.628
+    },
+    "chickadee_dee": {
+      "bytes": 40532,
+      "category": "call",
+      "file": "chickadee_dee.wav",
+      "loop": false,
+      "note": "'Chicka-dee-dee-dee' \u2014 two clear intro notes then four buzzy descending dees.",
+      "seconds": 0.918
+    },
+    "chickadee_song": {
+      "bytes": 46748,
+      "category": "call",
+      "file": "chickadee_song.wav",
+      "loop": false,
+      "note": "The whistled 'fee-bee' \u2014 a clear note and one a whole step down.",
+      "seconds": 1.059
+    },
+    "coyote_chorus": {
+      "bytes": 219214,
+      "category": "call",
+      "file": "coyote_chorus.wav",
+      "loop": false,
+      "note": "The pack: five detuned, time-offset howls at different distances.",
+      "seconds": 4.97
+    },
+    "coyote_howl": {
+      "bytes": 111274,
+      "category": "call",
+      "file": "coyote_howl.wav",
+      "loop": false,
+      "note": "A rising howl that breaks into yips.",
+      "seconds": 2.522
+    },
+    "crickets": {
+      "bytes": 352844,
+      "category": "bed",
+      "file": "crickets.wav",
+      "loop": true,
+      "note": "Night bed \u2014 dense buzzy 4 kHz pulse groups on a steady rhythm, 8 s seamless loop.",
+      "seconds": 8.0
+    },
+    "crow_caw": {
+      "bytes": 67348,
+      "category": "call",
+      "file": "crow_caw.wav",
+      "loop": false,
+      "note": "Three harsh mid-frequency caws.",
+      "seconds": 1.526
+    },
+    "deer_snort": {
+      "bytes": 51406,
+      "category": "call",
+      "file": "deer_snort.wav",
+      "loop": false,
+      "note": "The alarm: explosive noise burst then a descending whistle-wheeze.",
+      "seconds": 1.165
+    },
+    "eagle_cry": {
+      "bytes": 67730,
+      "category": "call",
+      "file": "eagle_cry.wav",
+      "loop": false,
+      "note": "Thin descending chittering whistles \u2014 the real eagle, not the movie hawk.",
+      "seconds": 1.535
+    },
+    "fisher_scream": {
+      "bytes": 81812,
+      "category": "call",
+      "file": "fisher_scream.wav",
+      "loop": false,
+      "note": "The scream in the dark: accelerating rise, flickering period-doubling, hard break.",
+      "seconds": 1.854
+    },
+    "fox_scream": {
+      "bytes": 60378,
+      "category": "call",
+      "file": "fox_scream.wav",
+      "loop": false,
+      "note": "A sharp strangled shrieking bark, then a shorter second one.",
+      "seconds": 1.368
+    },
+    "goose_honk": {
+      "bytes": 41252,
+      "category": "call",
+      "file": "goose_honk.wav",
+      "loop": false,
+      "note": "Two nasal honks \u2014 the short 'ah' and the rising 'HONK'.",
+      "seconds": 0.934
+    },
+    "goose_skein": {
+      "bytes": 278834,
+      "category": "call",
+      "file": "goose_skein.wav",
+      "loop": false,
+      "note": "A V passing over: eight honks at varying distance, farther = quieter and duller.",
+      "seconds": 6.322
+    },
+    "great_horned_owl": {
+      "bytes": 115724,
+      "category": "call",
+      "file": "great_horned_owl.wav",
+      "loop": false,
+      "note": "Five deep soft muffled hoots around 250 Hz with the classic middle stutter.",
+      "seconds": 2.623
+    },
+    "grouse_drum": {
+      "bytes": 428078,
+      "category": "call",
+      "file": "grouse_drum.wav",
+      "loop": false,
+      "note": "Ruffed grouse wing-drumming: 48 deep thumps accelerating from 0.42 s to a blur.",
+      "seconds": 9.706
+    },
+    "heron_croak": {
+      "bytes": 48060,
+      "category": "call",
+      "file": "heron_croak.wav",
+      "loop": false,
+      "note": "One harsh prehistoric 'frahnk'.",
+      "seconds": 1.089
+    },
+    "loon_chick": {
+      "bytes": 71582,
+      "category": "call",
+      "file": "loon_chick.wav",
+      "loop": false,
+      "note": "Soft short peeps.",
+      "seconds": 1.622
+    },
+    "loon_tremolo": {
+      "bytes": 95782,
+      "category": "call",
+      "file": "loon_tremolo.wav",
+      "loop": false,
+      "note": "The 'crazy laugh' \u2014 fast amplitude and pitch warble on a held tone.",
+      "seconds": 2.171
+    },
+    "loon_wail": {
+      "bytes": 179174,
+      "category": "call",
+      "file": "loon_wail.wav",
+      "loop": false,
+      "note": "Long mournful rising-then-falling glissando with a far-shore echo. THE sound of Maine.",
+      "seconds": 4.062
+    },
+    "loon_yodel": {
+      "bytes": 161190,
+      "category": "call",
+      "file": "loon_yodel.wav",
+      "loop": false,
+      "note": "Territorial: a rising note breaking into a repeating jagged undulation.",
+      "seconds": 3.654
+    },
+    "lynx_caterwaul": {
+      "bytes": 127232,
+      "category": "call",
+      "file": "lynx_caterwaul.wav",
+      "loop": false,
+      "note": "A long wavering yowl sagging into a growl.",
+      "seconds": 2.884
+    },
+    "moose_bellow": {
+      "bytes": 137764,
+      "category": "call",
+      "file": "moose_bellow.wav",
+      "loop": false,
+      "note": "Long low groaning bellow, pitch dropping, breathy and rough.",
+      "seconds": 3.123
+    },
+    "moose_cow_call": {
+      "bytes": 108352,
+      "category": "call",
+      "file": "moose_cow_call.wav",
+      "loop": false,
+      "note": "The rising, whining, nasal cow moan.",
+      "seconds": 2.456
+    },
+    "osprey_whistle": {
+      "bytes": 78122,
+      "category": "call",
+      "file": "osprey_whistle.wav",
+      "loop": false,
+      "note": "A series of clear whistles, the series rising then falling.",
+      "seconds": 1.77
+    },
+    "otter_chirp": {
+      "bytes": 75812,
+      "category": "call",
+      "file": "otter_chirp.wav",
+      "loop": false,
+      "note": "Quick high playful chirping whistles.",
+      "seconds": 1.718
+    },
+    "peepers": {
+      "bytes": 352844,
+      "category": "bed",
+      "file": "peepers.wav",
+      "loop": true,
+      "note": "Spring peeper chorus \u2014 34 overlapping voices, 8 s seamless loop.",
+      "seconds": 8.0
+    },
+    "pileated_call": {
+      "bytes": 115606,
+      "category": "call",
+      "file": "pileated_call.wav",
+      "loop": false,
+      "note": "The maniacal laughing 'kuk-kuk-kuk' cascade.",
+      "seconds": 2.62
+    },
+    "pileated_drum": {
+      "bytes": 64662,
+      "category": "call",
+      "file": "pileated_drum.wav",
+      "loop": false,
+      "note": "Fast hard even roll on hollow wood, 21 hits, with forest slap-back.",
+      "seconds": 1.465
+    },
+    "porcupine_moan": {
+      "bytes": 78822,
+      "category": "call",
+      "file": "porcupine_moan.wav",
+      "loop": false,
+      "note": "A weird rising nasal whine that collapses into a grunt.",
+      "seconds": 1.786
+    },
+    "raven_kraa": {
+      "bytes": 70894,
+      "category": "call",
+      "file": "raven_kraa.wav",
+      "loop": false,
+      "note": "Three harsh low rasping croaks, noise-heavy with hard formants.",
+      "seconds": 1.607
+    },
+    "red_squirrel_scold": {
+      "bytes": 123338,
+      "category": "call",
+      "file": "red_squirrel_scold.wav",
+      "loop": false,
+      "note": "Machine-gun chatter \u2014 three intro chips then a long rattling trill.",
+      "seconds": 2.796
+    },
+    "snowy_owl_hoot": {
+      "bytes": 85470,
+      "category": "call",
+      "file": "snowy_owl_hoot.wav",
+      "loop": false,
+      "note": "Two deep booming hoots in a big open space.",
+      "seconds": 1.937
+    },
+    "turkey_gobble": {
+      "bytes": 66346,
+      "category": "call",
+      "file": "turkey_gobble.wav",
+      "loop": false,
+      "note": "Rapid burbling cascade driven by chaotic sample-and-hold FM/AM.",
+      "seconds": 1.503
+    },
+    "wood_thrush": {
+      "bytes": 83924,
+      "category": "call",
+      "file": "wood_thrush.wav",
+      "loop": false,
+      "note": "Flutey rising spiral sung by two syrinxes at once, then a trill.",
+      "seconds": 1.902
+    },
+    "woodcock_peent": {
+      "bytes": 27716,
+      "category": "call",
+      "file": "woodcock_peent.wav",
+      "loop": false,
+      "note": "A single buzzy nasal 'peent'.",
+      "seconds": 0.627
+    },
+    "woodcock_twitter": {
+      "bytes": 149306,
+      "category": "call",
+      "file": "woodcock_twitter.wav",
+      "loop": false,
+      "note": "High wavering wing-feather twittering from the sky dance.",
+      "seconds": 3.385
+    }
+  },
+  "channels": 1,
+  "generator": "tools/crittercalls.py",
+  "sample_rate": 22050,
+  "seed": 7717,
+  "version": 1
+}

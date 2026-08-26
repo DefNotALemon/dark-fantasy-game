@@ -6,8 +6,26 @@ extends Node3D
 ## "Now Entering"-style location titles.
 
 const WORLD_RADIUS := 80.0
-const TREE_COUNT := 140
+## 140 trees over an 80 m disc is one tree every twelve metres — a savanna with
+## gaps you can see clean through. A wood wants roughly one every five or six,
+## and it wants them in GROVES with clearings between, not evenly sprinkled.
+const TREE_COUNT := 420
+const GROVE_CHANCE := 0.76      ## odds the next tree joins the last one's grove
+const GROVE_SPREAD := Vector2(2.6, 6.5)   ## how far from its neighbour it lands
+const TREE_MIN_GAP := 2.1       ## trunks must not grow through each other
+## A meteor crater is 4.6 m across; anything rooted within this of the centre
+## has lost the ground it stood on.
+const METEOR_FELL_RADIUS := 7.5
 const ROCK_COUNT := 14
+## The PSX Nature pack (docs/TREES_v3_PSX.md). false puts the grey boxes and
+## the procedural trees back.
+const USE_PSX_NATURE := true
+const PSX_REGION := "temperate"
+## Fallen logs, old stumps and standing boulders -- the pieces of the wood you
+## can trip over, climb onto or chop up. The small litter is instanced without
+## collision by Understory; these are real bodies, so there are not many.
+const PROP_COUNT := 96
+const PROP_MIN_GAP := 3.2
 const SPAWN_CLEAR := 7.0  ## keep trees/rocks away from the player spawn
 const CAVE_COUNT := 2
 
@@ -24,6 +42,19 @@ var _rng := RandomNumberGenerator.new()
 var _cave_sites: Array[Dictionary] = []  ## {mouth: Vector3, dir: Vector3, rect: Rect2}
 var _env: Environment
 var _daynight: DayNight
+var _wind: Wind
+var _sky: SkyRig
+var _weather: Weather
+## Weather thickens surface fog. _process aims the Environment at BASE_FOG
+## scaled by this — caves keep their own fog untouched.
+var weather_fog_scale := 1.0
+## --- wildlife ---
+var _wildlife: WildlifeDirector      ## who is out there, and when
+var _telegraph: Telegraph            ## the forest's alarm bus
+var _critter_audio: CritterAudio     ## calls, and the ambience bed
+
+## Trees v2 master switch — see _make_tree().
+const USE_TREES_V2 := true
 var _player: Player
 var _underground := false
 var _title_label: Label
@@ -40,11 +71,13 @@ func _ready() -> void:
 	_build_ground()
 	_build_forest()
 	_build_rocks()
+	_build_props()   ## fallen logs, stumps and boulders you can climb on
 	_build_caves()
 	_build_border()
 	_build_camp()
 	_spawn_player()
 	_spawn_enemies()
+	_build_wildlife()  ## --- wildlife ---
 	_build_titles()
 	## Hold the curtain (and the player's hands) until the deep + content are
 	## fully real — no first-minute lag spikes reach the eye.
@@ -94,7 +127,8 @@ func _process(delta: float) -> void:
 	var s_amb := _daynight.surf_ambient if _daynight else BASE_AMBIENT
 	var s_fog_col := _daynight.surf_fog if _daynight else BASE_FOG_COLOR
 	var want_ambient := lerpf(s_amb, CAVE_AMBIENT, depth_u)
-	var want_fog := lerpf(BASE_FOG, CAVE_FOG, depth_u)
+	## Surface fog thickens with the weather; the cave end of the lerp doesn't.
+	var want_fog := lerpf(BASE_FOG * weather_fog_scale, CAVE_FOG, depth_u)
 	var want_fog_col := s_fog_col.lerp(CAVE_FOG_COLOR, depth_u)
 	var k := 1.0 - pow(0.30, delta)  ## framerate-independent smoothing (unhurried)
 	_env.fog_density = lerpf(_env.fog_density, want_fog, k)
@@ -113,6 +147,10 @@ func _process(delta: float) -> void:
 		set_blackout(false, "")
 		if _player and _player.sleep_phase == "":
 			_player.input_locked = false
+
+	## --- wildlife ---  The wildlife runs on DayNight's calendar, never its own.
+	if _wildlife != null and _daynight != null:
+		_wildlife.set_clock(_daynight.hour, _daynight.day)
 
 	## Random events: now and then, the sky lets something go.
 	_meteor_t += delta
@@ -170,6 +208,32 @@ func _build_environment() -> void:
 	_daynight.sky_mat = sky_mat
 	_daynight.title_cb = _on_sky_title
 	add_child(_daynight)
+
+	## One wind for the whole world: leaves, bark, and later grass and cloth all
+	## read the same global shader parameters. See scripts/Wind.gd, spec §7.
+	_wind = Wind.new()
+	_wind.player = get_tree().get_first_node_in_group("player")
+	add_child(_wind)
+	Wind.publish_season(_daynight.day)
+
+	## The sky itself: shaders/sky.gdshader replaces the procedural gradient —
+	## pink dusk, clouds, stars, northern lights. DayNight keeps the clock and
+	## the sun; SkyRig paints what you look at. (scripts/SkyRig.gd)
+	_sky = SkyRig.new()
+	_sky.env = env
+	_sky.daynight = _daynight
+	_sky.wind = _wind
+	add_child(_sky)
+
+	## ...and the weather on top of it: clear -> overcast -> drizzle -> rain ->
+	## storm, with thunder only at the top of the ladder. (scripts/Weather.gd)
+	_weather = Weather.new()
+	_weather.env = env
+	_weather.sky = _sky
+	_weather.wind = _wind
+	_weather.daynight = _daynight
+	_weather.hud_cb = _on_sky_title
+	add_child(_weather)
 
 
 ## ====================== Graphics settings (Esc menu) ======================
@@ -337,6 +401,17 @@ func _meteor_impact(spot: Vector3, streak: Node3D) -> void:
 		_next_meteor = 15.0  ## ground busy (deep threads) — the sky tries again shortly
 		_meteor_t = 0.0
 		return
+	## The crater takes the ground out from under whatever was standing on it.
+	## Trees inside the blast go over, away from the impact, and leave a real
+	## trunk on the ground — before this the hole simply swallowed the base and
+	## the tree stood there with nothing underneath it.
+	for t in get_tree().get_nodes_in_group("trees"):
+		var tv := t as TreeV2
+		if tv == null or tv.felled:
+			continue
+		if tv.global_position.distance_to(spot) <= METEOR_FELL_RADIUS:
+			tv.blast_fell(spot)
+
 	if _player:
 		var d := _player.global_position.distance_to(spot)
 		_player.cam_shake = maxf(float(_player.cam_shake), clampf(0.62 - d * 0.004, 0.12, 0.62))
@@ -441,16 +516,50 @@ func _build_caves() -> void:
 
 
 func _build_forest() -> void:
+	## Grow the wood in groves: most trees land near the previous one, some
+	## start a new stand somewhere else. That leaves clearings and thickets
+	## instead of an even sprinkle, and it closes the see-through gaps.
+	var placed: Array[Vector3] = []
+	var last := Vector3.INF
 	for i in range(TREE_COUNT):
-		var pos := _random_ground_point()
+		var pos := Vector3.INF
+		if last != Vector3.INF and _rng.randf() < GROVE_CHANCE:
+			for _try in range(6):
+				var a := _rng.randf() * TAU
+				var r := _rng.randf_range(GROVE_SPREAD.x, GROVE_SPREAD.y)
+				var cand := last + Vector3(cos(a) * r, 0.0, sin(a) * r)
+				if cand.length() > WORLD_RADIUS or cand.length() < SPAWN_CLEAR:
+					continue
+				pos = cand
+				break
+		if pos == Vector3.INF:
+			pos = _random_ground_point()
 		if pos == Vector3.INF:
 			continue
+		var clash := false
+		for q in placed:
+			if q.distance_to(pos) < TREE_MIN_GAP:
+				clash = true
+				break
+		if clash:
+			continue
+		placed.append(pos)
+		last = pos
 		add_child(_make_tree(pos))
 
 func _make_tree(pos: Vector3) -> StaticBody3D:
-	## Trees are real objects now (ChopTree.gd): the axe eats a wedge out of
-	## the trunk, the trunk breaks at that wedge, the canopy comes apart on
-	## impact and the trunk splits into logs. All of that lives with the tree.
+	## Trees v2 (docs/TREES_v2_SPEC.md): five New England species, five life
+	## stages, real limbs. The axe takes the BRANCHES off first — the trunk
+	## refuses a bite until the tree is bare — then the trunk goes over as a
+	## physics body, and the fallen trunk bucks into logs.
+	##
+	## Set USE_TREES_V2 = false to fall back to the old cone trees (ChopTree.gd)
+	## if something in the new pipeline misbehaves.
+	if USE_TREES_V2:
+		var t := TreeV2.make(_rng)
+		t.position = pos
+		t.rotation.y = _rng.randf() * TAU
+		return t
 	var tree := ChopTree.make(_rng)
 	tree.position = pos
 	tree.rotation.y = _rng.randf() * TAU
@@ -476,6 +585,26 @@ func _build_rocks() -> void:
 		col.shape = bshape
 		col.position = Vector3(0, s * 0.6, 0)
 		rock.add_child(col)
+		## A grey box among the pack's art reads as a missing asset, so the
+		## boulders wear real rock now. The body, the groups and the `bites`
+		## meta are untouched -- Player._chop_boulder never learns about this.
+		if USE_PSX_NATURE:
+			var big := ["SM_Rock_05", "SM_Rock_07", "SM_Rock_08", "SM_Rock_04"]
+			var asset: String = big[_rng.randi() % big.size()]
+			var packed = load(PSXNature.scene_path(asset))
+			if packed != null:
+				var m3: Node3D = packed.instantiate()
+				var native: float = maxf(float(PSXNature.info(asset).get("height", 1.0)), 0.05)
+				m3.scale = Vector3.ONE * (s * 1.2 / native)
+				m3.rotation.y = _rng.randf() * TAU
+				rock.add_child(m3)
+				var rmats := PSXNature.materials("Props", PSX_REGION, false)
+				for n3 in _all_nodes(m3):
+					var rmi := n3 as MeshInstance3D
+					if rmi != null and rmi.mesh != null:
+						for si in range(rmi.mesh.get_surface_count()):
+							rmi.set_surface_override_material(si, rmats[0])
+				continue
 		var mesh := MeshInstance3D.new()
 		var bmesh := BoxMesh.new()
 		bmesh.size = Vector3(s, s * 1.2, s)
@@ -487,6 +616,48 @@ func _build_rocks() -> void:
 		mat.roughness = 1.0
 		mesh.material_override = mat
 		rock.add_child(mesh)
+
+func _all_nodes(n: Node) -> Array:
+	var out: Array = [n]
+	for c in n.get_children():
+		out.append_array(_all_nodes(c))
+	return out
+
+
+func _build_props() -> void:
+	## Deadfall reads as a wood that has been standing a long time, which is
+	## most of what makes a forest feel old. Logs cluster where trees are
+	## thickest, so these follow the same grove logic the timber does.
+	if not USE_PSX_NATURE:
+		return
+	var kinds := {
+		"SM_FallenLog_Large": [0.55, 1.05],
+		"SM_FallenLog_Small": [0.70, 1.30],
+		"SM_Stump_01": [0.70, 1.40],
+		"SM_Stump_02": [0.80, 1.60],
+		"SM_Rock_05": [0.60, 1.50],
+		"SM_Rock_07": [0.60, 1.40],
+		"SM_Rock_08": [0.55, 1.30],
+	}
+	var names: Array = kinds.keys()
+	var placed: Array[Vector3] = []
+	for i in range(PROP_COUNT):
+		var pos := _random_ground_point()
+		if pos == Vector3.INF:
+			continue
+		var clash := false
+		for q in placed:
+			if q.distance_to(pos) < PROP_MIN_GAP:
+				clash = true
+				break
+		if clash:
+			continue
+		placed.append(pos)
+		var asset: String = String(names[_rng.randi() % names.size()])
+		var band: Array = kinds[asset]
+		var s := _rng.randf_range(float(band[0]), float(band[1]))
+		add_child(PSXProp.make(asset, pos, _rng.randf() * TAU, s, PSX_REGION))
+
 
 func _random_ground_point() -> Vector3:
 	## Returns a random point inside the world disc, clear of the spawn and of
@@ -598,8 +769,22 @@ func save_state() -> Dictionary:
 	var trees: Array = []
 	for group in ["trees", "tree_stumps"]:
 		for t in get_tree().get_nodes_in_group(group):
-			if t is ChopTree:
+			## BUG 5, BACK AGAIN (docs/TREES_v2_SPEC.md §21): this used to read
+			## `if t is ChopTree` and nothing else, so the ENTIRE TreeV2 forest
+			## was never written -- and apply_state cleared the group before
+			## restoring, so a load silently deleted every tree in the world.
+			## It was fixed once and a later patcher put the old World.gd back.
+			## If you touch this loop, keep all three branches.
+			if t is TreeV2:
+				trees.append((t as TreeV2).save_dict())
+			elif t is TreeStump:
+				trees.append((t as TreeStump).save_dict())
+			elif t is ChopTree:
 				trees.append((t as ChopTree).save_dict())
+	var props: Array = []
+	for pr in get_tree().get_nodes_in_group("psx_props"):
+		if pr is PSXProp:
+			props.append((pr as PSXProp).save_dict())
 	var logs: Array = []
 	for l in get_tree().get_nodes_in_group("carry_logs"):
 		if l is CarryLog:
@@ -615,27 +800,54 @@ func save_state() -> Dictionary:
 			beds.append({"pos": (b as Node3D).global_position, "rot_y": (b as Node3D).rotation.y})
 	var out := {
 		"hour": _daynight.hour if _daynight else 17.0,
-		"trees": trees, "logs": logs, "dropped": dropped, "beds": beds,
+		"day": _daynight.day if _daynight else 0.0,
+		"weather": _weather.to_dict() if _weather else {},
+		"trees": trees, "props": props, "logs": logs, "dropped": dropped, "beds": beds,
 	}
+	if _wildlife != null:
+		out["wildlife"] = _wildlife.save_state()  ## --- wildlife ---
 	if _region != null:
 		out["cave"] = _region.save_state()
-		if _region.grass() != null:
-			out["grass"] = _region.grass().save_state()
+		## Untyped on purpose: the floor is a GrassSystem or an Understory.
+		var floor_sys = _region.grass()
+		if floor_sys != null and floor_sys.has_method("save_state"):
+			out["grass"] = floor_sys.save_state()
 	return out
 
 
 func apply_state(d: Dictionary) -> void:
 	if _daynight:
 		_daynight.hour = float(d.get("hour", 17.0))
+		_daynight.day = float(d.get("day", 0.0))
+		Wind.publish_season(_daynight.day)
+	if _weather and d.has("weather"):
+		_weather.from_dict(d["weather"] as Dictionary)
+	if _wildlife != null:
+		_wildlife.apply_state(d.get("wildlife", {}) as Dictionary)  ## --- wildlife ---
 	## Sweep the surface clean, then lay the saved one back down.
-	for group in ["trees", "tree_stumps", "carry_logs", "dropped_items", "beds"]:
+	for group in ["trees", "tree_stumps", "carry_logs", "dropped_items", "beds", "psx_props"]:
 		for n in get_tree().get_nodes_in_group(group):
 			(n as Node).queue_free()
 	for td in d.get("trees", []):
-		var t := ChopTree.from_dict(td as Dictionary)
-		t.position = (td as Dictionary).get("pos", Vector3.ZERO)
-		t.rotation.y = float((td as Dictionary).get("rot_y", 0.0))
-		add_child(t)
+		## Dispatch on "kind". An old save has no kind key at all, so it falls
+		## through to ChopTree exactly as it always did.
+		var rec: Dictionary = td as Dictionary
+		match str(rec.get("kind", "")):
+			"tree_v2":
+				var tv := TreeV2.from_dict(rec)
+				add_child(tv)
+				tv.restore(rec)
+			"stump":
+				add_child(TreeStump.from_dict(rec))
+			_:
+				var t := ChopTree.from_dict(rec)
+				t.position = rec.get("pos", Vector3.ZERO)
+				t.rotation.y = float(rec.get("rot_y", 0.0))
+				add_child(t)
+	for pd in d.get("props", []):
+		var pr := PSXProp.from_dict(pd as Dictionary)
+		add_child(pr)
+		pr.restore(pd as Dictionary)
 	for ld in d.get("logs", []):
 		var l := CarryLog.from_dict(ld as Dictionary)
 		add_child(l)
@@ -651,8 +863,9 @@ func apply_state(d: Dictionary) -> void:
 		bed.global_position = (bd as Dictionary).get("pos", Vector3.ZERO)
 		bed.rotation.y = float((bd as Dictionary).get("rot_y", 0.0))
 	if _region != null:
-		if _region.grass() != null and d.has("grass"):
-			_region.grass().apply_state(d["grass"] as Dictionary)
+		var floor_sys = _region.grass()
+		if floor_sys != null and d.has("grass") and floor_sys.has_method("apply_state"):
+			floor_sys.apply_state(d["grass"] as Dictionary)
 		if d.has("cave") and _region.apply_state(d["cave"] as Dictionary):
 			## The underground has to redraw itself from the saved seed and
 			## take your dig back. Hold the curtain the same way startup does —
@@ -661,3 +874,55 @@ func apply_state(d: Dictionary) -> void:
 			set_blackout(true, "Remembering the world...")
 			if _player:
 				_player.input_locked = true
+
+## ---------------------------------------------------------------- sky ------
+
+func set_cloud_mode(idx: int) -> void:
+	## Settings -> Clouds. 0 off, 1 painterly, 2 volumetric.
+	if _sky != null and is_instance_valid(_sky):
+		_sky.set_cloud_mode(idx)
+
+
+func weather() -> Weather:
+	## Handy from the console, and how a scripted moment (Katahdin's storm
+	## crown) grabs the sky: World.weather().lock_weather(Weather.Level.STORM)
+	return _weather
+
+
+## ============================== Wildlife ===================================
+## --- wildlife ---
+## Three nodes, in this order, because each finds the last one:
+##   Telegraph         the alarm bus every animal rings and listens to
+##   CritterAudio      the calls and the ambience bed (half the feature)
+##   WildlifeDirector  who spawns, where, and when
+##
+## See docs/WILDLIFE.md. Set USE_WILDLIFE = false to turn the whole thing off
+## in one line if it ever misbehaves — same escape hatch as USE_TREES_V2.
+
+
+const USE_WILDLIFE := true
+
+
+func _build_wildlife() -> void:
+	if not USE_WILDLIFE:
+		return
+	_telegraph = Telegraph.new()
+	add_child(_telegraph)
+	_critter_audio = CritterAudio.new()
+	add_child(_critter_audio)
+	_wildlife = WildlifeDirector.new()
+	_wildlife.player = _player
+	_wildlife.world_radius = WORLD_RADIUS
+	add_child(_wildlife)
+	if _daynight != null:
+		_wildlife.set_clock(_daynight.hour, _daynight.day)
+	## The hand-placed pass: a chickadee flock by the camp, a squirrel in the
+	## near timber, and one deer out at the tree line — so the first three
+	## things a player meets are the one that lands on your hand, the one that
+	## tells the forest you are here, and the one that runs.
+	_wildlife.seed_world()
+
+
+func wildlife_census() -> Dictionary:
+	## For the debug menu and the test suite.
+	return _wildlife.census() if _wildlife != null else {}

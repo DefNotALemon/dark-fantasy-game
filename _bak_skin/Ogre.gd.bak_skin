@@ -1,0 +1,179 @@
+extends Enemy
+class_name Ogre
+## Towering brute. Slow to move but hits like a truck, takes a lot to bring down,
+## and attacks fairly briskly for its size. Specials: "charge" (shared shoulder-
+## rush that shoves you aside and barrels past), "bite" (lunges in and chomps),
+## and "throw" (grabs you and HURLS you back over its shoulder).
+
+var rig: Node3D
+var jaw: Node3D
+var arm: Node3D
+
+
+func _init() -> void:
+	display_name = "Ogre"
+	max_health = 210.0       ## a real damage sponge
+	wander_speed = 1.1
+	chase_speed = 3.0          ## slow to move
+	attack_range = 2.6
+	attack_damage = 22.0
+	attack_cooldown = 1.1      ## but swings a little quicker than before
+	aggro_radius = 12.0
+	leash_radius = 26.0
+	xp_tier = 3
+	families = ["humanoid"]
+	## Too big to be afraid until it is very, very hurt — and too heavy to run well.
+	nerve = 0.12
+	rout_speed = 0.42
+	rout_line = "lumbers away bellowing"
+	duelist = true
+	duel_range = 6.5
+	duel_hold_min = 0.6        ## paces a touch quicker now
+	duel_hold_max = 1.4
+	strong_from_melee = true
+	strong_min_range = 3.0
+	strong_max_range = 8.0
+	telegraph_color = Color(0.95, 0.35, 0.10)
+	climb_speed = 2.1   ## hauls its bulk up hand over hand — slow, unstoppable
+	## Gait: THE WADDLE — slow ponderous cadence, short wide steps, hips
+	## rolling side to side, the whole bulk pitching with every footfall.
+	gait_rate = 0.6
+	stride_deg = 20.0
+	waddle_deg = 5.5
+	bob_h = 0.08
+
+
+func _choose_strong(dist: float) -> void:
+	var r := randf()
+	if dist <= attack_range + 0.6 and r < 0.4:
+		strong_mode = "throw"     ## grabs and HURLS you back (a real throw)
+		strong_throws = true
+		strong_throw_mode = "away"
+		strong_throw_power = 8.5  ## the big one — but still only if unblocked
+		strong_damage = 24.0
+		strong_speed = 1.0
+		strong_windup_time = 0.45
+		strong_duration = 0.35
+		strong_cooldown = 4.0
+		strong_hit_range = 2.7
+		strong_breaks_guard = true
+		strong_multi_hits = 1
+	elif dist <= attack_range + 0.6:
+		strong_mode = "bite"      ## lunges in and chomps
+		strong_throws = false
+		strong_damage = 28.0
+		strong_speed = 6.0
+		strong_windup_time = 0.45
+		strong_duration = 0.35
+		strong_cooldown = 3.8
+		strong_hit_range = 2.6
+		strong_breaks_guard = true
+		strong_multi_hits = 1
+	else:
+		strong_mode = "charge"    ## shared shoulder-rush — shoves aside, runs past
+		strong_throws = true
+		strong_throw_mode = "side"
+		strong_throw_power = 7.5
+		strong_damage = 26.0
+		strong_speed = 10.0
+		strong_windup_time = 0.50
+		strong_duration = 0.50
+		strong_cooldown = 3.5
+		strong_hit_range = 2.6
+		strong_breaks_guard = true
+		strong_multi_hits = 1
+
+
+func _animate(delta: float) -> void:
+	if rig == null:
+		return
+	if strong_windup > 0.0:
+		var p := 1.0 - strong_windup / strong_windup_time
+		if strong_mode == "bite":
+			## Negative pitch DROPS the chin — the maw actually gapes for the
+			## telegraph (positive clenched it up into the skull).
+			jaw.rotation_degrees = jaw.rotation_degrees.lerp(Vector3(-35.0 * p, 0, 0), delta * 16.0)
+			rig.rotation_degrees = rig.rotation_degrees.lerp(Vector3(-10.0 * p, 0, 0), delta * 12.0)
+		elif strong_mode == "throw":
+			arm.rotation_degrees = arm.rotation_degrees.lerp(Vector3(35.0 * p, 0, 0), delta * 16.0)  ## reach out FORWARD to grab you
+		else:
+			rig.rotation_degrees = rig.rotation_degrees.lerp(Vector3(-16.0 * p, 0, 0), delta * 12.0)
+		return
+	if strong_active:
+		var p := 1.0 - strong_time / strong_duration
+		if strong_mode == "bite":
+			## SNAP shut from the gape, with a little clench past closed.
+			jaw.rotation_degrees = Vector3(lerpf(-35.0, 3.0, minf(p * 2.2, 1.0)), 0, 0)
+			rig.rotation_degrees = Vector3(lerpf(-10.0, 8.0, minf(p * 2.0, 1.0)), 0, 0)
+		elif strong_mode == "throw":
+			## Sweep the arm up THROUGH THE FRONT and over — hurling you back
+			## across its shoulder. (The old signs windmilled the arm up behind
+			## its own back, so the whole throw played facing away from you.)
+			arm.rotation_degrees = Vector3(lerpf(35.0, 175.0, minf(p * 1.8, 1.0)), 0, 0)
+			rig.rotation_degrees = Vector3(0, lerpf(0.0, 40.0, minf(p * 1.8, 1.0)), 0)
+		else:
+			rig.rotation_degrees = Vector3(lerpf(-16.0, 14.0, minf(p * 2.0, 1.0)), 0, 0)
+		return
+	if melee_anim > 0.0 and arm:
+		## The swat gets the same treatment: wind back, whip through, settle.
+		var p := 1.0 - melee_anim / MELEE_ANIM_TIME
+		arm.rotation_degrees = Vector3(_swing_arc(p, -68.0, 58.0), 0, 0)
+		return
+	rig.rotation_degrees = rig.rotation_degrees.lerp(Vector3.ZERO, delta * 6.0)
+	jaw.rotation_degrees = jaw.rotation_degrees.lerp(Vector3.ZERO, delta * 8.0)
+	if arm:
+		## The club arm swings heavy with the waddle between attacks.
+		arm.rotation_degrees = arm.rotation_degrees.lerp(Vector3(sin(walk_t) * 12.0 * _loco_amount, 0, 0), delta * 6.0)
+
+
+func _build_body() -> void:
+	_add_collision(Vector3(1.2, 2.6, 1.0), Vector3(0, 1.3, 0))
+
+	## Palette swapped with the Orc: the brute now wears the deep green hide.
+	var skin := Color(0.28, 0.40, 0.22)
+	var skin_dark := Color(0.20, 0.30, 0.16)
+	var loin := Color(0.26, 0.18, 0.11)
+	base_body_color = skin
+
+	rig = Node3D.new()
+	add_child(rig)
+	loco_root = rig  ## heavy footfall bob while it walks
+
+	## Massive torso + gut. NOTE: the belly and the shoulder slab are deliberately
+	## INSET on Z (or clearly proud of the chest) rather than sharing the torso's
+	## 0.7 depth — coplanar faces z-fight and made the chest flicker.
+	var body := _box_in(rig, Vector3(1.0, 1.1, 0.7), skin, Vector3(0, 1.5, 0))
+	body_mat = body.material_override as StandardMaterial3D
+	_box_in(rig, Vector3(0.88, 0.5, 0.58), skin_dark, Vector3(0, 0.95, 0.06))    ## belly (inset)
+	_box_in(rig, Vector3(1.22, 0.28, 0.60), skin_dark, Vector3(0, 2.11, 0))      ## shoulders (inset, riding above)
+	## Head sunk between the shoulders, with a hinged jaw.
+	_box_in(rig, Vector3(0.5, 0.42, 0.46), skin, Vector3(0, 2.32, -0.04))
+	jaw = Node3D.new()
+	rig.add_child(jaw)
+	jaw.position = Vector3(0, 2.18, -0.10)
+	_box_in(jaw, Vector3(0.42, 0.16, 0.34), skin_dark, Vector3(0, -0.02, -0.10))
+	_box_in(jaw, Vector3(0.05, 0.10, 0.05), Color(0.85, 0.82, 0.7), Vector3(-0.12, 0.06, -0.24), Vector3(10, 0, 0))
+	_box_in(jaw, Vector3(0.05, 0.10, 0.05), Color(0.85, 0.82, 0.7), Vector3(0.12, 0.06, -0.24), Vector3(10, 0, 0))
+	## Left arm on a shoulder pivot — a slab of meat swinging with the waddle.
+	var larm := Node3D.new()
+	rig.add_child(larm)
+	larm.position = Vector3(-0.66, 1.95, 0)
+	_box_in(larm, Vector3(0.28, 1.0, 0.28), skin, Vector3(0, -0.50, 0))
+	_box_in(larm, Vector3(0.30, 0.30, 0.30), skin_dark, Vector3(0, -1.03, 0))   ## left fist
+	walk_arms.append(larm)
+	arm = Node3D.new()
+	rig.add_child(arm)
+	arm.position = Vector3(0.66, 1.95, 0)
+	_box_in(arm, Vector3(0.30, 1.0, 0.30), skin, Vector3(0, -0.5, 0))
+	_box_in(arm, Vector3(0.34, 0.34, 0.34), skin_dark, Vector3(0, -1.02, 0))      ## right fist
+	## Legs + loincloth: tree-trunk hip pivots for the waddling stomp.
+	_box_in(rig, Vector3(0.9, 0.3, 0.6), loin, Vector3(0, 0.72, 0))
+	for lx: float in [-0.24, 0.24]:
+		var leg := Node3D.new()
+		rig.add_child(leg)
+		leg.position = Vector3(lx, 0.76, 0)
+		_box_in(leg, Vector3(0.34, 0.75, 0.34), skin, Vector3(0, -0.38, 0))
+		walk_legs.append(leg)
+
+	_add_eye(Vector3(-0.11, 2.40, -0.26), Vector3(0.06, 0.05, 0.05), rig)
+	_add_eye(Vector3(0.11, 2.40, -0.26), Vector3(0.06, 0.05, 0.05), rig)

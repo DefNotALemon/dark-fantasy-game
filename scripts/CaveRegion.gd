@@ -16,7 +16,13 @@ var cave_seed := 0
 
 var field: CaveField
 var _rng := RandomNumberGenerator.new()
-var _rock_mat: StandardMaterial3D
+## THE FLOOR. true = the PSX pack's understory + textured ground,
+## false = the procedural blades in Grass.gd, which stay on disk untouched.
+const USE_PSX_UNDERSTORY := true
+## Which of the six painted biomes the surface runs. PSXNature.REGIONS.
+const PSX_REGION := "temperate"
+
+var _rock_mat: Material
 var _chunks := {}                ## Vector3i -> {body, shape, mesh} (lazy, sparse)
 var _ncx := 0
 var _ncy := 0
@@ -33,7 +39,9 @@ var _bresults := []
 var _deep_state := 0
 var _deep_gid := -1
 var _shifts := 0                 ## how many times sleep has moved the deep
-var _grass: GrassSystem          ## the living meadow on the surface skin
+## GrassSystem or Understory -- both answer to the same names (group
+## "grass_system", is_tall_at / cut_at / rebuild_area / save_state).
+var _grass: Node3D               ## what grows on the surface skin
 var _content_root: Node3D        ## resettable content (mobs/veins/deep crystals)
 								 ## — mouth dressing lives outside it, permanent
 
@@ -41,15 +49,20 @@ var _content_root: Node3D        ## resettable content (mobs/veins/deep crystals
 func _ready() -> void:
 	add_to_group("cave_regions")  ## horses ask us where the holes are (Horse.gd)
 	_rng.seed = cave_seed
-	_rock_mat = StandardMaterial3D.new()
-	_rock_mat.vertex_color_use_as_albedo = true
-	_rock_mat.roughness = 1.0
+	_rock_mat = _psx_ground_material() if USE_PSX_UNDERSTORY else null
+	if _rock_mat == null:
+		var std := StandardMaterial3D.new()
+		std.vertex_color_use_as_albedo = true
+		std.roughness = 1.0
+		_rock_mat = std
 	## Two-sided rock: where the noise leaves a wall thinner than a voxel, the
 	## surface-net has to pinch two sheets through one cell vertex — the
 	## twisted sliver shows its BACKFACE, which culling turned into a
 	## see-through crack in the world. Drawing both sides seals every such
 	## pinhole (collision has been two-sided all along; now the eye agrees).
-	_rock_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if _rock_mat is BaseMaterial3D:
+		(_rock_mat as BaseMaterial3D).cull_mode = BaseMaterial3D.CULL_DISABLED
+	## (the PSX ground shader declares cull_disabled in its own render_mode)
 
 	## Vastness is SPATIAL now (a slow noise inside the field): the one map-wide
 	## underground swings between tight warrens and grand halls on its own.
@@ -88,10 +101,17 @@ func _ready() -> void:
 	add_child(_content_root)
 	for m in range(mouths.size()):
 		_dress_mouth(m)  ## crystal + daylight shaft — deep content waits
-	## The meadow: instanced grass sampled off the freshly-built surface.
-	_grass = GrassSystem.new()
-	add_child(_grass)
-	_grass.setup(field, cave_seed)
+	## What grows on the surface skin, sampled off the freshly-built floor.
+	if USE_PSX_UNDERSTORY:
+		var u := Understory.new()
+		_grass = u
+		add_child(u)
+		u.setup(field, cave_seed, PSX_REGION)
+	else:
+		var g := GrassSystem.new()
+		_grass = g
+		add_child(g)
+		g.setup(field, cave_seed)
 	## The underground loads WITH the game: kick the deep carve right now
 	## (threaded, polled in _process) instead of waiting for an approach.
 	_deep_state = 1
@@ -519,8 +539,31 @@ var _restore_lo := Vector3i(1, 1, 1)   ## chunk range the stamp touched (lo > hi
 var _restore_hi := Vector3i(0, 0, 0)   ##   means "nothing pending")
 
 
-func grass() -> GrassSystem:
+func grass() -> Node:
+	## Deliberately untyped: this is a GrassSystem or an Understory depending on
+	## USE_PSX_UNDERSTORY, and every caller reaches for it by method name.
 	return _grass
+
+
+func _psx_ground_material() -> ShaderMaterial:
+	var sh := load("res://shaders/psx_ground.gdshader")
+	if sh == null:
+		return null
+	var stops: Array = PSXNature.region_atlases(PSX_REGION)
+	var warm := String(stops[1])          ## the region's summer biome
+	var cold := String(stops[3])          ## and its winter one
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	m.set_shader_parameter("floor_warm", _ground_tex(warm, "ForestFloor"))
+	m.set_shader_parameter("floor_cold", _ground_tex(cold, "ForestFloor"))
+	m.set_shader_parameter("soil_tex", _ground_tex(warm, "Soil"))
+	m.set_shader_parameter("rock_tex", _ground_tex(warm, "RockGround"))
+	return m
+
+
+func _ground_tex(biome: String, sheet: String) -> Texture2D:
+	var path := "res://assets/psx_nature/textures/%s/T_%s_%s_BaseColor.png" % [biome, biome, sheet]
+	return load(path) if ResourceLoader.exists(path) else null
 
 
 func _busy() -> bool:
