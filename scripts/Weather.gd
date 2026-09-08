@@ -517,6 +517,18 @@ func is_raining() -> bool:
 	return intensity > 0.05
 
 
+func season() -> int:
+	## Public face of _season(): 0 spring, 1 summer, 2 autumn, 3 winter.
+	## Exposure and the seasonal pass both want this and neither should have to
+	## reach through the underscore to get it.
+	return _season()
+
+
+func is_snowing() -> bool:
+	## Whether the precipitation currently falling is snow rather than rain.
+	return _snowing
+
+
 func _season() -> int:
 	## Wind.gd owns the 24-day-season maths (spec §7).
 	return int(Wind.phase_for_day(_day_number_f()) * 4.0) % 4
