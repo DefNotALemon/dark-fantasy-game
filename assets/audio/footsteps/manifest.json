@@ -1,0 +1,225 @@
+{
+ "generator": "tools/stepsounds.py",
+ "version": 1,
+ "seed": 20260905,
+ "sample_rate": 44100,
+ "families": [
+  "grass",
+  "dirt",
+  "mud",
+  "leaf",
+  "gravel",
+  "sand",
+  "snow",
+  "wood",
+  "stone"
+ ],
+ "variants": 3,
+ "sounds": {
+  "grass_1": {
+   "file": "grass_1.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "grass_2": {
+   "file": "grass_2.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "grass_3": {
+   "file": "grass_3.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "grass_land": {
+   "file": "grass_land.wav",
+   "seconds": 0.351,
+   "loop": false
+  },
+  "dirt_1": {
+   "file": "dirt_1.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "dirt_2": {
+   "file": "dirt_2.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "dirt_3": {
+   "file": "dirt_3.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "dirt_land": {
+   "file": "dirt_land.wav",
+   "seconds": 0.351,
+   "loop": false
+  },
+  "mud_1": {
+   "file": "mud_1.wav",
+   "seconds": 0.34,
+   "loop": false
+  },
+  "mud_2": {
+   "file": "mud_2.wav",
+   "seconds": 0.34,
+   "loop": false
+  },
+  "mud_3": {
+   "file": "mud_3.wav",
+   "seconds": 0.34,
+   "loop": false
+  },
+  "mud_land": {
+   "file": "mud_land.wav",
+   "seconds": 0.459,
+   "loop": false
+  },
+  "leaf_1": {
+   "file": "leaf_1.wav",
+   "seconds": 0.28,
+   "loop": false
+  },
+  "leaf_2": {
+   "file": "leaf_2.wav",
+   "seconds": 0.28,
+   "loop": false
+  },
+  "leaf_3": {
+   "file": "leaf_3.wav",
+   "seconds": 0.28,
+   "loop": false
+  },
+  "leaf_land": {
+   "file": "leaf_land.wav",
+   "seconds": 0.378,
+   "loop": false
+  },
+  "gravel_1": {
+   "file": "gravel_1.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "gravel_2": {
+   "file": "gravel_2.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "gravel_3": {
+   "file": "gravel_3.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "gravel_land": {
+   "file": "gravel_land.wav",
+   "seconds": 0.405,
+   "loop": false
+  },
+  "sand_1": {
+   "file": "sand_1.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "sand_2": {
+   "file": "sand_2.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "sand_3": {
+   "file": "sand_3.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "sand_land": {
+   "file": "sand_land.wav",
+   "seconds": 0.351,
+   "loop": false
+  },
+  "snow_1": {
+   "file": "snow_1.wav",
+   "seconds": 0.28,
+   "loop": false
+  },
+  "snow_2": {
+   "file": "snow_2.wav",
+   "seconds": 0.28,
+   "loop": false
+  },
+  "snow_3": {
+   "file": "snow_3.wav",
+   "seconds": 0.28,
+   "loop": false
+  },
+  "snow_land": {
+   "file": "snow_land.wav",
+   "seconds": 0.378,
+   "loop": false
+  },
+  "wood_1": {
+   "file": "wood_1.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "wood_2": {
+   "file": "wood_2.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "wood_3": {
+   "file": "wood_3.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "wood_land": {
+   "file": "wood_land.wav",
+   "seconds": 0.405,
+   "loop": false
+  },
+  "stone_1": {
+   "file": "stone_1.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "stone_2": {
+   "file": "stone_2.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "stone_3": {
+   "file": "stone_3.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "stone_land": {
+   "file": "stone_land.wav",
+   "seconds": 0.351,
+   "loop": false
+  },
+  "cloth_1": {
+   "file": "cloth_1.wav",
+   "seconds": 0.16,
+   "loop": false
+  },
+  "cloth_2": {
+   "file": "cloth_2.wav",
+   "seconds": 0.19,
+   "loop": false
+  },
+  "cloth_3": {
+   "file": "cloth_3.wav",
+   "seconds": 0.22,
+   "loop": false
+  },
+  "mail_1": {
+   "file": "mail_1.wav",
+   "seconds": 0.22,
+   "loop": false
+  },
+  "mail_2": {
+   "file": "mail_2.wav",
+   "seconds": 0.22,
+   "loop": false
+  }
+ }
+}
