@@ -109,6 +109,7 @@ var chron: Chronicle = null
 
 var _booted := false
 var _here := ""                 ## the place whose talk you are in earshot of
+var _voice := ""                ## [wayfarers] who is talking, when it is a person
 var _poll_t := 0.0
 var _gap_t := 0.0
 var _head_t := 0.0
@@ -256,10 +257,17 @@ func _leave() -> void:
 	## and the heard-set is kept. Talk does not follow you into the woods.
 	_here = ""
 	_queue.clear()
+	var spoken := false
 	for row in _lines:
 		var r := row as Dictionary
+		## [wayfarers] A traveller's line is not the village's to take back.
+		if bool(r.get("spoken", false)):
+			spoken = true
+			continue
 		r["life"] = minf(float(r["life"]), FADE_OUT)
-	_head_t = 0.0
+	if not spoken:
+		_head_t = 0.0
+		_voice = ""
 
 
 func _refill() -> void:
@@ -284,6 +292,53 @@ func _queued(k: String) -> bool:
 		if key_for(_here, String((q as Dictionary).get("text", ""))) == k:
 			return true
 	return false
+
+
+func offer(text: String, voice: String, kind := "", day := 0.0) -> bool:
+	## [wayfarers] Somebody on the road tells you something to your face.
+	##
+	## Straight onto the standing lines rather than into the queue, and that is
+	## the whole design decision: the queue is the VILLAGE's board and `_leave`
+	## empties it the moment you walk out of earshot, but a pedlar met three
+	## kilometres from anywhere is not in earshot of anything and his sentence
+	## must not be thrown away by the next poll. This is the same
+	## jump-the-queue case `_on_event_resolved` earns — a person is talking to
+	## you now.
+	##
+	## Refuses while muted rather than spending the line behind a menu — the
+	## freeze-don't-drop rule this feed was built on — and the caller is
+	## expected to come back on its next scan rather than treat the refusal as
+	## a delivery.
+	if not _booted or not enabled:
+		return false
+	if text.is_empty() or voice.is_empty():
+		return false
+	_muted = muted_now()
+	if _muted:
+		return false
+	## Keyed to the SPEAKER, not to a place. Being told it by Aldous Rye must
+	## not silence the same sentence at Bangor — the same reason the place is
+	## in the key at all — and Aldous must not tell you it twice.
+	var at := "~" + voice
+	if _heard.has(key_for(at, text)):
+		return false
+	_voice = voice
+	if _head != null and is_instance_valid(_head):
+		_head.text = voice.to_upper()
+	## The name holds as long as the sentence does, not for HEAD_HOLD. A place
+	## name may fade while the talk goes on -- you know which village you are
+	## standing in -- but a line with no speaker over it is just a voice in
+	## your head, and this was plainly wrong the first time it was looked at.
+	_head_t = maxf(HEAD_HOLD, dwell_for(text) + LIVE_BONUS)
+	## And being TOLD something here counts as having heard it here. Without
+	## this, a pedlar carrying Portland's news, met on Portland's doorstep,
+	## says his piece and the village board immediately says it again --
+	## verbatim, two lines apart. Scoped to `_here` only, so being told it by
+	## him at Portland still leaves Ellsworth free to tell you its own version.
+	if not _here.is_empty():
+		mark_heard(_here, text)
+	_say({"text": text, "day": day, "from": voice, "kind": kind, "live": true, "at": at})
+	return true
 
 
 func _on_event_resolved(ev: Dictionary) -> void:
@@ -364,6 +419,10 @@ func _say(r: Dictionary) -> void:
 		"full": dwell_for(text) + (LIVE_BONUS if live else 0.0),
 		"life": dwell_for(text) + (LIVE_BONUS if live else 0.0),
 		"born": 0.0, "live": live, "hidden": false,
+		## [wayfarers] True when a person said it rather than a village. Walking
+		## out of a village's earshot must not cut short a sentence somebody on
+		## the road is in the middle of saying to you.
+		"spoken": r.has("at"),
 	}
 	if _root != null and is_instance_valid(_root):
 		## A RichTextLabel rather than a Label so the line and the age it
@@ -385,7 +444,9 @@ func _say(r: Dictionary) -> void:
 	_lines.append(row)
 	said += 1
 	_head_t = maxf(_head_t, HEAD_HOLD)
-	mark_heard(_here, text)
+	## [wayfarers] A line offered by a traveller carries its own key scope in
+	## `at`; everything else is keyed to the place you are standing in.
+	mark_heard(String(r.get("at", _here)), text)
 
 
 func _alpha_for(row: Dictionary) -> float:
@@ -415,8 +476,13 @@ func _layout() -> void:
 	var y := vp.y * TOP_FRAC
 	if _head != null and is_instance_valid(_head):
 		var ha := clampf(_head_t / 0.6, 0.0, 1.0)
-		if _here == "" or _muted:
+		## [wayfarers] A speaker's name holds the head just as a place name
+		## does — otherwise a traveller's line would appear under whatever
+		## village you last walked out of, or under nothing at all.
+		if (_here == "" and _voice == "") or _muted:
 			ha = 0.0
+		if _head_t <= 0.0:
+			_voice = ""
 		_head.modulate = Color(0.72, 0.70, 0.62, ha * 0.85)
 		_head.position = Vector2(MARGIN_X, y - 22.0)
 	var n := _lines.size()

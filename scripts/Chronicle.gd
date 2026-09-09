@@ -820,6 +820,50 @@ func events_near(pos: Vector3, radius: float) -> Array:
 	return out
 
 
+func sky_at(t: float) -> int:
+	## [wayfarers] The weather the SIM believes in at day `t`, public so that
+	## anything else running on this calendar reads the same sky the event
+	## weights do. It is deliberately the same call the catch-up loop makes:
+	## the live `Weather` is `_rng`-driven and only answers for the step that
+	## is actually now, so a consumer that reached for `Weather.level` would
+	## put a number in the save's future that the save cannot reproduce.
+	return _weather_level(t)
+
+
+func deposit_rumour(place_name: String, rum: Dictionary) -> bool:
+	## [wayfarers] Word carried in by hand rather than spread by radius.
+	##
+	## `_spread_rumour` drops a line into every place within RUMOUR_SPREAD of
+	## where it happened, which is a day's walk and no further. This is the
+	## other way news travels: somebody walked it here. So the rumour keeps
+	## its ORIGINAL day — it is two days old and must read as two days old,
+	## whoever is telling it — and it is refused outright once it is past the
+	## window `_prune_rumours` would delete it in, because arriving with news
+	## the board would erase on the next step is not delivery.
+	var text := String(rum.get("text", ""))
+	if text.is_empty():
+		return false
+	var born := float(rum.get("day", days))
+	if born < days - RUMOUR_DAYS:
+		return false
+	var p := place_by_name(place_name)
+	if p.is_empty():
+		return false
+	var board: Array = p.get("rumours", [])
+	for r in board:
+		if r is Dictionary and String((r as Dictionary).get("text", "")) == text:
+			return false
+	board.append({
+		"text": text,
+		"day": born,
+		"from": String(rum.get("from", "")),
+		"kind": String(rum.get("kind", "")),
+	})
+	while board.size() > RUMOURS_PER_PLACE:
+		board.pop_front()
+	return true
+
+
 func report() -> Dictionary:
 	## A stable digest of the whole world, for the console, the tests and a
 	## future tavern board. Everything in here is sorted or already ordered:
