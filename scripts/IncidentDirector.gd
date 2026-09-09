@@ -232,6 +232,16 @@ var _kind_cache: Dictionary = {}
 ## the life of a Director.
 var _road_ends: Dictionary = {}
 
+## The road net, once there is one (2026-09-09, WORLD). Typed `Object` and
+## called duck-typed for the same reason `_ground` is: this class has to parse
+## inside a stripped test project that has no RoadNet.gd in it. Null is the
+## normal case and everything below falls back to the straight-line stand-in.
+var roadnet: Object = null
+## uid -> the point on the net, snapshotted the first time it is worked out,
+## for exactly the reason `_road_ends` is: the net is rebuilt when the roster
+## changes and an incident does not get to relocate because a fort was founded.
+var _road_pts: Dictionary = {}
+
 ## The scan's remaining build allowance, shared by the staging pass and the
 ## re-dressing pass. It was on staging alone at first, which left the whole
 ## point of it open: `Chronicle._resolve_due` resolves EVERY event past its
@@ -285,6 +295,20 @@ func bind_world(w: Node) -> void:
 	var dn: Variant = w.get("_daynight")
 	if dn is Node:
 		clock = dn as Node
+	## The road net, through World's accessor if it has one and through the
+	## group if it does not -- the same never-assume contract as everything
+	## else in here. Duck-typed on the three methods `_road_point` uses.
+	if w.has_method("roadnet"):
+		var rn: Variant = w.call("roadnet")
+		if rn is Object and is_instance_valid(rn as Object):
+			roadnet = rn as Object
+	if roadnet == null and is_inside_tree():
+		var g := get_tree().get_first_node_in_group("roads")
+		if g != null and is_instance_valid(g):
+			roadnet = g
+	if roadnet != null and not (roadnet.has_method("nearest_road")
+			and roadnet.has_method("point_on_edge") and roadnet.has_method("edges_from")):
+		roadnet = null
 
 
 func _process(delta: float) -> void:
@@ -1055,6 +1079,37 @@ func _road_point(rec: Dictionary, uid: int) -> Vector2:
 	## not get to relocate because a village was founded somewhere else.
 	var pos := _as_vec2(rec.get("pos", Vector2.ZERO))
 	var h := _hash(world_seed, uid, SALT_ROAD)
+	## THE ROAD NET, once there is one (2026-09-09, WORLD). Not a line between
+	## two villages any more: a point a fifth to four fifths of the way along
+	## one of the roads that actually leaves this place, picked by the same uid
+	## hash that used to pick the point on the line. The caravan is now on a
+	## track that goes round the hill and keeps out of the lake, because that
+	## is what the net carved. Snapshotted per uid for exactly the reason the
+	## straight-line far end is: the net is rebuilt when the roster changes and
+	## an incident does not get to relocate because a fort was founded.
+	if roadnet != null and is_instance_valid(roadnet):
+		var memo_pt: Variant = _road_pts.get(uid, null)
+		if memo_pt is Vector2:
+			return memo_pt as Vector2
+		var eid := -1
+		var nm := String(rec.get("place", ""))
+		if nm != "" and roadnet.has_method("has_place") and bool(roadnet.call("has_place", nm)):
+			var lstv: Variant = roadnet.call("edges_from", nm)
+			if lstv is PackedInt32Array and (lstv as PackedInt32Array).size() > 0:
+				var lst := lstv as PackedInt32Array
+				var k := clampi(int(_unit(h, 3) * float(lst.size())), 0, lst.size() - 1)
+				eid = int(lst[k])
+		if eid < 0:
+			var nearv: Variant = roadnet.call("nearest_road", pos)
+			if nearv is Dictionary and bool((nearv as Dictionary).get("ok", false)):
+				eid = int((nearv as Dictionary)["edge"])
+		if eid >= 0:
+			var tt := (1.0 - ROAD_MID) * 0.5 + _unit(h, 0) * ROAD_MID
+			var ptv: Variant = roadnet.call("point_on_edge", eid, tt)
+			if ptv is Vector2:
+				if uid > 0:
+					_road_pts[uid] = ptv as Vector2
+				return ptv as Vector2
 	var best := Vector2.ZERO
 	var found := false
 	var memo: Variant = _road_ends.get(uid, null)
