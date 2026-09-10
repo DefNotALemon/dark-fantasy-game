@@ -49,6 +49,20 @@ const FIRE_CORE := 0.9            ## full heat inside this radius
 const FIRE_RANGE := 5.5           ## nothing beyond this
 const EMBER_HEAT_MULT := 0.25
 
+## --- the flame signal, and the light it drives -------------------------------
+## ONE number drives the flicker, and both the light and FireAudio's crackle
+## rate are computed from it. That is the whole reason a pop lands on the frame
+## the flame flares instead of on a timer of its own.
+const FLICKER_A := 11.3           ## the fast gutter
+const FLICKER_B := 4.1            ## the slow breath under it
+const EMBER_BREATH := 0.22        ## coals do not gutter; they breathe, slowly
+const FUEL_BRIGHT := 600.0        ## fuel at which a flame is at its full size
+const COLOR_HOT := Color(1.0, 0.68, 0.34)    ## a fed flame: yellow
+const COLOR_LOW := Color(1.0, 0.36, 0.11)    ## a starved one: orange-red
+const COLOR_EMBER := Color(1.0, 0.24, 0.06)  ## coals: red
+const SHADOW_RANGE := 18.0        ## no shadows from a fire you cannot make out
+const SHADOW_BIAS := 0.05
+
 ## --- weather ------------------------------------------------------------------
 const RAIN_BURN_MULT := 2.0
 const RAIN_THRESHOLD := 0.5       ## Weather.intensity above which rain bites
@@ -303,6 +317,9 @@ func tick(delta: float) -> void:
 	if _shelter_t <= 0.0:
 		_shelter_t = SHELTER_RECHECK
 		_sheltered = _raycast_roof()
+	## Coals were FROZEN before this line moved up here: _flicker only
+	## advanced in LIT, so an ember bed never breathed and never popped.
+	_flicker += delta
 	if state == State.EMBERS:
 		ember_t -= delta
 		if ember_t <= 0.0:
@@ -314,7 +331,6 @@ func tick(delta: float) -> void:
 	if fuel <= 0.0:
 		state = State.EMBERS
 		ember_t = EMBER_SECONDS
-	_flicker += delta
 	_apply_visuals()
 
 
@@ -370,12 +386,14 @@ func _raycast_roof() -> bool:
 func _apply_visuals() -> void:
 	if _light == null:
 		return
-	var f01 := clampf(fuel / 600.0, 0.0, 1.0)
+	var f01 := clampf(fuel / FUEL_BRIGHT, 0.0, 1.0)
 	match state:
 		State.LIT:
-			var flick := 1.0 + sin(_flicker * 11.3) * 0.06 + sin(_flicker * 4.1) * 0.04
-			_light.light_energy = (1.1 + 1.4 * f01) * flick
+			## 0.90 + 0.20 * signal IS 1.0 + 0.06 sin(11.3t) + 0.04 sin(4.1t).
+			## FireAudioTests asserts that longhand, to a millionth.
+			_light.light_energy = (1.1 + 1.4 * f01) * (0.90 + 0.20 * flame_signal(_flicker))
 			_light.omni_range = 6.5 + 3.5 * f01
+			_light.light_color = light_color(State.LIT, f01)
 			_flame.emitting = true
 			_flame.amount_ratio = 0.35 + 0.65 * f01
 			_smoke.emitting = true
@@ -383,18 +401,118 @@ func _apply_visuals() -> void:
 			_set_ember_glow(1.4)
 		State.EMBERS:
 			var e01 := clampf(ember_t / EMBER_SECONDS, 0.0, 1.0)
-			_light.light_energy = 0.45 * e01
+			var esig := flame_signal(_flicker * EMBER_BREATH)
+			_light.light_energy = 0.45 * e01 * (0.82 + 0.36 * esig)
 			_light.omni_range = 4.5
+			_light.light_color = light_color(State.EMBERS, e01)
 			_flame.emitting = false
 			_smoke.emitting = true
 			_ember_mesh.visible = true
-			_set_ember_glow(0.35 + 0.9 * e01)
+			_set_ember_glow((0.35 + 0.9 * e01) * (0.86 + 0.28 * esig))
 		_:
 			_light.light_energy = 0.0
 			_flame.emitting = false
 			_smoke.emitting = false
 			_ember_mesh.visible = false
 	_sync_swarm_group()
+
+
+# ===========================================================================
+#  The flame signal - ONE number, read by the light and by the sound
+# ===========================================================================
+
+static func flame_signal(t: float) -> float:
+	## 0..1, deterministic, no RNG. The light's energy is computed from this,
+	## and `FireAudio.pop_rate` warps the crackle rate with it, so the pop you
+	## hear lands on the frame the flame flares. Sound and light cannot drift
+	## apart because there is only one of them -- the trick StepAudio used to
+	## hang the footstep off `Player.gait_phase`'s bob peaks.
+	return clampf(0.5 + 0.30 * sin(t * FLICKER_A) + 0.20 * sin(t * FLICKER_B), 0.0, 1.0)
+
+
+func signal_now() -> float:
+	## This fire's flicker, this instant. Coals breathe at EMBER_BREATH speed,
+	## and _apply_visuals reads the same number, not a second copy of it.
+	return flame_signal(_flicker if state == State.LIT else _flicker * EMBER_BREATH)
+
+
+func flame01() -> float:
+	## How hard this fire is burning, 0..1. A flame reads its fuel; coals read
+	## their ember clock and are capped at the same quarter their HEAT is
+	## capped at, because they are a quarter of a fire in every other way too.
+	if state == State.LIT:
+		return clampf(fuel / FUEL_BRIGHT, 0.0, 1.0)
+	if state == State.EMBERS:
+		return clampf(ember_t / EMBER_SECONDS, 0.0, 1.0) * EMBER_HEAT_MULT
+	return 0.0
+
+
+static func light_color(st: int, f01: float) -> Color:
+	## The colour used to be a constant and only the energy moved, which is why
+	## a dying fire read as "the same fire, further away". It should read as a
+	## different fire.
+	if st == State.EMBERS:
+		return COLOR_EMBER
+	if st == State.OUT:
+		return COLOR_LOW
+	return COLOR_LOW.lerp(COLOR_HOT, clampf(f01, 0.0, 1.0))
+
+
+# ===========================================================================
+#  Light spill - exactly ONE fire in the world casts shadows
+# ===========================================================================
+
+static func shadow_pick(entries: Array, at: Vector3, range_m: float) -> int:
+	## [{"id": int, "pos": Vector3, "state": int}] -> the id of the one fire
+	## that gets shadows, or -1. The nearest BURNING one within range: a cold
+	## pit half a metre away must not take the promotion from the campfire you
+	## are actually sitting at.
+	var best := -1
+	var best_d := INF
+	for e in entries:
+		var d: Dictionary = e
+		if int(d.get("state", State.OUT)) == State.OUT:
+			continue
+		var pos: Vector3 = d.get("pos", Vector3.ZERO)
+		var dist := pos.distance_to(at)
+		if dist > range_m:
+			continue
+		if dist < best_d:
+			best_d = dist
+			best = int(d.get("id", -1))
+	return best
+
+
+static func apply_shadows(fires: Array, at: Vector3) -> int:
+	## Called once per query by the fire bus, not once per fire per frame.
+	## Twenty-six hearths each deciding for themselves is twenty-six distance
+	## queries a frame for an answer only one of them can have.
+	var entries: Array = []
+	var pits: Array = []
+	for n in fires:
+		var fp := n as Firepit
+		if fp == null or not is_instance_valid(fp):
+			continue
+		pits.append(fp)
+		entries.append({"id": int(fp.get_instance_id()), "pos": fp.here(), "state": fp.state})
+	var pick := shadow_pick(entries, at, SHADOW_RANGE)
+	for p in pits:
+		var fp2 := p as Firepit
+		fp2.set_shadow(int(fp2.get_instance_id()) == pick)
+	return pick
+
+
+func set_shadow(on: bool) -> void:
+	if _light == null:
+		return
+	if on and not _light.shadow_enabled:
+		_light.shadow_bias = SHADOW_BIAS
+		_light.shadow_normal_bias = 1.4
+	_light.shadow_enabled = on
+
+
+func casts_shadow() -> bool:
+	return _light != null and _light.shadow_enabled
 
 
 func _set_ember_glow(e: float) -> void:
