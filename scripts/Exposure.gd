@@ -181,6 +181,8 @@ const DEFAULTS := {
 	"fire_c": 0.0,        ## Firepit.heat_from(...), degrees
 	"torch": false,       ## a LIT torch in hand
 	"asleep": false,      ## on a bedroll
+	"worn": {},           ## armour slot -> Materials id; see Garments.gd
+	"base_c": NAN,        ## Seasons.base_c_at() for HERE; NAN = use the table
 	"swimming": false,
 	"mode": MODE_NORMAL,
 	"survival": true,     ## Settings -> Warmth: Survival, not Light
@@ -256,6 +258,15 @@ static func ambient_c(e: Dictionary) -> float:
 	var sheltered := is_sheltered(e)
 	var intensity := clampf(float(e.get("intensity", 0.0)), 0.0, 1.0)
 	var c := SEASON_BASE_C[season]
+	var local := float(e.get("base_c", NAN))
+	if not is_nan(local):
+		## `Seasons.base_c_at()` answers this same question for a PLACE,
+		## continuously, on that place's own calendar. When the caller has
+		## bothered to ask it, its answer replaces the shared table
+		## outright -- everything below here (the hour, the lapse rate,
+		## the weather, the wind) still applies on top, because this term
+		## is the SEASON's contribution and nothing else's.
+		c = local
 	c += hour_curve_c(float(e.get("hour", 12.0)))
 	c += lapse_c(float(e.get("y", LAPSE_BASE_Y)))
 	if not sheltered:
@@ -266,6 +277,27 @@ static func ambient_c(e: Dictionary) -> float:
 	return c
 
 
+static func still_air_c(e: Dictionary) -> float:
+	## The air with the wind's own chill taken back OUT of it.
+	##
+	## This is the temperature a harness has been sitting in, and it is
+	## what `Garments` is asked for. Handing it the windy figure instead
+	## would charge the metal for conducting away the very draught it is
+	## standing in the way of, and a full suit of plate in a gale would
+	## then be scored twice for the same three degrees.
+	return ambient_c(e) - wind_c(float(e.get("wind", 0.0)), is_sheltered(e))
+
+
+static func garment_c(e: Dictionary, wet_v: float) -> float:
+	## What is on your back, in degrees. `Garments` owns every number in
+	## here; this is the door it comes through, and it is the only place
+	## in the project that reads the `worn` key.
+	var sheltered := is_sheltered(e)
+	var wind := 0.0 if sheltered else clampf(float(e.get("wind", 0.0)), 0.0, 1.0)
+	var worn: Dictionary = e.get("worn", {})
+	return Garments.garment_c(worn, still_air_c(e), clampf(wet_v, 0.0, 1.0), wind)
+
+
 static func felt_c(e: Dictionary, wet_v: float) -> float:
 	## What the body is actually up against: ambient, less what being wet costs
 	## in this wind, plus every source of heat within reach.
@@ -273,6 +305,7 @@ static func felt_c(e: Dictionary, wet_v: float) -> float:
 	var wind := 0.0 if sheltered else clampf(float(e.get("wind", 0.0)), 0.0, 1.0)
 	var chill := WET_CHILL_C * (1.0 + WET_CHILL_WIND * wind) * clampf(wet_v, 0.0, 1.0)
 	var f := ambient_c(e) - chill
+	f += garment_c(e, wet_v)
 	f += maxf(0.0, float(e.get("fire_c", 0.0)))
 	if bool(e.get("torch", false)):
 		f += TORCH_C
@@ -324,6 +357,10 @@ static func wet_rate(e: Dictionary, wet_v: float) -> float:
 		dry *= WET_DRY_FIRE_MULT
 	elif is_sheltered(e):
 		dry *= WET_DRY_SHELTER_MULT
+	## And metal does not breathe. A man drying himself at a fire in full
+	## plate is working against his own harness, which is why getting out
+	## of it is an ACTION rather than a number on a sheet.
+	dry *= Garments.dry_mult(e.get("worn", {}))
 	return -dry
 
 
