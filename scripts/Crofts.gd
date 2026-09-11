@@ -878,7 +878,32 @@ func _step(n: int) -> void:
 	var season := season_at(t)
 	var sky := sky_at(t)
 	for c in crofts:
-		_step_croft(c as Dictionary, t, sky, season)
+		_step_croft(c as Dictionary, t, sky, season_here(t, c as Dictionary))
+
+
+func season_here(t: float, c: Dictionary) -> int:
+	## [seasons] The season AT THIS CROFT, which is not always the season on
+	## the calendar. `season_at` still answers for the world — the Chronicle
+	## runs on it and a save header records it — but a household's YEAR is
+	## warped by where it stands, so the northern crofts sow late and are
+	## snowed on early, and the coastal ones get the long mild end of it.
+	##
+	## This is what makes the woodpile a question about GEOGRAPHY. A croft in
+	## the north burns `SEASON_BURN`'s winter rate for a longer winter and
+	## gathers over a shorter autumn, off the same two tables, so the same
+	## household habits leave a different pile in December depending only on
+	## which road it was seated beside. See scripts/Seasons.gd.
+	##
+	## No altitude term: a croft's `pos` is a Vector2 seated off a road and
+	## the sim never learns its height, so latitude and the sea decide it and
+	## `Seasons.alt_u` reads 0. Crofts sit in valleys; that is close enough to
+	## true and it is honest about what is known.
+	## ⚠ Through `season_at`, NEVER through `Seasons.local_index` directly:
+	## `season_at` is the door that delegates to the Chronicle, and the
+	## Chronicle owns the calendar. Geography moves the DAY this croft is
+	## living in; it does not get to decide what a day means.
+	var p: Vector2 = c.get("pos", Vector2.ZERO)
+	return season_at(t + Seasons.warp_days(t, Vector3(p.x, 0.0, p.y)))
 
 
 func sky_at(t: float) -> int:

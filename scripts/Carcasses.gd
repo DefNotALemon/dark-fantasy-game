@@ -614,7 +614,7 @@ func _step(n: int) -> void:
 		var rec := r as Dictionary
 		if rec.is_empty():
 			continue
-		if _step_rec(rec, t, hour, sky, season):
+		if _step_rec(rec, t, hour, sky, season_here(t, rec)):
 			dead.append(rec)
 	for r2 in dead:
 		_forget(r2 as Dictionary)
@@ -631,6 +631,28 @@ func season_at(t: float) -> int:
 	if chron != null and is_instance_valid(chron) and chron.has_method("season_at"):
 		return clampi(int(chron.call("season_at", t)), 0, 3)
 	return int(fposmod(t, DAYS_PER_SEASON * 4.0) / DAYS_PER_SEASON) % 4
+
+
+func season_here(t: float, rec: Dictionary) -> int:
+	## [seasons] The season WHERE THE BODY LIES. `season_at` is still the
+	## calendar and still what the Chronicle runs on; rot and scent are local.
+	##
+	## This is the difference between a larder and a loss. `SEASON_ROT` says
+	## August takes meat eight times faster than February, and until now the
+	## whole map shared one August — so a kill in the far north spoiled at the
+	## same rate as one on the warm south coast. It does not any more: on 30
+	## of the year's 96 days two carcasses on this map are rotting in
+	## different seasons, and in the shoulder weeks a body up on Katahdin is
+	## already keeping while the same animal Down East is still going off.
+	##
+	## Unlike a croft, a carcass knows its own height — `rec["at"]` is a
+	## Vector3 — so altitude counts here, and the mountain gets its full share
+	## of the warp. See scripts/Seasons.gd.
+	## ⚠ Through `season_at`, NEVER through `Seasons.local_index` directly —
+	## see the same note in `Crofts.season_here`. The Chronicle owns the
+	## calendar; geography only moves which day this body is lying in.
+	var at: Vector3 = rec.get("at", Vector3.ZERO)
+	return season_at(t + Seasons.warp_days(t, at))
 
 
 func _step_rec(rec: Dictionary, t: float, hour: float, sky: int, season: int) -> bool:
