@@ -38,6 +38,14 @@ const MAX_HOPS := 4
 const ALERT_SECONDS := 9.0       ## how long a spooked animal stays wound up
 const PLAYER_HEAR := 55.0        ## the player is told about alarms this close
 
+## How far the player's own noise carries, from a careful walk to a sprint.
+## These were literals inside player_noise() until the weather started reading
+## them; they are named now so that WeatherwiseTests can ask its question --
+## "at which sky does a sprint stop reaching a deer?" -- without either file
+## restating the other's number.
+const NOISE_NEAR := 10.0
+const NOISE_FAR := 34.0
+
 static var _instance: Telegraph = null
 
 ## Live alarms, for anything that wants to query rather than be pushed to:
@@ -47,6 +55,12 @@ var recent: Array[Dictionary] = []
 ## The player's own noise. Crashing through brush IS an alarm — the forest
 ## empties ahead of a careless walker, and that is the stealth mechanic.
 var _player_noise_t := 0.0
+
+## The sky, as WildlifeDirector hands it over every tick. Empty means "no
+## weather", which Weatherwise reads as a clear day — so a Telegraph that
+## nobody tells about the weather behaves exactly as this bus always has, and
+## every suite written before today is untouched.
+var weather: Dictionary = {}
 
 signal alarmed(pos: Vector3, radius: float, threat: int, source_name: String)
 
@@ -121,7 +135,12 @@ func _ring(pos: Vector3, radius: float, threat: int, source_name: String, hops: 
 		var carrier: Node3D = relays[0]
 		var delay := randf_range(RELAY_DELAY.x, RELAY_DELAY.y)
 		var cp: Vector3 = carrier.global_position
-		var next_r := radius * RELAY_FALLOFF
+		## [weather] ...and the forest cannot hear either. The same rain that
+		## hides a running man shortens every hop of the alarm chain, so the
+		## word stops travelling: a 34 m alarm carries the full four hops this
+		## bus allows on a clear day and exactly two in a storm.
+		## Rain buys you stealth and takes away your intelligence.
+		var next_r := radius * RELAY_FALLOFF * Weatherwise.relay_mult(weather)
 		if carrier.has_method("relay_alarm"):
 			carrier.call("relay_alarm", delay)
 		get_tree().create_timer(delay).timeout.connect(
@@ -148,8 +167,14 @@ func player_noise(pos: Vector3, loudness: float) -> void:
 	if loudness < 0.35 or _player_noise_t > 0.0:
 		return
 	_player_noise_t = lerpf(1.4, 0.5, clampf(loudness, 0.0, 1.0))
-	_ring(pos, lerpf(10.0, 34.0, clampf(loudness, 0.0, 1.0)),
-		Threat.WARY if loudness < 0.7 else Threat.ALARM, "you", 1)
+	## [weather] RAIN IS LOUD, AND THAT IS THE POINT. A sprint rings at
+	## NOISE_FAR on a clear day, which is just outside a whitetail's notice
+	## radius; from drizzle onward it no longer reaches one, so you can run in
+	## wet woods without emptying them ahead of you. The price is paid in the
+	## same coin two functions down, where the relay is cut by the same rain.
+	var ring := lerpf(NOISE_NEAR, NOISE_FAR, clampf(loudness, 0.0, 1.0))
+	ring *= Weatherwise.noise_mult(weather)
+	_ring(pos, ring, Threat.WARY if loudness < 0.7 else Threat.ALARM, "you", 1)
 
 
 func heard_by_player(player_pos: Vector3) -> Array[Dictionary]:
