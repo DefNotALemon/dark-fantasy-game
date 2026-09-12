@@ -86,6 +86,7 @@ var _roads: RoadNet                  ## [roadnet] and the roads between the plac
 var _wayfarers: Wayfarers            ## [wayfarers] and who is out walking them
 var _crofts: Crofts                   ## [crofts] and who lives out between them
 var _carcasses: Carcasses            ## [carcasses] and what the woods do with a kill
+var _warbands: Warbands              ## [warbands] and who holds the ground it happens on
 var _water_audio: WaterAudio = null  ## [water] shores, strokes, the muffle under
 var _step_audio: StepAudio = null    ## [steps] the ground under your feet
 var _drowned: Node3D = null          ## [water] the thing that has the swimmer, if any
@@ -1356,6 +1357,7 @@ func save_state() -> Dictionary:
 	out["wayfarers"] = _wayfarers.to_dict() if _wayfarers else {}    ## [wayfarers]
 	out["crofts"] = _crofts.to_dict() if _crofts else {}          ## [crofts]
 	out["carcasses"] = _carcasses.to_dict() if _carcasses else {}  ## [carcasses]
+	out["warbands"] = _warbands.to_dict() if _warbands else {}    ## [warbands]
 	if _terrain != null:
 		out["overworld"] = _terrain.save_state()  ## [terrain] the felled-slot ledger
 	if _region != null:
@@ -1397,6 +1399,8 @@ func apply_state(d: Dictionary) -> void:
 		_crofts.from_dict(d.get("crofts", {}) as Dictionary)
 	if _carcasses:  ## [carcasses]
 		_carcasses.from_dict(d.get("carcasses", {}) as Dictionary)
+	if _warbands:  ## [warbands]
+		_warbands.from_dict(d.get("warbands", {}) as Dictionary)
 	## Sweep the surface clean, then lay the saved one back down.
 	for group in ["trees", "tree_stumps", "carry_logs", "dropped_items", "beds", "psx_props"]:
 		for n in get_tree().get_nodes_in_group(group):
@@ -1531,6 +1535,14 @@ func carcasses() -> Carcasses:
 	return _carcasses
 
 
+func warbands() -> Warbands:
+	## [warbands] The goblin camps and who is in them, for the console, the
+	## map and the tests: World.warbands().report(). Null until
+	## _build_wildlife() has run, or forever if USE_WILDLIFE is off -- every
+	## caller must tolerate that.
+	return _warbands
+
+
 func rumours() -> RumourFeed:
 	## [rumours] The ear on the Chronicle, for the console and the tests:
 	## World.rumours().report(). Null until _build_wildlife() has run, or
@@ -1655,6 +1667,25 @@ func _build_wildlife() -> void:
 	_carcasses.name = "Carcasses"
 	add_child(_carcasses)
 	_carcasses.bind_world(self)
+	## [warbands] The frontier had numbers and a line on the map and not one
+	## goblin standing on it. A WARBAND does not spawn: it CAMPS, and the camp
+	## is always there -- 115 sites marched off the map, deep ground, no road
+	## within 220 m, clear of every town -- while who is IN it is the goblin
+	## share of that region's hold, read out of the Chronicle's own faction
+	## field. So a border that moves is a fire in a clearing that was dark last
+	## month, and you can walk to it. At dusk the band walks out to the nearest
+	## road its season can reach and stands on it at midnight, which is the
+	## whole of why the north is dangerous after dark and empty at noon. Kill
+	## one to the last goblin and the region carries a negative goblin push --
+	## it does NOT become men's ground; whoever presses on it from next door
+	## divides it, and in the north that is as often the wolves.
+	## Built LAST, because bind_world reaches for roadnet(), chronicle() and
+	## rumours(), and a collaborator that does not exist yet binds as null and
+	## stays null for the session.
+	_warbands = Warbands.new()
+	_warbands.name = "Warbands"
+	add_child(_warbands)
+	_warbands.bind_world(self)
 
 
 func wildlife_census() -> Dictionary:

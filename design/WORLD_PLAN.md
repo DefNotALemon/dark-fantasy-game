@@ -1,6 +1,6 @@
 # Myrkfell — world plan
 
-> Written by the in-game god editor (`scripts/GodEditor.gd`) on 2026-09-11T15:51:05.
+> Written by the in-game god editor (`scripts/GodEditor.gd`) on 2026-09-12T07:12:50.
 > Data: `res://design/world_plan.json`. Edit the world in game, not this file — it is regenerated on every save.
 
 Coordinates are world metres: **+x east, +z south**, y up. Sea level is y −22.5,
