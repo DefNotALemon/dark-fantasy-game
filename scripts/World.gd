@@ -1773,4 +1773,3 @@ func _drowned_tick(delta: float, uw: float) -> void:
 
 func drowned_active() -> bool:
 	return _drowned != null and is_instance_valid(_drowned)
-
