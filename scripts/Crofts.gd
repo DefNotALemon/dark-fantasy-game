@@ -176,8 +176,18 @@ const SEASON_GATHER: Array = [1.65, 0.75, 1.55, 0.85]
 const WOOD_MAX := 9
 
 # --------------------------------------------------------------- the alarm
-const ALARM_TAGS: Array = ["raid", "beast", "wolf", "war"]
-const SHUT_PRESSURE := 0.55
+## [factions] These were `["raid", "beast", "wolf", "war"]` and NOT ONE OF THE
+## FOUR EXISTS. The Chronicle's bias pool is keyed on the tags its own
+## catalogue emits — `goblins`, `wolves` (plural), `bandits`, `unrest` — so
+## `pressure_at` returned a flat zero for every tag in this list, every time.
+## Measured over a simulated year: 4 800 croft-days, best worst-pressure ever
+## reached 0.250, threshold 0.55, ZERO doors barred. `croft_shut` has never
+## emitted since this file shipped. With the real tags the same year clears
+## the old threshold on 37.6% of croft-days, which is a village of shut-ins,
+## so the threshold is re-measured too — 0.90 sits at about one day in
+## fourteen, and the faction field decides which crofts they are.
+const ALARM_TAGS: Array = ["goblins", "wolves", "bandits", "unrest"]
+const SHUT_PRESSURE := 0.90       ## measured: p90 is 0.83, p95 0.97
 const SHUT_DAYS := 1.6
 
 # --------------------------------------------------------------- the yard

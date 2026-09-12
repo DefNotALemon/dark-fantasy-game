@@ -832,7 +832,7 @@ func _t_year() -> void:
 # -------------------------------------------------------------------- alarm
 
 func _t_alarm() -> void:
-	claim("alarm", 10)
+	claim("alarm", 13)
 	var net := _mk_net(_ring(8, 1200.0))
 	var sky := FakeSky.new()
 	root.add_child(sky)
@@ -846,10 +846,10 @@ func _t_alarm() -> void:
 	cr.advance(48.0)
 	ok(_shut.is_empty(), "a quiet country bars nobody in")
 	ok(not bool(Crofts.routine_at(cc, cr.days, 0, 0, cst)["shut_in"]), "and the door stands open")
-	sky.press["raid"] = Crofts.SHUT_PRESSURE + 0.2
+	sky.press["goblins"] = Crofts.SHUT_PRESSURE + 0.2
 	cr.advance(48.0)
 	ok(not _shut.is_empty(), "a raid nearby bars the door")
-	ok(String(_shut[0]).contains("raid"), "and says which scare did it (%s)" % String(_shut[0]))
+	ok(String(_shut[0]).contains("goblins"), "and says which scare did it (%s)" % String(_shut[0]))
 	var shut_r := Crofts.routine_at(cc, cr.days, 0, 0, cst)
 	ok(bool(shut_r["shut_in"]), "the household is barred in")
 	ok(String(shut_r["shutters"]) == "shut", "the shutters are shut at noon")
@@ -864,9 +864,29 @@ func _t_alarm() -> void:
 			"and it lifts once the country is quiet again")
 	## The check is once a day per household, not once a step.
 	var before := _shut.size()
-	sky.press["beast"] = 0.99
+	sky.press["bandits"] = 0.99
 	cr.advance(6.0)
 	ok(_shut.size() - before <= 1, "the alarm is checked once a day, not twelve times")
+	## EVERY ALARM TAG MUST BE ONE THE CATALOGUE CAN ACTUALLY EMIT. This file
+	## shipped with `["raid", "beast", "wolf", "war"]` and not one of the four
+	## exists anywhere in ChronicleEvents, so `pressure_at` answered a flat
+	## zero for all of them and no croft in Myrkfell ever barred its door.
+	## Measured over a simulated year before this was fixed: 4 800 croft-days,
+	## best pressure ever seen 0.250, doors barred ZERO. A tag list is exactly
+	## as dead as a method nobody calls, and it is just as invisible.
+	var emitted := {}
+	for kid in ChronicleEvents.ids():
+		var kd := ChronicleEvents.by_id(String(kid))
+		for o in (kd.get("outcomes", []) as Array):
+			for tg in ((o as Dictionary).get("bias", {}) as Dictionary):
+				emitted[String(tg)] = true
+	ok(emitted.size() >= 10, "the catalogue emits a real spread of bias tags (%d)" % emitted.size())
+	var dead: Array = []
+	for tg in Crofts.ALARM_TAGS:
+		if not emitted.has(String(tg)):
+			dead.append(String(tg))
+	ok(dead.is_empty(), "and every ALARM_TAG is one of them (dead: %s)" % str(dead))
+	ok(not Crofts.ALARM_TAGS.is_empty(), "and there is at least one to be alarmed by")
 	sky.free()
 	cr.free()
 	net.free()
@@ -875,7 +895,7 @@ func _t_alarm() -> void:
 # ---------------------------------------------------------------- chronicle
 
 func _t_chronicle() -> void:
-	claim("chronicle", 9)
+	claim("chronicle", 11)
 	## A STUB IS NOT THE COLLABORATOR. Everything above drives a FakeSky;
 	## this section drives the real Chronicle's real front door, because
 	## three mutations of a real Chronicle method survived a green suite on
@@ -886,12 +906,22 @@ func _t_chronicle() -> void:
 	ok(chron.has_method("pressure_at"), "Chronicle still has pressure_at")
 	ok(chron.has_method("sky_at"), "and sky_at")
 	ok(chron.has_method("season_at"), "and season_at")
-	var quiet := chron.pressure_at(Vector3(1e6, 0.0, 1e6), "raid")
+	var quiet := chron.pressure_at(Vector3(1e6, 0.0, 1e6), "goblins")
 	ok(quiet < Crofts.SHUT_PRESSURE, "an empty corner of the map is not an alarm (%.2f)" % quiet)
-	chron.bias["raid"] = 0.9
-	var loud := chron.pressure_at(Vector3(1e6, 0.0, 1e6), "raid")
+	## [factions] and the SAME tag, at the same instant, now reads differently
+	## depending on where you are standing — which is the whole of the faction
+	## field, seen from the one door Crofts actually uses.
+	var deep := chron.pressure_at(Vector3(2485.9, 0.0, -5560.1), "goblins")   ## Baxter
+	var town := chron.pressure_at(Vector3(600.2, 0.0, 559.9), "goblins")      ## Casco Bay
+	ok(deep > town + 0.30, "deep country reads hotter for goblins than the coast does (%.2f vs %.2f)"
+			% [deep, town])
+	chron.bias["goblins"] = 1.5
+	var loud := chron.pressure_at(Vector3(1e6, 0.0, 1e6), "goblins")
 	ok(loud >= Crofts.SHUT_PRESSURE, "a loaded bias is (%.2f)" % loud)
 	ok(loud > quiet, "and the real pressure_at moved when the bias did")
+	ok(absf(chron.pressure_at(Vector3(2485.9, 0.0, -5560.1), "bandits")
+			- chron.pressure_at(Vector3(600.2, 0.0, 559.9), "bandits")) < 0.001,
+			"but a tag that speaks for nobody is exactly as loud everywhere")
 	var lvl := chron.sky_at(3.0)
 	ok(lvl >= 0 and lvl <= 4, "the real sky_at answers a legal Weather.Level (%d)" % lvl)
 	## Crofts' own season fallback must agree with the Chronicle's, or two

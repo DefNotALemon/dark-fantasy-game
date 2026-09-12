@@ -203,6 +203,20 @@ var places: Array = []          ## of place Dictionaries, see the file header
 var active: Array = []          ## live events
 var resolved: Array = []        ## the last RESOLVED_KEEP, oldest first
 var bias: Dictionary = {}       ## tag -> float, canonical (sorted) after each step
+
+## [factions] WHO HOLDS THE GROUND. `bias` above is one pool for the whole
+## map, which is why `pressure_at` took a position and threw it away. These
+## four are the write side: the political field, the fortnight's memory of
+## what has been happening in each region, and the last holder seen, so a
+## border that MOVES can say so. The three cached tables beneath them are
+## pure functions of the roster and are rebuilt by boot(), never saved.
+var factions: Dictionary = {}   ## region -> {men, goblins, wolves, wild}
+var fpush: Dictionary = {}      ## region -> {men, goblins, wolves, lawless}
+var _fwas: Dictionary = {}      ## region -> the holder at the last step
+var _fseats: Dictionary = {}
+var _fadj: Dictionary = {}
+var _fanch: Dictionary = {}
+var _fland: Array = []
 var days := 0.0                 ## the sim's own clock, in float game days
 
 var _steps := 0                 ## the step index the sim has reached
@@ -282,7 +296,23 @@ func boot(force := false) -> void:
 			"watch": clampf(0.15 + 0.20 * _unit(h, 4) + 0.20 * float(rank), 0.0, 1.0),
 			"rumours": [],
 		})
+	_rebuild_factions()
 	_booted = true
+
+
+func _rebuild_factions() -> void:
+	## The political map is DERIVED from the places that exist right now — add
+	## a fort at runtime and the borders redraw themselves. Nothing in here is
+	## saved except the field itself and its pressure.
+	_fseats = Factions.seats_from(places)
+	_fland = Factions.land_regions(REGION_ROSTER, _fseats)
+	_fadj = Factions.adjacency(_fland, Factions.centres_of(REGION_ROSTER))
+	_fanch = Factions.anchors(_fland, _fseats, Factions.reach(_fland, _fseats, _fadj))
+	factions = Factions.blank(_fanch)
+	fpush = Factions.blank_push(_fland)
+	_fwas = {}
+	for r in _fland:
+		_fwas[String(r)] = Factions.holder_of(factions, String(r))
 
 
 func _roster() -> Array:
@@ -341,20 +371,11 @@ func _region_for(pos: Vector2) -> String:
 	## region at all and every region preference in the catalogue would be
 	## dead weight. So: the circle that contains it if there is one, otherwise
 	## the nearest circle's centre. Every place belongs somewhere.
-	var best := ""
-	var bd := INF
-	var near := ""
-	var nd := INF
-	for r in REGION_ROSTER:
-		var rd := r as Dictionary
-		var d: float = (rd["pos"] as Vector2).distance_to(pos)
-		if d < nd:
-			nd = d
-			near = String(rd["name"])
-		if d < float(rd.get("r", 500.0)) and d < bd:
-			bd = d
-			best = String(rd["name"])
-	return best if not best.is_empty() else near
+	##
+	## [factions] The rule itself now lives in `Factions.region_at`, because
+	## the faction field has to answer the same question for an arbitrary
+	## position and two copies of this would be two maps.
+	return Factions.region_at(Vector3(pos.x, 0.0, pos.y), REGION_ROSTER)
 
 
 ## =============================== The clock ================================
@@ -450,10 +471,58 @@ func _step(n: int) -> void:
 	var sky := _weather_level(t)
 
 	_decay_bias()
+	_step_factions(t)
 	_drift(t)
 	_prune_rumours(t)
 	_resolve_due(t)
 	_maybe_fire(n, t, hour, season, sky)
+
+
+func _step_factions(t: float) -> void:
+	## [factions] The border moves on the same step everything else does, by
+	## exactly one step's worth of days — so a sleep that hands the sim
+	## fourteen hours at once moves it fourteen hours, and a save that restores
+	## the step count restores the frontier with it.
+	if _fland.is_empty():
+		return
+	Factions.step(factions, fpush, _fanch, _fadj, _fseats, STEP_HOURS / 24.0)
+	## and a border that has actually moved is NEWS. It is deposited at the
+	## region's chief seat and travels from there like anything else, so you
+	## hear that the watch has lost the Allagash from someone in a village
+	## rather than from a number on a panel.
+	for r in _fland:
+		var rn := String(r)
+		var was := String(_fwas.get(rn, ""))
+		var now := Factions.holder_of(factions, rn)
+		if now == was:
+			continue
+		_fwas[rn] = now
+		if was.is_empty():
+			continue
+		var line := Factions.line_for(factions, rn, was)
+		if line.is_empty():
+			continue
+		var seat := _chief_seat(rn)
+		if seat.is_empty():
+			continue
+		deposit_rumour(seat, {"text": line, "day": t, "from": seat, "kind": "frontier"})
+
+
+func _chief_seat(region: String) -> String:
+	## The best-ranked place in a region, ties broken by name so two Chronicles
+	## that told the same story pick the same mouth.
+	var best := ""
+	var br := -1
+	for p in places:
+		var pd := p as Dictionary
+		if String(pd.get("region", "")) != region:
+			continue
+		var rank := int(pd.get("rank", 0))
+		var nm := String(pd.get("name", ""))
+		if rank > br or (rank == br and nm < best):
+			br = rank
+			best = nm
+	return best
 
 
 static func season_at(day: float) -> int:
@@ -526,6 +595,13 @@ func pressure_at(pos: Vector3, tag: String) -> float:
 		var kind := ChronicleEvents.by_id(String(e.get("kind", "")))
 		if (kind.get("tags", []) as Array).has(tag):
 			p += 0.25
+	## [factions] and finally WHERE YOU ARE STANDING. Until this line the
+	## dominant term was map-wide: a bad raid at Freeport raised the goblin
+	## pressure at the Allagash by the same amount in the same instant. A tag
+	## that speaks for a claimant now reads high on that claimant's ground and
+	## low off it, and a tag that speaks for nobody — bandits, unrest — is
+	## exactly as loud everywhere, which is the point of them.
+	p += Factions.pressure_bonus(factions, Factions.region_at(pos, REGION_ROSTER), tag)
 	return p
 
 
@@ -676,6 +752,10 @@ func _resolve(ev: Dictionary, t: float) -> void:
 	var b: Dictionary = out.get("bias", {})
 	for tag in b:
 		bias[String(tag)] = float(bias.get(String(tag), 0.0)) + float(b[tag])
+	## [factions] ...and WHERE it happened is written down too. The world-wide
+	## pool above says what sort of year it is; this says whose ground it is.
+	var epos: Vector2 = ev.get("pos", Vector2.ZERO)
+	Factions.note(fpush, Factions.region_at(Vector3(epos.x, 0.0, epos.y), REGION_ROSTER), b)
 
 	## 3. the news travels — here first, then as far as a day's walk
 	_spread_rumour(ev, t)
@@ -934,7 +1014,19 @@ func to_dict() -> Dictionary:
 		"places": pl,
 		"active": act,
 		"resolved": res,
+		"factions": _fdup(factions),
+		"fpush": _fdup(fpush),
 	}
+
+
+func _fdup(src: Dictionary) -> Dictionary:
+	## Sorted, because the key order is part of what a save round-trip compares.
+	var names: Array = src.keys()
+	names.sort()
+	var out := {}
+	for n in names:
+		out[String(n)] = (src[String(n)] as Dictionary).duplicate()
+	return out
 
 
 func from_dict(d: Dictionary) -> void:
@@ -981,6 +1073,21 @@ func from_dict(d: Dictionary) -> void:
 	for e in (d.get("resolved", []) as Array):
 		if e is Dictionary:
 			resolved.append((e as Dictionary).duplicate(true))
+	## [factions] The field and its pressure are state; the tables under them
+	## are not, so they are rebuilt from the roster this build actually has and
+	## only the numbers are overlaid. A save from before factions existed
+	## leaves the world standing at rest rather than empty.
+	_rebuild_factions()
+	for rn in (d.get("factions", {}) as Dictionary):
+		if factions.has(String(rn)):
+			(factions[String(rn)] as Dictionary).merge(
+				(d.get("factions", {}) as Dictionary)[rn] as Dictionary, true)
+	for rn in (d.get("fpush", {}) as Dictionary):
+		if fpush.has(String(rn)):
+			(fpush[String(rn)] as Dictionary).merge(
+				(d.get("fpush", {}) as Dictionary)[rn] as Dictionary, true)
+	for r in _fland:
+		_fwas[String(r)] = Factions.holder_of(factions, String(r))
 	var pool: Dictionary = d.get("bias", {})
 	var tags: Array = pool.keys()
 	tags.sort()

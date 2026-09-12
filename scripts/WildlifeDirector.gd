@@ -97,6 +97,29 @@ func _wx() -> Dictionary:
 ## ================================ Clock ===================================
 
 
+func _ground() -> Dictionary:
+	## [factions] The ONE place this Director asks whose ground it is standing
+	## on. Same contract as `_wx()` directly above: a world with no Chronicle —
+	## the headless suites, the old build, a test harness — gets an empty
+	## dictionary back, which `Factions.spawn_mult` reads as neutral country
+	## and prices at exactly 1.0. Wildlife without a Chronicle behaves exactly
+	## as it did before this existed.
+	var ch := Chronicle.get_bus(self)
+	if ch == null:
+		return {}
+	var at := _spawn_anchor()
+	var rn := Factions.region_at(at, Chronicle.REGION_ROSTER)
+	return Factions.hold_of(ch.factions, rn)
+
+
+func _spawn_anchor() -> Vector3:
+	## Where the Director is thinking about, which is where the player is.
+	var pl := get_tree().get_first_node_in_group("player") if is_inside_tree() else null
+	if pl != null and pl is Node3D:
+		return (pl as Node3D).global_position
+	return Vector3.ZERO
+
+
 func set_clock(hour: float, day: float) -> void:
 	_hour = hour
 	_day = day
@@ -299,6 +322,7 @@ func _roll_species(zone: String) -> String:
 	if cands.is_empty():
 		return ""
 	var wx := _wx()
+	var ground := _ground()
 	var pool: Array = []
 	var total := 0.0
 	for e in cands:
@@ -330,6 +354,14 @@ func _roll_species(zone: String) -> String:
 		## zero, which is how `rain_only` finally means something: the Red Eft
 		## is not rare on a dry day, it is absent.
 		w *= Weatherwise.out_mult(k, wx)
+		## [factions] And WHOSE GROUND this is. Same shape again, same place in
+		## the chain: an offset through the multiplier stack that was already
+		## here, exactly 1.0 on neutral country by construction, so a world with
+		## no Chronicle in it spawns precisely as it did before this existed.
+		## Nobody wrote "there are more wolves in goblin country" anywhere —
+		## predators run about twice as common in the deep north as on the
+		## settled coast because that is what the field says about the ground.
+		w *= Factions.spawn_mult(k, ground)
 		if w <= 0.0:
 			continue
 		pool.append({"key": k, "w": w})
