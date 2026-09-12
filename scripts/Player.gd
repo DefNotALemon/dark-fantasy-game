@@ -385,6 +385,8 @@ var _drop_target: DroppedItem = null    ## the dropped item currently looked at
 var _bed_target: Node3D = null          ## the bedroll under the gaze (E = pack up)
 var _debris_target: RockDebris = null   ## a landed rock under the gaze (E = gather)
 var _fire_target: Firepit = null        ## a fire pit under the gaze (E = light / feed)
+var _carc_target: Dictionary = {}       ## a carcass record under the gaze (E = butcher)
+var _cut_cd := 0.0                      ## seconds until the next cut can be taken
 var _log_target: CarryLog = null        ## a felled log under the gaze (E = shoulder it)
 
 ## ------------------------- THE REACH-AND-GRAB -----------------------------
@@ -1633,6 +1635,8 @@ func _input(event: InputEvent) -> void:
 				elif menu_open == "" and kd_phase == "" and _fire_target != null \
 						and is_instance_valid(_fire_target):
 					_use_firepit(_fire_target)   ## [fire]
+				elif menu_open == "" and kd_phase == "" and not _carc_target.is_empty():
+					_butcher_cut()   ## [butchery]
 				elif menu_open == "" and kd_phase == "" and _water_target != Vector3.INF:
 					_drink_water()   ## [water]
 			KEY_M:
@@ -5460,12 +5464,14 @@ func _die() -> void:
 
 func _update_hud(delta: float) -> void:
 	## Dropped-item gaze check + the "[E] Pick up" prompt.
+	_cut_cd = maxf(0.0, _cut_cd - delta)
 	_update_drop_target()
 	_update_water_target()
 	if pickup_prompt:
 		pickup_prompt.visible = _drop_target != null or _bed_target != null \
 			or _debris_target != null or _log_target != null or _water_target != Vector3.INF
 		pickup_prompt.visible = pickup_prompt.visible or _fire_target != null   ## [fire]
+		pickup_prompt.visible = pickup_prompt.visible or not _carc_target.is_empty()  ## [butchery]
 		if _drop_target != null:
 			pickup_prompt.text = "[E] / [LMB]  Pick up %s" % _drop_target.display_name()
 		elif _bed_target != null:
@@ -5482,6 +5488,11 @@ func _update_hud(delta: float) -> void:
 				pickup_prompt.text = "Too wild a wind to strike a light"
 			else:
 				pickup_prompt.text = "[E]  Light the fire"
+		elif not _carc_target.is_empty():
+			var chv: Dictionary = (CritterDex.get_profile(
+				String(_carc_target.get("species", ""))) as Dictionary).get("harv", {})
+			pickup_prompt.text = Butchery.prompt_for(_carc_target, chv, _edge_mat(),
+				_total_weight(), stats.carry_limit())
 		elif _water_target != Vector3.INF:
 			if _water_is_sea:
 				pickup_prompt.text = "Sea water -- brine"
@@ -7634,6 +7645,7 @@ func _update_drop_target() -> void:
 	_debris_target = null
 	_fire_target = null
 	_log_target = null
+	_carc_target = {}
 	if menu_open != "" or kd_phase != "" or reach_phase != "":
 		return  ## mid-reach the gaze picks nothing new up
 	var best := 0.92
@@ -7715,6 +7727,129 @@ func _update_drop_target() -> void:
 		if d > fbest:
 			fbest = d
 			_fire_target = fp
+
+	## And a carcass. E butchers it -- see `Butchery`, which is the caller
+	## `Carcasses.harvest_at` had been waiting for since `a23a20e`.
+	##
+	## It competes with the fire rather than deferring to it, because
+	## butchering BESIDE a fire is the whole winter play (a cut leaves you
+	## bloody, and wet is worth three and a half minutes of a winter warmth
+	## bar) and an early return here would have made the smart move the one
+	## the game refuses.
+	var carc := Carcasses.get_bus(self)
+	if carc == null or not is_instance_valid(carc):
+		return
+	var cbest: float = maxf(Butchery.CONE, fbest if _fire_target != null else 0.0)
+	for row in carc.near(_aim_origin(), Butchery.REACH):
+		var rec: Dictionary = (row as Dictionary)["rec"]
+		var to2: Vector3 = (rec["at"] as Vector3) + Vector3.UP * 0.25 - _aim_origin()
+		var dist2 := to2.length()
+		if dist2 > Butchery.REACH or dist2 < 0.05:
+			continue
+		var d2 := fwd.dot(to2.normalized())
+		if d2 > cbest:
+			cbest = d2
+			_carc_target = rec
+	if not _carc_target.is_empty():
+		_fire_target = null
+
+
+func _edge_mat() -> String:
+	## What you would open an animal with, as a `Materials` id, or "" for
+	## nothing. THE SWORD ON YOUR HIP IS AN EDGE -- a wretched butcher's tool
+	## and the only one Myrkfell has -- so this is reachable from the first
+	## minute of a new game rather than gated behind a knife that does not
+	## exist anywhere in the project. A pickaxe is not an edge.
+	var sw: Dictionary = _slot_item("sword")
+	if not sw.is_empty():
+		var m := String(sw.get("material", ""))
+		if Butchery.edge_tier(m) >= 0:
+			return m
+	for it in inventory:
+		var nm := String(it.get("name", ""))
+		if nm.contains("Knife") or nm.contains("Dagger"):
+			var m2 := String(it.get("material", "iron"))
+			return m2 if Butchery.edge_tier(m2) >= 0 else "iron"
+	return ""
+
+
+func _butcher_cut() -> void:
+	## ONE CUT. Everything it refuses, it refuses out loud, because a verb
+	## that silently does nothing is indistinguishable from a broken one.
+	var carc := Carcasses.get_bus(self)
+	if carc == null or not is_instance_valid(carc) or _carc_target.is_empty():
+		return
+	if _cut_cd > 0.0:
+		return
+	var rec := _carc_target
+	var mass := float(rec.get("mass", 0.0))
+	var before := float(rec.get("left", 0.0))
+	var species0 := String(rec.get("species", ""))
+	var harv0: Dictionary = (CritterDex.get_profile(species0) as Dictionary).get("harv", {})
+	if Carcasses.stage_of(rec) >= Carcasses.STAGE_BONES:
+		_add_log_msg("Bones. There is nothing on it to take", Color(0.75, 0.75, 0.75))
+		return
+	if not Butchery.butcherable(harv0):
+		_add_log_msg("There is nothing on a %s a knife is for"
+			% String(rec.get("nm", "beast")).to_lower(), Color(0.80, 0.80, 0.80))
+		return
+	var edge := _edge_mat()
+	if edge == "":
+		_add_log_msg("Nothing on you will open it -- it wants an edge", Color(0.90, 0.75, 0.40))
+		return
+	var limit := stats.carry_limit()
+	var carried := _total_weight()
+	var want := Butchery.take_for(before, Butchery.cut_kg(edge), carried, limit)
+	if want <= 0.0:
+		_add_log_msg("Your back is full -- %.0f / %.0f" % [carried, limit],
+			Color(0.90, 0.75, 0.40))
+		return
+	if stamina < Butchery.CUT_STAMINA:
+		_add_log_msg("No strength left in your arms for it", Color(0.80, 0.80, 0.80))
+		return
+
+	## THE LEDGER IS THE TRUTH: what the bus gives back is what goes in the
+	## pack, never what we asked for.
+	var got := carc.harvest_at(rec["at"] as Vector3, 1.0, want)
+	if got <= 0.0:
+		return
+	var after := float(rec.get("left", before - got))
+	_cut_cd = Butchery.CUT_SECONDS
+	stamina = maxf(0.0, stamina - Butchery.CUT_STAMINA)
+
+	var species := species0
+	var nm := String(rec.get("nm", "beast"))
+	var harv := harv0
+
+	## The meat is counted in whole kilograms, one weight unit each, so the
+	## pack and the carcass ledger can never drift apart by a rounding error.
+	if int(harv.get("meat", 0)) > 0:
+		var mn := Butchery.meat_name(species, nm)
+		var kg := Butchery.meat_count(got)
+		if _give_item_dict({"name": mn, "weight": 1.0, "count": kg, "slot": ""}):
+			_push_gain(mn, kg)
+
+	## And the parts, out of the dex's own `harv` row -- its first reader in
+	## the life of the project.
+	var due: Dictionary = Butchery.parts_due(harv, mass, mass - before, mass - after)
+	for k in due.keys():
+		var part := String(k)
+		var cnt := int(due[k])
+		var pnm := Butchery.part_name(part, nm)
+		if _give_item_dict({"name": pnm, "weight": Butchery.part_weight(part),
+				"count": cnt, "slot": ""}):
+			_push_gain(pnm, cnt)
+
+	## A CUT IS WET WORK, and in autumn that is an eight-fold hazard.
+	if warmth_survival():
+		exposure.wet = minf(1.0, exposure.wet + Butchery.CUT_WET)
+
+	if Carcasses.open_mult(mass, before) == 1.0 and Carcasses.open_mult(mass, after) > 1.0:
+		_add_log_msg("It is open now, and the woods can smell it", Color(0.95, 0.78, 0.55))
+	for id in Butchery.crossed(mass, before, after):
+		var line := Butchery.denied_line(String(id))
+		if line != "":
+			_add_log_msg(line, Color(0.72, 0.88, 0.72))
 
 
 ## ==================== Bestiary ledger (learn by doing) ====================

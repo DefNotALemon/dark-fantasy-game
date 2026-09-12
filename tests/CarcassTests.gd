@@ -385,9 +385,9 @@ func _t_search() -> void:
 	claim("search", 14)
 	var deer := Carcasses.mass_of("whitetail", DEER_LEN)
 	var moose := Carcasses.mass_of("moose", MOOSE_LEN)
-	ok(Carcasses.find_gain(Carcasses.G_CORVID, deer, 2.0, 0, 1) == 0.0,
+	ok(Carcasses.find_gain(Carcasses.G_CORVID, deer, deer, 2.0, 0, 1) == 0.0,
 			"nobody gets closer to finding anything while they are asleep")
-	ok(Carcasses.find_gain(Carcasses.G_CORVID, deer, 12.0, 0, 1) > 0.0,
+	ok(Carcasses.find_gain(Carcasses.G_CORVID, deer, deer, 12.0, 0, 1) > 0.0,
 			"and does while they are awake")
 	## Scent. Stated as LITERAL margins, never against the tables that make
 	## them -- `scent(summer) > scent(winter) * SEASON_SCENT_RATIO` agrees
@@ -410,8 +410,8 @@ func _t_search() -> void:
 	ok(Carcasses.scent(0, 0) > 0.0 and is_finite(Carcasses.scent(4, 3)),
 			"scent is finite and positive at both ends -- a threshold satisfied by zero is not a threshold")
 	## Size. A moose is found sooner and the margin is stated flat.
-	ok(Carcasses.find_gain(Carcasses.G_CORVID, moose, 12.0, 0, 1)
-			> Carcasses.find_gain(Carcasses.G_CORVID, deer, 12.0, 0, 1) * 1.5,
+	ok(Carcasses.find_gain(Carcasses.G_CORVID, moose, moose, 12.0, 0, 1)
+			> Carcasses.find_gain(Carcasses.G_CORVID, deer, deer, 12.0, 0, 1) * 1.5,
 			"a moose draws the crows at least half again as fast as a deer does")
 	ok(Carcasses.draw_of(moose) <= 2.1 and Carcasses.draw_of(0.5) >= 0.35,
 			"and the draw is clamped at both ends")
@@ -433,7 +433,7 @@ func _t_search() -> void:
 			"but February is not free -- the ground never stops entirely")
 	near_f(Carcasses.rot_per_step(m, Carcasses.SPRING) * 48.0, m * Carcasses.ROT_PER_DAY, 1e-6,
 			"and forty-eight steps is a day of it")
-	ok(Carcasses.find_gain(Carcasses.G_BEAR, moose, 12.0, 0, Carcasses.WINTER) == 0.0,
+	ok(Carcasses.find_gain(Carcasses.G_BEAR, moose, moose, 12.0, 0, Carcasses.WINTER) == 0.0,
 			"a denned bear makes no progress toward anything")
 
 
@@ -547,7 +547,7 @@ func _t_gale() -> void:
 # ------------------------------------------------------------------- economy
 
 func _t_economy() -> void:
-	claim("economy", 12)
+	claim("economy", 16)
 	## THE FLOORS ARE THE TEETH: butcher it, or fund the predators. Every
 	## margin below is a LITERAL share, never the constant it guards.
 	var mass := Carcasses.mass_of("moose", MOOSE_LEN)
@@ -571,14 +571,36 @@ func _t_economy() -> void:
 			"the crows still do, because crows are not proud")
 
 	## And the boundary is where the table says it is, not somewhere near it.
+	##
+	## 2026-09-12: the two assertions that stood here were passing for the
+	## WRONG REASON, and `Butchery`'s round is what exposed them. They said
+	## "half a moose is not worth a bear's walk" -- but the bear's floor is
+	## 30 %, so a bear wants half a moose very much indeed. What was actually
+	## keeping him away was that his thirty-four-hour search did not finish
+	## inside an arbitrary four-day window. `Carcasses.OPEN_SCENT` shortened
+	## that search by a measured 1.6 and the pair went red at once, which is an
+	## assertion finally telling the truth about itself. Both are restated as
+	## what they MEANT: the floor, said directly through `wants_it`, and
+	## BEAR_EVICTS, which is what a bear arriving on half a moose actually does
+	## to a coyote pack.
 	var half := _bus(Carcasses.AUTUMN, Carcasses.SKY_CLEAR, 6.0)
 	var rh := _moose(half)
 	half.harvest_at(Vector3.ZERO, 5.0, mass * 0.5)
+	ok(Carcasses.wants_it(Carcasses.G_PACK, rh), "half a moose is worth a pack's walk")
+	ok(Carcasses.wants_it(Carcasses.G_BEAR, rh),
+			"and a bear's too -- fifty per cent clears his thirty-per-cent floor")
 	_run_days(half, 4.0)
-	ok((rh["seen"] as Dictionary).has("pack"),
-			"half a moose is still worth a pack's walk")
-	ok(not (rh["seen"] as Dictionary).has("bear"),
-			"and is not worth a bear's -- a bear wants more of it than a coyote does")
+	ok((rh["seen"] as Dictionary).has("bear"),
+			"and once it is OPEN he finds it inside four clear autumn days")
+	ok(not (rh["seen"] as Dictionary).has("pack"),
+			"AND THE PACK NEVER GETS A LOOK IN -- BEAR_EVICTS, and the bear got there first")
+	var lean := _bus(Carcasses.AUTUMN, Carcasses.SKY_CLEAR, 6.0)
+	var rl := _moose(lean)
+	lean.harvest_at(Vector3.ZERO, 5.0, mass * 0.78)
+	ok(Carcasses.wants_it(Carcasses.G_PACK, rl), "at twenty-two per cent left a pack still comes")
+	ok(not Carcasses.wants_it(Carcasses.G_BEAR, rl),
+			"and a bear does NOT -- THAT is where the two floors part company")
+	lean.free()
 	ok(float((GUILDS_ROW(Carcasses.G_BEAR))["floor"]) > float((GUILDS_ROW(Carcasses.G_PACK))["floor"]),
 			"which is the table saying so")
 	## `wants_it` is the one function all of that rests on.
@@ -1146,13 +1168,13 @@ func _t_purity() -> void:
 	ok(_func_body(spaced, "scent").contains("Weather" + "."),
 			"and reads a SPACE-indented body too, which is the bug that hid a whole scan")
 	## Same arguments, same answer, twice -- no hidden state anywhere.
-	near_f(Carcasses.find_gain(1, 49.0, 3.0, 2, 1), Carcasses.find_gain(1, 49.0, 3.0, 2, 1),
+	near_f(Carcasses.find_gain(1, 49.0, 49.0, 3.0, 2, 1), Carcasses.find_gain(1, 49.0, 49.0, 3.0, 2, 1),
 			0.0, "the same arguments give the same answer")
-	ok(Carcasses.find_gain(1, 49.0, 3.0, 2, 1) != Carcasses.find_gain(1, 49.0, 3.0, 4, 1),
+	ok(Carcasses.find_gain(1, 49.0, 49.0, 3.0, 2, 1) != Carcasses.find_gain(1, 49.0, 49.0, 3.0, 4, 1),
 			"a different sky gives a different answer")
-	ok(Carcasses.find_gain(1, 49.0, 3.0, 2, 1) != Carcasses.find_gain(1, 49.0, 3.0, 2, 3),
+	ok(Carcasses.find_gain(1, 49.0, 49.0, 3.0, 2, 1) != Carcasses.find_gain(1, 49.0, 49.0, 3.0, 2, 3),
 			"and a different season does")
-	ok(Carcasses.find_gain(1, 490.0, 3.0, 2, 1) != Carcasses.find_gain(1, 49.0, 3.0, 2, 1),
+	ok(Carcasses.find_gain(1, 490.0, 490.0, 3.0, 2, 1) != Carcasses.find_gain(1, 49.0, 49.0, 3.0, 2, 1),
 			"and a different animal does")
 
 
