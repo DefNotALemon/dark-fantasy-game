@@ -1,0 +1,17 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Ember autumn",
+ "based_on": "bench:ember",
+ "blurb": "Bluestem cured copper, dry straw, a low warm sun.",
+ "exported": "2026-09-12",
+ "params": {
+  "density": 1.0,
+  "w_bluestem": 3,
+  "w_timothy": 1.5,
+  "w_flower": 0.2,
+  "col_autumn": "#9a7a2c",
+  "col_dry": "#b88a4a",
+  "col_bluestem_cured": "#b5522a",
+  "tint_dry": 0.8
+ }
+}

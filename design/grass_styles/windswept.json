@@ -1,0 +1,32 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Windswept fescue",
+ "based_on": "bench:windswept",
+ "blurb": "Long gold pampas bowing in a hard wind, low sun. Tsushima lineage.",
+ "exported": "2026-09-12",
+ "params": {
+  "density": 1.25,
+  "tall_shift": -0.444,
+  "tall_keep": 0.5,
+  "tall_height": 1.6,
+  "height": 0.7,
+  "width": 0.04,
+  "blades": 6,
+  "segs": 5,
+  "lean": 0.5,
+  "droop": 1.6,
+  "col_summer": "#8c8f3f",
+  "col_autumn": "#b98a3c",
+  "col_dry": "#c9a05a",
+  "w_flower": 0.3,
+  "w_clover": 0,
+  "w_fern": 0,
+  "w_moss": 0,
+  "w_timothy": 0.5,
+  "w_bluestem": 1.5,
+  "pixel_on": 0.0,
+  "palette": 16,
+  "bands": 1,
+  "backlight": 1
+ }
+}

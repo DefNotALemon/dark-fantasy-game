@@ -253,7 +253,10 @@ func set_roster(rows: Array) -> void:
 
 ## The roster may say "Lewiston"; the tier table says "Lewiston-Auburn".
 static func canonical_name(raw: String) -> String:
-	var s := raw.strip_edges()
+	## The bake writes "Lewiston–Auburn" with an EN DASH; the tier table says
+	## "Lewiston-Auburn". Every dash is a hyphen here (2026-09-12: the sixth
+	## city was missing from the live world for exactly this).
+	var s := raw.strip_edges().replace("–", "-").replace("—", "-").replace("‐", "-")
 	if ALIASES.has(s):
 		s = ALIASES[s]
 	if CITY_TIERS.has(s):
@@ -345,9 +348,23 @@ func road_dirs_for(city: String) -> Array:
 		return out
 	var here: Vector2 = _rows[city]
 	var edges: Variant = _net.call("edges_from", city)
-	if not (edges is Array):
+	## RoadNet.edges_from answers a PackedInt32Array of EDGE IDS, resolved
+	## through RoadNet.edge(id); a net that hands the records straight back is
+	## accepted too. (2026-09-12: the id form is the real one, and it used to
+	## fall through this `is Array` test and leave every city with the two
+	## default gates.)
+	var recs: Array = []
+	if edges is PackedInt32Array:
+		for id in edges:
+			recs.append(int(id))
+	elif edges is Array:
+		recs = edges as Array
+	else:
 		return out
-	for e in edges:
+	for e0 in recs:
+		var e: Variant = e0
+		if (e is int) and _net.has_method("edge"):
+			e = _net.call("edge", int(e))
 		var far: Variant = _edge_far_end(e, city, here)
 		if far == null:
 			continue
@@ -365,23 +382,25 @@ func _edge_far_end(e: Variant, city: String, here: Vector2) -> Variant:
 	var pts: Variant = null
 	if e is Dictionary:
 		var d := e as Dictionary
-		for pair in [["a", "b"], ["from", "to"], ["u", "v"]]:
-			if d.has(pair[0]) and d.has(pair[1]):
+		## Names first: RoadNet's record carries `from`/`to` as place names and
+		## `a`/`b` as NODE INDICES, and an index is not a name.
+		for pair in [["from", "to"], ["a", "b"], ["u", "v"]]:
+			if d.has(pair[0]) and d.has(pair[1]) and (d[pair[0]] is String) and (d[pair[1]] is String):
 				other = str(d[pair[1]]) if str(d[pair[0]]) == city else str(d[pair[0]])
 				break
-		for k in ["pts", "points", "polyline", "path"]:
+		for k in ["pts", "points", "polyline", "path", "poly"]:
 			if d.has(k):
 				pts = d[k]
 				break
 	elif e is Object:
 		var o := e as Object
-		for pair in [["a", "b"], ["from", "to"], ["u", "v"]]:
+		for pair in [["from", "to"], ["a", "b"], ["u", "v"]]:
 			var pa: Variant = o.get(pair[0])
 			var pb: Variant = o.get(pair[1])
-			if pa != null and pb != null:
+			if pa is String and pb is String:
 				other = str(pb) if str(pa) == city else str(pa)
 				break
-		for k in ["pts", "points", "polyline", "path"]:
+		for k in ["pts", "points", "polyline", "path", "poly"]:
 			var v: Variant = o.get(k)
 			if v != null:
 				pts = v

@@ -1,0 +1,29 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Painterly wild",
+ "based_on": "bench:painterly",
+ "blurb": "Wide soft blades, two-tone light, yellow tips. Breath-of-the-Wild lineage.",
+ "exported": "2026-09-12",
+ "params": {
+  "density": 0.917,
+  "tall_shift": 0.072,
+  "height": 0.55,
+  "width": 0.085,
+  "blades": 4,
+  "segs": 3,
+  "lean": 0.5,
+  "droop": 0.7,
+  "col_spring": "#86ad42",
+  "col_summer": "#6f9a3a",
+  "col_autumn": "#a58a3a",
+  "hue_var": 0.06,
+  "val_var": 0.25,
+  "root_dark": 0.5,
+  "tip_light": 0.7,
+  "pixel_on": 0.0,
+  "palette": 16,
+  "bands": 2,
+  "backlight": 0.6,
+  "w_flower": 1.4
+ }
+}

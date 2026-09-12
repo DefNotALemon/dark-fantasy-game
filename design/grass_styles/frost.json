@@ -1,0 +1,22 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Frost winter",
+ "based_on": "bench:frost",
+ "blurb": "Snow settling cell by cell on dead stalks. Hard blue light.",
+ "exported": "2026-09-12",
+ "params": {
+  "snow": 0.9,
+  "density": 0.917,
+  "tall_shift": -0.084,
+  "w_flower": 0,
+  "w_clover": 0,
+  "w_fern": 0.3,
+  "col_winter": "#6e6a58",
+  "col_dry": "#8f8467",
+  "col_snow": "#dfe6f0",
+  "pixel_on": 1.0,
+  "cells": 12,
+  "palette": 6,
+  "bands": 4
+ }
+}

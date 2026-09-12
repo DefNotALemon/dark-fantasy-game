@@ -102,6 +102,7 @@ var god := false
 var flying := false
 var god_speed := 1.0
 var godmode: GodEditor = null
+var grass_lab: GrassLab = null   ## F3 -- the grass lab (scripts/GrassLab.gd)
 var pad: Node = null             ## the gamepad translator (scripts/Pad.gd)
 var _space_tap_ms := 0
 var _god_mask_saved := -1      ## collision_mask parked while noclipping
@@ -1345,6 +1346,9 @@ func _build_hud() -> void:
 	## The god editor builds itself too (scripts/GodEditor.gd) -- F1 opens it.
 	godmode = GodEditor.new()
 	hud_layer.add_child(godmode)
+	## The grass lab builds itself too (scripts/GrassLab.gd) -- F3 opens it.
+	grass_lab = GrassLab.new()
+	hud_layer.add_child(grass_lab)
 	_build_wheel_ui()
 
 
@@ -1554,6 +1558,9 @@ func _input(event: InputEvent) -> void:
 				## the map is over the panel, which is why it also lives here.
 				if godmode != null and godmode.visible:
 					godmode.drop_in_here()
+			KEY_F3:
+				## F3 IS THE GRASS LAB. Styles, colours, shapes and sliders for the meadow.
+				_toggle_menu("grass")
 			KEY_SPACE:
 				## GOD: double-tap Space toggles flight, Minecraft-style. While
 				## flying, Space is "up" and never a jump.
@@ -1585,6 +1592,8 @@ func _input(event: InputEvent) -> void:
 				## trapped under a log forever is a bug, not a story beat.
 				if pinned_by != null:
 					_pin_reload()
+				elif (menu_open == "" or menu_open == "talk") and NPCFocus.take_f(self):
+					pass  ## a person: antagonize (scripts/NPCFocus.gd)
 				elif menu_open == "" and _water_target != Vector3.INF and _bed_target == null \
 						and mount == null and _has_waterskin() >= 0 and not _water_is_sea:
 					_fill_waterskin()   ## [water]
@@ -1614,7 +1623,9 @@ func _input(event: InputEvent) -> void:
 					elif menu_open == "tab" and tab_page == "inventory" and hovered_item_idx >= 0:
 						_q_inv_idx = hovered_item_idx
 			KEY_E:
-				if menu_open == "" and kd_phase == "" and _try_grab(false):
+				if (menu_open == "" or menu_open == "talk") and kd_phase == "" and NPCFocus.take_e(self):
+					pass  ## a person: greet / talk / continue the talk (scripts/NPCFocus.gd)
+				elif menu_open == "" and kd_phase == "" and _try_grab(false):
 					pass    ## the reach: crouch, open hand, over the shoulder
 				elif menu_open == "" and kd_phase == "" and _drop_target != null \
 						and is_instance_valid(_drop_target):
@@ -1790,7 +1801,7 @@ func _physics_process(delta: float) -> void:
 	if block_broken_timer > 0.0:
 		block_broken_timer -= delta
 	var was_blocking := blocking
-	blocking = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and block_broken_timer <= 0.0 \
+	blocking = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not NPCFocus.claims_rmb(self) and block_broken_timer <= 0.0 \
 		and current_weapon == "sword" \
 		and (godmode == null or not godmode.visible)  ## RMB is look-drag in god mode
 	## Parry timing: how fresh is this guard? (A block raised within PARRY_WINDOW
@@ -5737,6 +5748,8 @@ func _toggle_menu(which: String) -> void:
 		sky_panel.visible = which == "sky"
 	if map_panel:
 		map_panel.visible = which == "map"
+	if grass_lab:
+		grass_lab.visible = which == "grass"
 	if which == "sky" and sky_panel:
 		sky_panel.refresh()
 	if which == "map" and map_panel:
@@ -5781,6 +5794,8 @@ func _close_menu() -> void:
 		sky_panel.visible = false
 	if map_panel:
 		map_panel.visible = false
+	if grass_lab:
+		grass_lab.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
@@ -5931,6 +5946,7 @@ func _mob_types() -> Array:
 func _spawn_types() -> Array:
 	## The M menu offers both kinds of horse; the bestiary doesn't need to.
 	return [
+		["Villager", NPC],  ## a person (scripts/NPC.gd)
 		["Boar", Boar], ["Kobold", Kobold], ["Goblin", Goblin], ["Skeleton", Skeleton],
 		["Orc", Orc], ["Ogre", Ogre], ["Dark Knight", DarkKnight],
 		["Horse (wild)", Horse], ["Horse (saddled)", SaddledHorse],

@@ -1,0 +1,29 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Marsh sedge",
+ "based_on": "bench:marsh",
+ "blurb": "Blue-green sedge, moss and fern; damp all the way down.",
+ "exported": "2026-09-12",
+ "params": {
+  "density": 1.167,
+  "tall_shift": -0.384,
+  "tall_keep": 0.45,
+  "tall_height": 1.3,
+  "w_sedge": 3,
+  "w_moss": 3,
+  "w_fern": 2.5,
+  "w_clover": 0.3,
+  "w_flower": 0.2,
+  "w_timothy": 0,
+  "w_bluestem": 0,
+  "tint_moist": 1,
+  "col_summer": "#2f5a2e",
+  "col_spring": "#3c6b2f",
+  "col_moss": "#23422a",
+  "hue_var": 0.18,
+  "bands": 3,
+  "pixel_on": 1.0,
+  "cells": 16,
+  "palette": 9
+ }
+}

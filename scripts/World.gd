@@ -145,6 +145,7 @@ func _ready() -> void:
 	_build_titles()      ## a Label; _show_title must never find it null
 	_build_park_floor()  ## something for the parked body to stand on
 	_spawn_player()
+	NPCDirector.boot(self)  ## the people (scripts/NPCDirector.gd, tools/patch_npc.py)
 	## The body is parked and blind until a row is picked.
 	if _player:
 		_player.input_locked = true
@@ -175,12 +176,10 @@ func begin_world() -> void:
 	## Set the body down on the ground that now exists, not on the slab that
 	## no longer does.
 	if _player:
-	_player.input_locked = true
-	_player.global_position = _world_home()
-	_player.velocity = Vector3.ZERO
+		_player.global_position = _world_home()
+		_player.velocity = Vector3.ZERO
+	_cities = Cities.boot(self)    ## [cities] the big six stand up last, after the roster, the net and the crofts
 
-
-_cities = Cities.boot(self)    ## [cities] the big six stand up last, after the roster, the net and the crofts
 
 func _build_park_floor() -> void:
 	## Phase one has no ground. A CharacterBody3D with nothing under it falls
@@ -1371,10 +1370,12 @@ func save_state() -> Dictionary:
 		var floor_sys = _region.grass()
 		if floor_sys != null and floor_sys.has_method("save_state"):
 			out["grass"] = floor_sys.save_state()
+	out["npcs"] = NPCDirector.state_of(self)  ## the people
 	return out
 
 
 func apply_state(d: Dictionary) -> void:
+	NPCDirector.restore(self, d.get("npcs", {}))  ## the people
 	if _daynight:
 		_daynight.hour = float(d.get("hour", 17.0))
 		## Seasons. Every save written before 2026-09-01 counted days from 0, and

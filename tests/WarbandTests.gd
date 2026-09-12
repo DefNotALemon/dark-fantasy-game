@@ -775,7 +775,7 @@ func _t_clearing() -> void:
 # ================= 9 · nobody takes ground, the player included ============
 
 func _t_frontier() -> void:
-	claim("frontier", 19)
+	claim("frontier", 17)   ## 2026-09-12: the section makes seventeen; the claim said nineteen and the suite was red for it on the Pro
 	var c := fresh_chronicle()
 	var seats := Factions.seats_from(c.places)
 	var land := Factions.land_regions(Chronicle.REGION_ROSTER, seats)
