@@ -42,6 +42,7 @@ var _rng := RandomNumberGenerator.new()
 var _cave_sites: Array[Dictionary] = []  ## {mouth: Vector3, dir: Vector3, rect: Rect2}
 var _env: Environment
 var _daynight: DayNight
+var _cities: Node3D = null    ## [cities] the big six, scripts/Cities.gd
 var _wind: Wind
 var _sky: SkyRig
 var _weather: Weather
@@ -83,6 +84,7 @@ func _ready() -> void:
 	## fully real — no first-minute lag spikes reach the eye.
 	if _player:
 		_player.input_locked = true
+	_cities = Cities.boot(self)    ## [cities] the big six stand up last, after the roster, the net and the crofts
 
 
 func _process(delta: float) -> void:
@@ -926,3 +928,7 @@ func _build_wildlife() -> void:
 func wildlife_census() -> Dictionary:
 	## For the debug menu and the test suite.
 	return _wildlife.census() if _wildlife != null else {}
+
+
+func cities() -> Node3D:    ## [cities] the built cities, or null before begin_world
+	return _cities

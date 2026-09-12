@@ -21,6 +21,14 @@ config/icon="res://icon.svg"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 
+[dotnet]
+
+project/assembly_name="The Withering"
+
+[filesystem]
+
+import/blender/enabled=false
+
 [rendering]
 
 environment/defaults/default_clear_color=Color(0.1, 0.12, 0.16, 1)
