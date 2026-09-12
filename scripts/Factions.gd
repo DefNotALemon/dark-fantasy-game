@@ -679,6 +679,48 @@ static func readout(state: Dictionary, adj: Dictionary, region: String) -> Dicti
 	}
 
 
+## Short words that stay lowercase inside a name, but never as the first word.
+const SMALL_WORDS: Array[String] = ["of", "the", "and", "at", "on"]
+
+
+static func pretty(region: String) -> String:
+	## The roster names regions in CAPITALS, which is right for a label on a map
+	## and wrong in the middle of a sentence a villager is saying to you. Found
+	## by LOOKING at the live rumour board, at 343 green assertions:
+	##
+	##     "no honest man walks moosehead after dark any more"
+	##     "there is argument over who holds down east now"
+	##
+	## Godot's own `capitalize()` gets sixteen of the eighteen right and loses on
+	## exactly two, and both of them are in this roster: it drops the hyphen out
+	## of 100-MILE WILDERNESS, and it writes "Gulf Of Maine".
+	var parts := region.to_lower().split(" ")
+	var out: PackedStringArray = []
+	for i in range(parts.size()):
+		var w := String(parts[i])
+		if w.is_empty():
+			continue
+		if i > 0 and SMALL_WORDS.has(w):
+			out.append(w)
+			continue
+		out.append(_cap_hyphenated(w))
+	return " ".join(out)
+
+
+static func _cap_hyphenated(w: String) -> String:
+	## Each side of a hyphen is its own word: 100-MILE WILDERNESS is a place, not
+	## a number followed by a word.
+	var bits := w.split("-")
+	var out: PackedStringArray = []
+	for b in bits:
+		var sb := String(b)
+		if sb.is_empty():
+			out.append(sb)
+		else:
+			out.append(sb.substr(0, 1).to_upper() + sb.substr(1))
+	return "-".join(out)
+
+
 static func line_for(state: Dictionary, region: String, was: String) -> String:
 	## What the world SAYS when a border moves. The Chronicle deposits this at
 	## the region's chief seat, so news of a frontier arrives the same way news
@@ -687,14 +729,14 @@ static func line_for(state: Dictionary, region: String, was: String) -> String:
 	if now == was:
 		return ""
 	if now == CONTESTED:
-		return "there is argument over who holds %s now" % region.to_lower()
+		return "there is argument over who holds %s now" % pretty(region)
 	if now == MEN:
-		return "the watch has the roads through %s again" % region.to_lower()
+		return "the watch has the roads through %s again" % pretty(region)
 	if now == GOBLINS:
-		return "no honest man walks %s after dark any more" % region.to_lower()
+		return "no honest man walks %s after dark any more" % pretty(region)
 	if now == WOLVES:
-		return "the packs have run the herds out of %s" % region.to_lower()
-	return "%s has gone back to the wild" % region.to_lower()
+		return "the packs have run the herds out of %s" % pretty(region)
+	return "%s has gone back to the wild" % pretty(region)
 
 
 ## ============================== Validation ================================

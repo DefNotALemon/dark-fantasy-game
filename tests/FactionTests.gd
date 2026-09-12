@@ -610,7 +610,7 @@ func _t_push() -> void:
 # ============================================================ 6. frontier
 
 func _t_frontier() -> void:
-	claim("frontier", 18)
+	claim("frontier", 28)
 	var st := Factions.blank(_anch)
 	# CONTESTED IS A NAMED STATE, not a tie broken by sort order.
 	var tie := {"T": {Factions.MEN: 0.30, Factions.GOBLINS: 0.29,
@@ -680,8 +680,40 @@ func _t_frontier() -> void:
 			"and when the trouble stops the men have it back (%s)"
 			% Factions.holder_of(st, "AROOSTOOK"))
 	# the world has something to SAY about it
-	ok(Factions.line_for(st, "AROOSTOOK", Factions.GOBLINS).contains("aroostook"),
+	ok(Factions.line_for(st, "AROOSTOOK", Factions.GOBLINS).contains("Aroostook"),
 			"a border that moved says where")
+	# ...AND IT SAYS IT LIKE A PERSON. The roster is in capitals, which reads
+	# as shouting inside a sentence; the first draft said "no honest man walks
+	# moosehead after dark", which the live board showed and no assertion
+	# could. Godot's `capitalize()` loses on exactly the two hard cases in the
+	# roster, and both of them are asserted here.
+	# A SYNTHETIC state, so the sentence is the thing under test rather than
+	# whoever happens to hold Down East by now. Asked against the live field it
+	# came back EMPTY -- the holder had not changed -- and an assertion about
+	# an empty string cannot fail.
+	var de := {"DOWN EAST": {Factions.MEN: 0.60, Factions.GOBLINS: 0.20,
+			Factions.WOLVES: 0.10, Factions.WILD: 0.10}}
+	var de_line := Factions.line_for(de, "DOWN EAST", Factions.GOBLINS)
+	ok(not de_line.is_empty(), "the fixture really does produce a sentence (%s)" % de_line)
+	ok(not de_line.contains("down east"), "a two-word region is not muttered")
+	ok(not de_line.contains("DOWN EAST"), "nor shouted")
+	ok(de_line.contains("Down East"), "it is written the way a person would write it")
+	ok(Factions.pretty("100-MILE WILDERNESS") == "100-Mile Wilderness",
+			"the hyphen stays in the 100-Mile Wilderness (%s)"
+			% Factions.pretty("100-MILE WILDERNESS"))
+	ok(Factions.pretty("GULF OF MAINE") == "Gulf of Maine",
+			"and the Gulf of Maine keeps its lowercase 'of' (%s)"
+			% Factions.pretty("GULF OF MAINE"))
+	ok(Factions.pretty("PENOBSCOT R.") == "Penobscot R.",
+			"an abbreviated river keeps its stop (%s)" % Factions.pretty("PENOBSCOT R."))
+	ok(Factions.pretty("KATAHDIN") == "Katahdin", "and a one-word name is simply itself")
+	ok(Factions.pretty("") == "", "and an empty name does not crash")
+	var ugly := 0
+	for r in _land:
+		var pr := Factions.pretty(String(r))
+		if pr == String(r) or pr == String(r).to_lower():
+			ugly += 1
+	ok(ugly == 0, "no region on the map is left shouting or muttering (%d)" % ugly)
 	ok(Factions.line_for(st, "AROOSTOOK", Factions.MEN).is_empty(),
 			"and a border that did not move says nothing at all")
 	for who in [Factions.MEN, Factions.GOBLINS, Factions.WOLVES, Factions.WILD,
