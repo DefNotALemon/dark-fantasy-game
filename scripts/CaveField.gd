@@ -583,6 +583,11 @@ func carve_sphere(center: Vector3, r: float, j_floor := 1) -> Array[Vector3i]:
 
 func is_rock(world: Vector3) -> bool:
 	var g := (world - origin) / VOX
+	## Outside the block there is no rock of ours to be inside. The clamp
+	## below used to answer for the whole map: 300 m south of spawn, 12 m
+	## below the valley floor, is a Portland meadow -- not the field's rim.
+	if g.x < -0.5 or g.z < -0.5 or g.x > float(SX) - 0.5 or g.z > float(SZ) - 0.5:
+		return false
 	var i := clampi(int(round(g.x)), 0, SX - 1)
 	var j := clampi(int(round(g.y)), 0, SY - 1)
 	var k := clampi(int(round(g.z)), 0, SZ - 1)

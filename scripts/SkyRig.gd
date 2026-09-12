@@ -34,6 +34,16 @@ enum Clouds { OFF = 0, PAINTERLY = 1, VOLUMETRIC = 2 }
 ## over several frames, which is invisible for something as slow as a sunset.
 const RADIANCE_SIZE := Sky.RADIANCE_SIZE_128
 
+## ---------------------------------------------------------------------------
+## CLOUD SPEED — the only two numbers that decide how fast the deck moves.
+## Units are cloud-uv per second; one uv unit is roughly one cloud, so 0.001
+## means a puff takes about fifteen minutes to slide past you. Turn these UP
+## for a scudding, weather-front sky; DOWN for a still one. Zero freezes it.
+## (Before 2026-09-01 this was ~4x higher AND the shader multiplied it by TIME
+## a second time, so the clouds accelerated without limit. See sky.gdshader.)
+const DRIFT_BASE := 0.0009          ## dead-calm drift — nothing is ever quite still
+const DRIFT_PER_WIND := 0.0040      ## how much the world's wind adds on top
+
 var env: Environment           ## set by World before add_child
 var daynight: DayNight         ## set by World before add_child
 var wind: Wind                 ## set by World before add_child (optional)
@@ -119,7 +129,9 @@ func _process(delta: float) -> void:
 		strength = wind.last_strength
 	## Accumulate an offset instead of setting a velocity, so a gust can't make
 	## the whole cloud deck jump sideways when the wind changes its mind.
-	_wind_off += dir * (0.0022 + strength * 0.010) * delta
+	## The shader consumes `cloud_wind` as a POSITION — it must NOT multiply it
+	## by TIME again, or this integration squares and the deck accelerates.
+	_wind_off += dir * (DRIFT_BASE + strength * DRIFT_PER_WIND) * delta
 	sky_mat.set_shader_parameter("cloud_wind", _wind_off)
 
 

@@ -13,6 +13,7 @@ func _init() -> void:
 	mass = 35.0
 	skin_tile = "skin"
 	display_name = "Goblin"
+	monster = true           ## cave dweller — hunts you on Peaceful too
 	max_health = 40.0        ## fragile fodder
 	wander_speed = 1.8
 	chase_speed = 5.0

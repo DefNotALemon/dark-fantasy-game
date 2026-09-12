@@ -1,0 +1,174 @@
+{
+  "format": 1,
+  "pieces": [],
+  "trees": [
+    {
+      "branches": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "chops": 5,
+      "dead": false,
+      "growth": [],
+      "kind": "tree_v2",
+      "notch": 0.0,
+      "notch_ang": 0.0,
+      "notch_y": 0.0,
+      "pos": [
+        0.781919062137604,
+        0.00271191913634539,
+        -0.108153939247131
+      ],
+      "region": "temperate",
+      "rot": 2.7862913608551,
+      "scale": 1.0,
+      "seed": 3267396472,
+      "species": "maple",
+      "stage": 2
+    },
+    {
+      "branches": [],
+      "chops": 1,
+      "dead": false,
+      "growth": [],
+      "kind": "tree_v2",
+      "notch": 0.0,
+      "notch_ang": 0.0,
+      "notch_y": 0.0,
+      "pos": [
+        -0.131483316421509,
+        0.00271191913634539,
+        -3.61095714569092
+      ],
+      "region": "temperate",
+      "rot": 0.590740501880646,
+      "scale": 1.0,
+      "seed": 3597139604,
+      "species": "maple",
+      "stage": 0
+    },
+    {
+      "branches": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "chops": 3,
+      "dead": false,
+      "growth": [
+        {
+          "accent": "sporophytes",
+          "ang": 0.622647146822517,
+          "area": 0.1220721075,
+          "base": "peat",
+          "centre": [
+            0.0,
+            0.774800062179565,
+            0.0
+          ],
+          "damp": 0.0,
+          "day": 31.3141626813901,
+          "growth": 0.30416582546529,
+          "inward": true,
+          "mode": 0,
+          "reach": 1.42,
+          "seed": 388062701,
+          "shade": 0.93025438785553,
+          "span": [
+            0.394499987363815,
+            0.73675000667572
+          ],
+          "type": "moss"
+        }
+      ],
+      "kind": "tree_v2",
+      "notch": 0.0,
+      "notch_ang": 0.0,
+      "notch_y": 0.0,
+      "pos": [
+        3.28268194198608,
+        0.00271191913634539,
+        -4.50479698181152
+      ],
+      "region": "temperate",
+      "rot": 1.93790626525879,
+      "scale": 1.0,
+      "seed": 1243507766,
+      "species": "maple",
+      "stage": 1
+    },
+    {
+      "branches": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "chops": 2,
+      "dead": true,
+      "growth": [
+        {
+          "accent": "teeth",
+          "ang": -1.51587792302216,
+          "area": 0.58047066,
+          "base": "mycelium",
+          "centre": [
+            0.0,
+            0.753332436084747,
+            0.0
+          ],
+          "damp": 0.0,
+          "day": 31.3141626813901,
+          "growth": 0.58489195678337,
+          "inward": true,
+          "mode": 0,
+          "reach": 2.24,
+          "seed": 754216604,
+          "shade": 0.906775295734406,
+          "span": [
+            0.578999996185303,
+            0.808499991893768
+          ],
+          "type": "fungi"
+        }
+      ],
+      "kind": "tree_v2",
+      "notch": 0.0,
+      "notch_ang": 0.0,
+      "notch_y": 0.0,
+      "pos": [
+        -1.38426375389099,
+        0.00271191913634539,
+        -2.72392797470093
+      ],
+      "region": "temperate",
+      "rot": 3.98237586021423,
+      "scale": 1.0,
+      "seed": 2379598761,
+      "species": "maple",
+      "stage": 4
+    }
+  ]
+}

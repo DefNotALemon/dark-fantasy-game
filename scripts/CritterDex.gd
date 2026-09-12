@@ -116,7 +116,11 @@ const DEX := {
 	"zone": {"deep_woods": 1.0, "moosehead": 1.0, "western_peaks": 0.9, "katahdin": 0.7,
 		"bangor_gate": 0.6, "county": 0.6, "dawnwatch": 0.4, "freeport_road": 0.2},
 	"flags": {"den": true, "climbs": true, "dusk": true, "raids": true,
-		"bold": 1, "relentless": true, "leash": 58.0},
+		"bold": 1, "relentless": true, "leash": 58.0,
+		## Contact specials (Critter._pick_move): the jaw grab-and-toss and
+		## the rear-up press. Any species can carry these flags — the moves
+		## ride the URSID clips, so give them to something with a jaw pivot.
+		"grab": true, "press": true},
 	"feat": {"hump": 0.22, "muzzle": 1.2, "claw": true},
 	"harv": {"meat": 5, "hide": 1, "fat": 3, "claw": 4},
 },

@@ -278,10 +278,34 @@ func _run() -> void:
 	var spread_ratio := b_aabb.size.x / b_aabb.size.y
 	_ok(spread_ratio < 1.4, "upright bunch, not a splay (w/h %.2f)" % spread_ratio)
 
-	print("\n-- 8. placement over a real (synthetic) hillside --")
-	_note("%d x %d = %d chunks over the map" % [gs._ncx, gs._ncz, gs._ncx * gs._ncz])
+	print("\n-- 7c. v2.4: the fescue is mown-short, and cut still reads as cut --")
+	## Height is the one knob that moves FILL RATE rather than triangles, and
+	## fescue is ~78% of every tuft in the world, so this number is most of the
+	## frame budget. Pin it: a regression that quietly restores 0.44 m would
+	## cost more than any geometry change in this file.
+	var std_h := std_m.get_aabb().size.y
+	_ok(std_h > 0.12 and std_h < 0.26,
+		"red fescue stands ankle-height (%.2f m — it was 0.50)" % std_h)
+	var stub_m: ArrayMesh = (gs._mesh["stub"] as Array)[0]
+	var stub_h := stub_m.get_aabb().size.y
+	_ok(stub_h < std_h * 0.55,
+		"mown stubble still reads shorter than the grass around it (%.2f vs %.2f m)"
+			% [stub_h, std_h])
+	_note("fescue %.2f m, stubble %.2f m — %.0f%% of the v2.3 blade height"
+		% [std_h, stub_h, 100.0 * std_h / 0.4956])
+	_ok(int((budget["std"] as Array)[0]) < 35,
+		"and a near fescue tuft is lighter than v2.3's 35 triangles (%d now)"
+			% int((budget["std"] as Array)[0]))
 
-	var key := Vector2i(8, 8)
+	print("\n-- 8. placement over a real (synthetic) hillside --")
+	_note("the valley is %d x %d chunks; the world beyond it is unbounded" % [gs._ncx, gs._ncz])
+
+	## v2.5: chunk keys are WORLD-space — floor(world / 12.8) — not CaveField
+	## chunk indices, and they run negative. The valley spans ±108.8 m, so keys
+	## −8 .. 7 sit inside it. Vector2i(8, 8) is now (102 .. 115 m), straddling
+	## the rim; with no Overworld in a headless harness the outside half grows
+	## nothing and every count below would quietly halve.
+	var key := Vector2i(-2, 3)
 	var placed: Dictionary = gs._place_chunk(key)
 	var total := 0
 	var kinds_seen := 0
@@ -354,8 +378,8 @@ func _run() -> void:
 	var tall_before: Array = (_of(placed, "tall") as Array).duplicate()
 	if tall_before.is_empty():
 		_note("(no tall grass in this chunk — searching for one that has it)")
-		for cx in range(4, 13):
-			for cz in range(4, 13):
+		for cx in range(-7, 7):
+			for cz in range(-7, 7):
 				var k2 := Vector2i(cx, cz)
 				var pl2: Dictionary = gs._place_chunk(k2)
 				if (_of(pl2, "tall") as Array).size() > 4:
@@ -383,50 +407,64 @@ func _run() -> void:
 				% [tall_before.size(), (_of(after, "tall") as Array).size()])
 		gs._cut_cells.clear()
 
-	print("\n-- 12. the whole-map cost, measured --")
+	print("\n-- 12. the cost of the RING, measured --")
+	## v2.5: "the whole map" stopped being a number. The map is 78 km² and the
+	## meadow streams, so the only quantity that costs frames is what stands
+	## inside draw_dist of you. Measure a chunk, then integrate the ring.
 	var per_chunk := {}
 	var sample := 0
-	var grand := {}
 	for kind in GrassSystem.KINDS:
-		grand[kind] = 0
-	for cx in range(0, gs._ncx, 3):
-		for cz in range(0, gs._ncz, 3):
+		per_chunk[kind] = 0
+	for cx in range(-7, 8, 2):
+		for cz in range(-7, 8, 2):
 			var pl: Dictionary = gs._place_chunk(Vector2i(cx, cz))
 			for kind in GrassSystem.KINDS:
-				grand[kind] = int(grand[kind]) + (_of(pl, kind) as Array).size()
+				per_chunk[kind] = int(per_chunk[kind]) + (_of(pl, kind) as Array).size()
 			sample += 1
-	var scale := float(gs._ncx * gs._ncz) / float(sample)
-	var world_tufts := 0
-	var tri_hi := 0
-	var tri_lo := 0
+	var chunk_area := GrassSystem.CHUNK_M * GrassSystem.CHUNK_M
+	var dens := 0.0                 ## tufts per m²
+	var hi_rate := 0.0              ## triangles per m² if every tuft drew its hi mesh
+	var lo_rate := 0.0              ## ...and its lo mesh
 	for kind in GrassSystem.KINDS:
-		var est := int(float(grand[kind]) * scale)
-		world_tufts += est
-		tri_hi += est * int((budget[kind] as Array)[0])
-		tri_lo += est * int((budget[kind] as Array)[2])
-		_note("%-7s ~%7d tufts world-wide" % [kind, est])
-	_note("TOTAL   ~%d tufts; %s triangles if every one were near, %s if every one were far"
-		% [world_tufts, _commas(tri_hi), _commas(tri_lo)])
-	## Only the chunks inside LOD_HI are ever near. A 15 m radius over 12.8 m
-	## chunks is about a dozen chunks of the 289.
-	var near_frac := (PI * GrassSystem.LOD_HI * GrassSystem.LOD_HI) \
-		/ float(gs._ncx * gs._ncz * GrassSystem.CHUNK_CELLS * GrassSystem.CHUNK_CELLS
-			* CaveField.VOX * CaveField.VOX)
-	var mid_frac := (PI * GrassSystem.LOD_MID * GrassSystem.LOD_MID) \
-		/ float(gs._ncx * gs._ncz * GrassSystem.CHUNK_CELLS * GrassSystem.CHUNK_CELLS
-			* CaveField.VOX * CaveField.VOX) - near_frac
-	var cull_frac := (PI * GrassSystem.CULL_END * GrassSystem.CULL_END) \
-		/ float(gs._ncx * gs._ncz * GrassSystem.CHUNK_CELLS * GrassSystem.CHUNK_CELLS
-			* CaveField.VOX * CaveField.VOX)
-	var drawn := int(float(world_tufts) * cull_frac)
-	var est_tris := int(float(tri_hi) * near_frac) \
-		+ int(float(tri_hi) * mid_frac * 0.35) \
-		+ int(float(tri_lo) * maxf(cull_frac - near_frac - mid_frac, 0.0))
-	_note("of those, ~%s are inside the %.0f m draw ring at any moment"
-		% [_commas(drawn), GrassSystem.CULL_END])
-	_note("=> roughly %s triangles of grass on screen — v1 drew ~%s and could not curve"
-		% [_commas(est_tris), _commas(int(float(world_tufts) * cull_frac * 4.0))])
-	_ok(est_tris < 900000, "the standing meadow fits a sane triangle budget")
+		var mean := float(per_chunk[kind]) / float(sample)
+		dens += mean / chunk_area
+		hi_rate += mean * float((budget[kind] as Array)[0]) / chunk_area
+		lo_rate += mean * float((budget[kind] as Array)[2]) / chunk_area
+		if mean >= 1.0:
+			_note("%-7s %6.0f per 12.8 m chunk" % [kind, mean])
+	_note("density %.1f tufts/m²  (%.0f per chunk)" % [dens, dens * chunk_area])
+
+	## The bands, as areas rather than fractions of a fixed map.
+	var d0 := gs.draw_dist
+	var near_a := PI * GrassSystem.LOD_HI * GrassSystem.LOD_HI
+	var mid_a := PI * GrassSystem.LOD_MID * GrassSystem.LOD_MID - near_a
+	var fade_r := d0 * GrassSystem.FADE_START_F
+	var full_a := maxf(PI * fade_r * fade_r - near_a - mid_a, 0.0)
+	var thin_a := maxf(PI * d0 * d0 - PI * fade_r * fade_r, 0.0)
+	## Past the fade line the chunk keeps its far mesh but draws only FAR_KEEP
+	## of its instances — the thing that makes a 90 m ring affordable at all.
+	var drawn := int(dens * (near_a + mid_a + full_a + thin_a * GrassSystem.FAR_KEEP))
+	var est_tris := int(hi_rate * near_a) \
+		+ int(hi_rate * 0.35 * mid_a) \
+		+ int(lo_rate * (full_a + thin_a * GrassSystem.FAR_KEEP))
+	_note("at %.0f m: ~%s tufts standing, ~%s triangles of grass on screen"
+		% [d0, _commas(drawn), _commas(est_tris)])
+	_note("without the far thinning it would be ~%s tufts"
+		% _commas(int(dens * (near_a + mid_a + full_a + thin_a))))
+	_ok(est_tris < 1000000, "the ring fits a sane triangle budget")
+	_ok(drawn < 300000, "and a sane instance budget")
+
+	## The setting has to actually buy something. Area squares, so halving the
+	## ring should quarter it — this is the claim the Esc menu's note makes.
+	var lo_r := 45.0
+	var lo_fade := lo_r * GrassSystem.FADE_START_F
+	var lo_full := maxf(PI * lo_fade * lo_fade - near_a - mid_a, 0.0)
+	var lo_thin := maxf(PI * lo_r * lo_r - PI * lo_fade * lo_fade, 0.0)
+	var lo_drawn := int(dens * (near_a + mid_a + lo_full + lo_thin * GrassSystem.FAR_KEEP))
+	_note("at %.0f m (Low): ~%s tufts — %.0f%% of Medium"
+		% [lo_r, _commas(lo_drawn), 100.0 * float(lo_drawn) / maxf(float(drawn), 1.0)])
+	_ok(float(lo_drawn) / maxf(float(drawn), 1.0) < 0.45,
+		"Draw Distance Low really is well under half of Medium")
 
 	print("\n-- 13. the shader --")
 	var sh := Shader.new()
@@ -469,7 +507,11 @@ func _run() -> void:
 	## Walk toward the chunk and confirm the meshes actually change under you.
 	var centre := gs._chunk_center(key)
 	var seen: Array = []
-	for d in [90.0, 25.0, 4.0, 90.0]:
+	## Distances are measured to the chunk's EDGE — _update_lod subtracts the
+	## 6.4 m half-chunk — and v2.4 pulled the bands in (hi 9 m, mid 16 m). The
+	## mid sample moves 25 m -> 20 m accordingly: 20 - 6.4 = 13.6 m, which is
+	## mid. Left at 25 m it would band as FAR and this would assert nothing.
+	for d in [90.0, 20.0, 4.0, 90.0]:
 		gs._update_lod(centre + Vector3(d, 0, 0))
 		var kind0: String = per_kind.keys()[0]
 		var mm := (per_kind[kind0] as MultiMeshInstance3D).multimesh
@@ -488,6 +530,106 @@ func _run() -> void:
 	var n_after: int = (per_kind[kind_check] as MultiMeshInstance3D).multimesh.instance_count
 	_ok(n_before == n_after,
 		"swapping detail does NOT touch the instance buffer (%d tufts before and after)" % n_after)
+
+	print("\n-- 15. the ring: the meadow streams, and grows back the same --")
+	## THE CONTRACT THAT MAKES FREEING A CHUNK SAFE. Placement is deterministic
+	## in the WORLD key, so walking away from a meadow and walking back gives
+	## you the same tufts in the same spots — including the flat stubble
+	## wherever you mowed, because _cut_cells is a sparse world-space record
+	## that outlives the chunk that drew it. Break this and the world reshuffles
+	## itself behind your back.
+	var far_key := Vector2i(400, 400)          ## 5.1 km from spawn, never seen
+	var fa: Dictionary = gs._place_chunk(far_key)
+	var fb: Dictionary = gs._place_chunk(far_key)
+	var det := true
+	for kind in GrassSystem.KINDS:
+		var aa: Array = _of(fa, kind)
+		var bb: Array = _of(fb, kind)
+		if aa.size() != bb.size():
+			det = false
+			break
+		for i in range(aa.size()):
+			if (aa[i] as Transform3D).origin.distance_to((bb[i] as Transform3D).origin) > 0.0001:
+				det = false
+				break
+	_ok(det, "a chunk five kilometres from spawn places identically twice")
+
+	gs.warm(Vector3.ZERO)
+	var n_spawn := gs._chunks.size()
+	_ok(n_spawn > 0, "warm() built a ring at spawn (%d chunks)" % n_spawn)
+	var outside := 0
+	for k2: Vector2i in gs._chunks:
+		if gs._chunk_dist(k2) > gs.draw_dist * GrassSystem.STREAM_KEEP:
+			outside += 1
+	_ok(outside == 0, "every live chunk is inside the ring (%d strays)" % outside)
+
+	## Walk out of the valley and the old ring must be GONE, not merely hidden —
+	## a streamer that only hides is a memory leak with a view.
+	var before_keys := {}
+	for k3: Vector2i in gs._chunks:
+		before_keys[k3] = true
+	gs.warm(Vector3(400.0, 0.0, 0.0))
+	var overlap := 0
+	for k4: Vector2i in gs._chunks:
+		if before_keys.has(k4):
+			overlap += 1
+	_ok(overlap == 0, "walking 400 m frees the whole old ring (%d kept)" % overlap)
+	gs.warm(Vector3.ZERO)
+	_ok(gs._chunks.size() == n_spawn,
+		"and walking back rebuilds exactly the same ring (%d -> %d)"
+			% [n_spawn, gs._chunks.size()])
+
+	## Draw Distance (Esc) has to move everything, not just the cull ring.
+	gs.set_draw_distance(45.0)
+	gs.warm(Vector3.ZERO)
+	var n_low := gs._chunks.size()
+	var ratio := float(n_low) / maxf(float(n_spawn), 1.0)
+	_ok(n_low < n_spawn, "Low streams fewer chunks than Medium (%d vs %d)" % [n_low, n_spawn])
+	_ok(ratio < 0.40, "and the area squares — Low is %.0f%% of Medium" % (ratio * 100.0))
+	var worst_vr := 0.0
+	for k5: Vector2i in gs._chunks:
+		for kind: String in gs._chunks[k5]:
+			var mmi5 := gs._chunks[k5][kind] as MultiMeshInstance3D
+			if not GrassSystem.DETAIL_KINDS.has(kind):
+				worst_vr = maxf(worst_vr, mmi5.visibility_range_end)
+	_ok(absf(worst_vr - 45.0) < 0.01,
+		"every live chunk's cull range followed the setting (%.0f m)" % worst_vr)
+	gs.set_draw_distance(GrassSystem.CULL_END)
+	gs.warm(Vector3.ZERO)
+	_ok(absf(gs.draw_dist - GrassSystem.CULL_END) < 0.01, "and it goes back")
+
+	## The far thinning: past the fade line a chunk keeps its mesh and drops
+	## most of its instances. This is what pays for the 90 m default.
+	gs._update_lod(Vector3.ZERO)
+	var thinned := 0
+	var full := 0
+	var overclaim := 0
+	var thin_shown := 0
+	var thin_held := 0
+	for k6: Vector2i in gs._chunks:
+		for kind: String in gs._chunks[k6]:
+			var mm6 := (gs._chunks[k6][kind] as MultiMeshInstance3D).multimesh
+			if mm6 == null:
+				continue
+			if mm6.visible_instance_count < 0:
+				full += 1
+				continue
+			thinned += 1
+			thin_shown += mm6.visible_instance_count
+			thin_held += mm6.instance_count
+			if mm6.visible_instance_count > mm6.instance_count:
+				overclaim += 1
+	_ok(thinned > 0 and full > 0,
+		"past the fade line the meadow thins, inside it does not (%d thinned, %d full)"
+			% [thinned, full])
+	_ok(overclaim == 0, "no thinned MultiMesh claims more instances than it holds")
+	if thin_held > 0:
+		var shown := float(thin_shown) / float(thin_held)
+		_ok(absf(shown - GrassSystem.FAR_KEEP) < 0.05,
+			"a thinned chunk draws FAR_KEEP of its tufts (%.2f vs %.2f)"
+				% [shown, GrassSystem.FAR_KEEP])
+		_note("thinned band draws %.0f%% of what it holds — %s tufts hidden for free"
+			% [shown * 100.0, _commas(thin_held - thin_shown)])
 
 	print("\n=====================================================")
 	print("  %d passed, %d failed" % [_pass, _fail])

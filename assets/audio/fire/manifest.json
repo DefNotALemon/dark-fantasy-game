@@ -1,0 +1,88 @@
+{
+ "generator": "tools/firesounds.py",
+ "version": 1,
+ "seed": 20260910,
+ "sample_rate": 44100,
+ "sounds": {
+  "fire_bed_small": {
+   "file": "fire_bed_small.wav",
+   "seconds": 6.15,
+   "loop": true
+  },
+  "fire_bed_big": {
+   "file": "fire_bed_big.wav",
+   "seconds": 8.15,
+   "loop": true
+  },
+  "ember_bed": {
+   "file": "ember_bed.wav",
+   "seconds": 6.65,
+   "loop": true
+  },
+  "rain_hiss": {
+   "file": "rain_hiss.wav",
+   "seconds": 5.15,
+   "loop": true
+  },
+  "crackle_1": {
+   "file": "crackle_1.wav",
+   "seconds": 0.07,
+   "loop": false
+  },
+  "crackle_2": {
+   "file": "crackle_2.wav",
+   "seconds": 0.07,
+   "loop": false
+  },
+  "crackle_3": {
+   "file": "crackle_3.wav",
+   "seconds": 0.14,
+   "loop": false
+  },
+  "crackle_4": {
+   "file": "crackle_4.wav",
+   "seconds": 0.14,
+   "loop": false
+  },
+  "crackle_5": {
+   "file": "crackle_5.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "crackle_6": {
+   "file": "crackle_6.wav",
+   "seconds": 0.26,
+   "loop": false
+  },
+  "settle_1": {
+   "file": "settle_1.wav",
+   "seconds": 0.73,
+   "loop": false
+  },
+  "settle_2": {
+   "file": "settle_2.wav",
+   "seconds": 0.67,
+   "loop": false
+  },
+  "settle_3": {
+   "file": "settle_3.wav",
+   "seconds": 0.89,
+   "loop": false
+  },
+  "catch": {
+   "file": "catch.wav",
+   "seconds": 1.5,
+   "loop": false
+  },
+  "feed_log": {
+   "file": "feed_log.wav",
+   "seconds": 1.1,
+   "loop": false
+  },
+  "douse": {
+   "file": "douse.wav",
+   "seconds": 1.8,
+   "loop": false
+  }
+ }
+}

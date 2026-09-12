@@ -19,10 +19,42 @@ extends RefCounted
 const PATH := "user://save01.dat"
 const VERSION := 2          ## v2: equipment slots hold the ITEMS themselves
 const OLDEST_READABLE := 1  ## v1 (index-based equipment) migrates on load
+## HARDCORE's tombstone. Written beside the save, never inside it, so that a
+## dead run is still a readable file — it just cannot be gone back to.
+const SEAL_FILE := "save01.dead"
+const SEAL_PATH := "user://save01.dead"
 
 
 static func has_save() -> bool:
 	return FileAccess.file_exists(PATH)
+
+
+## ============================ The tombstone ================================
+## HARDCORE's whole weight sits in these three functions. Dying in Hardcore
+## does not delete your save — deleting it would be a mercy, because then
+## nothing would be there to refuse you. It lays a marker BESIDE the file:
+## the run is still on the disk, it simply cannot be gone back to. The mark
+## outlives the process, so quitting and relaunching does not undo the death.
+
+
+static func is_sealed() -> bool:
+	return FileAccess.file_exists(SEAL_PATH)
+
+
+static func seal(reason := "") -> void:
+	var f := FileAccess.open(SEAL_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string("%s\n%s\n" % [Time.get_datetime_string_from_system(true), reason])
+	f.close()
+
+
+static func unseal() -> void:
+	## The only two things that break a seal: Settings -> New Run, and writing
+	## a fresh save over the slot (which is the same act by another name).
+	var d := DirAccess.open("user://")
+	if d != null and d.file_exists(SEAL_FILE):
+		d.remove(SEAL_FILE)
 
 
 static func stamp() -> String:
@@ -41,6 +73,10 @@ static func stamp() -> String:
 
 static func save_game(player: Node) -> String:
 	## Returns "" on success, or a short reason to show the player.
+	## Writing a new run over the slot lays the old one to rest — but Player
+	## refuses to even call this while GameMode.run_lost, so you cannot use it
+	## to unpick the death you just had.
+	unseal()
 	var world := player.get_tree().get_first_node_in_group("world")
 	if world == null or not world.has_method("save_state"):
 		return "No world to save"
@@ -61,6 +97,9 @@ static func save_game(player: Node) -> String:
 static func load_game(player: Node) -> String:
 	if not has_save():
 		return "Nothing saved yet"
+	if is_sealed():
+		## The whole of Hardcore, right here.
+		return "That run is over. Hardcore does not take it back."
 	var f := FileAccess.open(PATH, FileAccess.READ)
 	if f == null:
 		return "Couldn't read the save file"

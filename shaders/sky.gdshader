@@ -45,7 +45,13 @@ uniform float cloud_softness : hint_range(0.01, 0.5) = 0.16;
 uniform float cloud_scale : hint_range(0.2, 6.0) = 1.35;
 uniform float cloud_opacity : hint_range(0.0, 1.0) = 1.0;
 uniform float cloud_darkness : hint_range(0.0, 1.0) = 0.0; // Weather: storm bottoms
-uniform vec2 cloud_wind = vec2(0.008, 0.003);              // Sky.gd feeds Wind.gd into this
+// A POSITION, not a velocity. SkyRig.gd integrates the world's wind into this
+// every frame (_wind_off += dir * rate * delta) so a gust can't make the whole
+// deck jump sideways. Do NOT multiply it by TIME down in sky() — that used to
+// be here, which made the drift speed * t * t: the clouds accelerated
+// quadratically and were tearing across the sky minutes into a session.
+// The one speed knob lives in SkyRig.DRIFT_BASE / DRIFT_PER_WIND.
+uniform vec2 cloud_wind = vec2(0.0, 0.0);
 group_uniforms;
 
 group_uniforms volumetric_clouds;
@@ -55,6 +61,8 @@ uniform float vol_density : hint_range(0.1, 4.0) = 1.0;
 uniform float vol_freq : hint_range(0.0002, 0.004) = 0.0008;   // cloud size: bigger = smaller puffs
 uniform float vol_far : hint_range(4000.0, 40000.0) = 16000.0; // stop marching out here
 uniform float vol_brightness : hint_range(0.1, 2.0) = 0.72;
+// How fast the puffs churn in place, independent of how fast they drift past.
+uniform float vol_evolve : hint_range(0.0, 0.05) = 0.002;
 group_uniforms;
 
 group_uniforms night_sky;
@@ -140,7 +148,7 @@ float cloud_density(vec3 p, vec2 drift, float cov, int oct, float t) {
 	vec2 uv = p.xz * vol_freq + drift;
 	float base = fbm2(uv, oct);
 	float detail = vnoise3(vec3(p.x, p.y * 1.7, p.z) * vol_freq * 3.4
-		+ vec3(drift.x * 4.0, t * 0.01, drift.y * 4.0));
+		+ vec3(drift.x * 4.0, t * vol_evolve, drift.y * 4.0));
 	// Erode the base shape with the detail rather than adding to it — adding
 	// just raises the average and the deck turns into fog.
 	float n = base - (1.0 - detail) * 0.22;
@@ -195,7 +203,8 @@ void sky() {
 	// --- clouds (computed first so stars/aurora can hide behind them) --------
 	float cm = 0.0;             // cloud alpha
 	vec3 cloud_col = vec3(0.0); // cloud color
-	vec2 drift = cloud_wind * TIME;
+	// Already integrated over time by SkyRig.gd — see the cloud_wind uniform.
+	vec2 drift = cloud_wind;
 
 	if (cloud_mode == 1 && dir.y > 0.0) {
 		// Painterly: two scrolling fbm layers projected on a dome.

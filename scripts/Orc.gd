@@ -14,6 +14,7 @@ func _init() -> void:
 	mass = 110.0
 	skin_tile = "skin"
 	display_name = "Orc"
+	monster = true           ## cave dweller — hunts you on Peaceful too
 	max_health = 120.0       ## takes several hits and keeps coming
 	wander_speed = 1.8
 	chase_speed = 5.6          ## faster than the others

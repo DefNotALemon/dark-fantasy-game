@@ -184,6 +184,11 @@ func _process(delta: float) -> void:
 	_t += delta
 	## Off-screen swarms do nothing. There is no state to keep warm.
 	var pl := get_tree().get_first_node_in_group("player") as Node3D
+	## Swarms find you by group rather than through Enemy._get_player, so the
+	## spectator gate has to be repeated here. Blackflies do not get to orbit a
+	## parked body while you are two kilometres away laying out a town.
+	if EditorMode.active:
+		pl = null
 	if pl != null:
 		var d := global_position.distance_to(pl.global_position)
 		if d > 90.0:
@@ -208,14 +213,19 @@ func _harass(pl: Node3D, delta: float) -> void:
 	var share := float(alive_count()) / maxf(float(count), 1.0)
 	if share <= 0.0:
 		return
+	## PEACEFUL: the cloud still finds you, still sounds like that and still
+	## wants smoke — it just never takes anything off the bar.
+	var bite := GameMode.swarm_damage_mult()
+	if bite <= 0.0:
+		return
 	if pl.has_method("apply_bug_bites"):
-		pl.call("apply_bug_bites", HARASS_DPS * share * delta)
+		pl.call("apply_bug_bites", HARASS_DPS * share * bite * delta)
 		return
 	_harass_t += delta
 	if _harass_t >= 1.0:
 		_harass_t = 0.0
 		if pl.has_method("take_damage"):
-			pl.take_damage(HARASS_DPS * share, global_position, false, Vector3.INF, null)
+			pl.take_damage(HARASS_DPS * share * bite, global_position, false, Vector3.INF, null)
 
 
 ## =============================== Swatting =================================

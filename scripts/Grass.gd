@@ -31,24 +31,90 @@ class_name GrassSystem
 
 const CHUNK_CELLS := 16          ## grass chunk = one rock chunk footprint (12.8 m)
 const TUFTS_PER_CHUNK := 3400    ## placement attempts per chunk. History: 650 at
-                                 ## v2, ×2.6 at v2.1 ("much denser"), doubled again
-                                 ## at v2.2 for the SHORT grass specifically —
-                                 ## the tall-patch keep below halves twice to hold
-                                 ## the hiding grass at half its v2.1 density.
-                                 ## The LOD ladder is what makes this affordable:
-                                 ## the extra tufts are mostly 3-triangle far-field.
+								 ## v2, ×2.6 at v2.1 ("much denser"), doubled again
+								 ## at v2.2 for the SHORT grass specifically —
+								 ## the tall-patch keep below halves twice to hold
+								 ## the hiding grass at half its v2.1 density.
+								 ## The LOD ladder is what makes this affordable:
+								 ## the extra tufts are mostly 3-triangle far-field.
+const FULL_COVER := true         ## v2.6: every dry cell is full meadow — no
+								 ## treeline, sand, canopy, tideline or slope
+								 ## thinning. Flip false for the graded world.
+const GPU_FESCUE := false        ## v3: RED FESCUE outside the valley is placed by
+								 ## a particle process shader (scripts/GrassGPU.gd) and
+								 ## never touches this file's chunks. `std` was 284,653
+								 ## of 429,116 tufts — 66% of the meadow and effectively
+								 ## all of the _fill_mm cost. Flip false for the pure
+								 ## v2.7 MultiMesh meadow; everything else is unchanged
+								 ## either way, and the valley is ALWAYS CPU-placed
+								 ## because you can dig it.
 const SHORT_KEEP := 0.94         ## short grass keeps nearly all of its draw
 
 ## Distance bands. LOD keeps the near meadow expensive and the far one nearly
 ## free, so the ring can be much wider than v1's 38 m without costing frames.
-const LOD_HI := 12.0             ## curved 4-segment blades (pulled in from 15 —
-                                 ## at 2.6× density the near ring pays for it)
-const LOD_MID := 21.0            ## 2-segment blades (27→22 at v2.2, →21 at v2.3:
-                                 ## every density or species add pays its bill here)
-const FADE_START := 34.0         ## blades start sinking + taking the ground's colour
-const FADE_END := 46.0           ## by here they ARE the ground
-const CULL_END := 60.0           ## whole chunks stop rendering
-const DETAIL_CULL := 27.0        ## flowers/clover/moss are small — cull them early
+const LOD_HI := 9.0              ## curved 4-segment blades. 15 → 12 → 9 at v2.4.
+								 ## The near ring IS the bill: its area goes as the
+								 ## square of this, so 12→9 sheds 44% of the
+								 ## expensive tufts without moving a visible edge —
+								 ## at 9 m a 0.18 m fescue is already a few pixels.
+const LOD_MID := 16.0            ## 2-segment blades (27→22→21, →16 at v2.4). The
+								 ## mid ring loses 41% of its area with it.
+## v2.5 — THE RING IS THE WHOLE COST NOW. Grass no longer lives in a 208 m
+## valley you can seed once and forget: it streams across 78 km² of Maine, so
+## the only thing that decides what grass costs is how far it draws. That is
+## why draw distance is a SETTING (Esc → Draw Distance) rather than a constant,
+## and why everything below is a FRACTION of it — move the one number and the
+## whole ladder moves honestly, instead of four constants drifting apart.
+##
+## Area goes as the square: 60 → 90 m is 2.25× the tufts on screen. The
+## defaults here are "Medium".
+const CULL_END := 90.0           ## DEFAULT draw distance, m — whole chunks stop
+const DRAW_MIN := 30.0           ## Esc → Draw Distance: Low
+const DRAW_MAX := 180.0          ## ...to Ultra. Past this the streamer thrashes.
+const FADE_START_F := 0.58       ## blades start sinking + taking the ground's colour
+const FADE_END_F := 0.78         ## by here they ARE the ground
+const DETAIL_CULL_F := 0.33      ## flowers/clover/moss are small — cull them early
+const FADE_START := CULL_END * FADE_START_F
+const FADE_END := CULL_END * FADE_END_F
+const DETAIL_CULL := CULL_END * DETAIL_CULL_F
+
+## One grass chunk in metres. The chunk grid is WORLD-space at v2.5 (it used to
+## be indexed off CaveField cells, which only existed inside the valley), so a
+## key is just floor(world / CHUNK_M) and there is no bound on it.
+const CHUNK_M := float(CHUNK_CELLS) * CaveField.VOX
+
+## --- streaming ---------------------------------------------------------------
+## 7.2 × 10.8 km at 12.8 m is 474,000 chunks. You cannot seed that; you carry a
+## ring of it with you. At 90 m that ring is ~190 chunks — about what the old
+## fixed valley grid drew at 60 m, for a world 1,500× the area.
+const STREAM_TICK := 0.30        ## seconds between re-evaluating the ring
+const STREAM_BATCH := 8          ## chunks per worker batch (one batch in flight)
+const STREAM_KEEP := 1.12        ## free a chunk once it is this far past the ring.
+								 ## Hysteresis: a chunk on the boundary must not
+								 ## be freed and rebuilt every time you step back
+								 ## and forth across one metre. One chunk of slack
+								 ## is enough — measured at 1.30 the resident set
+								 ## was 224 chunks for a ring that wanted 178, and
+								 ## a resident chunk still holds its instance
+								 ## buffer even though nothing draws it.
+const APPLY_PER_FRAME := 3       ## MultiMesh fills per frame — the main-thread half
+
+## --- what actually pays for a 90 m ring --------------------------------------
+## Measured the moment the ring went to 90 m: 180 chunks live, **429,116 tufts
+## standing**, 7 fps. The old 60 m valley drew ~165k. Area squares, and the LOD
+## ladder does not help here — it swaps a tuft's MESH, never whether it is drawn
+## at all, so 417,000 far tufts were still 417,000 instances of vertex work.
+##
+## So past the fade line the meadow THINS. `MultiMesh.visible_instance_count`
+## draws the first N instances and costs nothing to change — no rebuild, no
+## reupload, one integer — and placement order inside a chunk is rng order, so
+## taking the first third is a clean uniform thinning rather than a pattern.
+##
+## It starts exactly where the blades already begin sinking into the ground
+## colour (FADE_START_F), so the density step lands underneath the fade that
+## was going to hide it anyway. At 90 m that is 52 m out, and it takes the
+## standing count from ~429k back to ~250k for fifty percent more reach.
+const FAR_KEEP := 0.35           ## fraction of a faded chunk's tufts still drawn
 
 const WITHER_R := 11.0           ## grass sickens this close to a cave mouth
 const TALL_T := 0.34             ## tall-noise above this = a HIDING patch
@@ -121,7 +187,7 @@ var _chunk_lod := {}             ## Vector2i -> 0/1/2, so a re-band is one assig
 var _litter := {}                ## kind -> ring buffer of what CAME OFF the world
 var _density := FastNoiseLite.new()
 var _tall := FastNoiseLite.new() ## slow noise carves the tall meadows — the SAME
-                                 ## noise answers "am I hidden here?"
+								 ## noise answers "am I hidden here?"
 var _clump := FastNoiseLite.new()  ## 2 m scale: tufts grow in clumps, with dirt between
 var _moist := FastNoiseLite.new()  ## wet ground -> sedge, moss, fern, deeper green
 var _lush := FastNoiseLite.new()   ## rich vs thin ground -> height and colour
@@ -129,10 +195,28 @@ var _gust_t := 0.0               ## the leaf-litter gust clock (Tsushima drift)
 var _gust_next := 22.0
 var _lod_t := 0.0
 var _weather: Node = null
-var _ncx := 0
-var _ncz := 0
-var _bkeys: Array[Vector2i] = [] ## threaded first build
+var _ncx := 0                    ## CaveField chunk span — the VALLEY's footprint
+var _ncz := 0                    ## only; the world grid beyond it is unbounded
+var _bkeys: Array[Vector2i] = [] ## threaded build: the keys of the batch in flight
 var _bresults := []
+
+## --- v2.5: the streamed world -----------------------------------------------
+var draw_dist := CULL_END        ## live draw distance, m (Esc → Draw Distance)
+var detail_dist := DETAIL_CULL   ## flowers/clover/moss, scaled off draw_dist
+var _ow: Overworld = null        ## the heightfield outside the valley; may be null
+var _sea := -22.5                ## cached Overworld.sea_level
+var _stream_t := 0.0
+var _focus := Vector3.ZERO       ## the position the ring is centred on
+var _queue: Array[Vector2i] = [] ## chunks wanted but not yet placed, nearest first
+var _pending: Dictionary = {}    ## Vector2i -> true while queued or in flight
+var _job_gid := -1               ## the WorkerThreadPool group task in flight, or -1
+var _apply_q: Array = []         ## [key, placed] waiting for a main-thread fill
+
+## --- v3: the GPU fescue field ------------------------------------------------
+var _gpu: GrassGPU = null        ## null when GPU_FESCUE is off or there is no bake
+var _gpu_on := false             ## read from WORKER THREADS in _place_chunk, so it
+								 ## is a plain bool set once on the main thread and never
+								 ## touched again — do not make this a property lookup
 
 
 func _ready() -> void:
@@ -164,25 +248,186 @@ func setup(f: CaveField, seed_v: int) -> void:
 	_build_meshes()
 	_ncx = int(ceil(float(CaveField.CELLS_X) / CHUNK_CELLS))
 	_ncz = int(ceil(float(CaveField.CELLS_Z) / CHUNK_CELLS))
-	_reseed_all()
-	print("GrassSystem: %d chunks seeded" % _chunks.size())
+	_ow = Overworld.inst
+	if _ow != null:
+		_sea = _ow.sea_level
+	## v3. The GPU field owns the fescue everywhere the baked heightfield is the
+	## ground; this system keeps the valley (voxel, diggable) and the other eight
+	## kinds. It has to exist BEFORE warm(), because _place_chunk asks it whether
+	## to skip `std` and _tall_noise_at reads its baked tile.
+	if GPU_FESCUE and _ow != null:
+		var g := GrassGPU.new()
+		g.name = "GrassGPU"
+		add_child(g)
+		## The rect the voxel field answers for — the same bounds _place_chunk's
+		## `on_field` test uses, so the two grounds meet exactly at the rim and
+		## neither leaves a bald metre for the other to have covered.
+		var fmin := Vector2(field.origin.x + 2.0 * CaveField.VOX,
+			field.origin.z + 2.0 * CaveField.VOX)
+		var fmax := Vector2(field.origin.x + float(CaveField.SX - 3) * CaveField.VOX,
+			field.origin.z + float(CaveField.SZ - 3) * CaveField.VOX)
+		if g.setup(_mat, _mesh["std"] as Array, seed_v, fmin, fmax):
+			_gpu = g
+			_gpu_on = true
+		else:
+			g.queue_free()
+	set_draw_distance(draw_dist)
+	warm(Vector3.ZERO)
+	print("GrassSystem: %s — %d chunks up around spawn, draw %.0f m"
+		% ["streaming the whole map" if _ow != null else "valley only (no Overworld)",
+			_chunks.size(), draw_dist])
 
 
-func _reseed_all() -> void:
-	## Placement is pure field reads — thread it like the rock. Used by the
-	## first build AND by a load (which has to re-place every chunk so the
-	## stubble matches the restored record of what's been mown).
+## --------------------------------------------------------------- streaming ---
+## v2.5. THERE IS NO "ALL THE CHUNKS" ANY MORE.
+##
+## Until now the meadow was 289 chunks over a 208 m valley, seeded once at boot
+## and never touched again. The world is 7.2 × 10.8 km — 474,000 chunks. You do
+## not seed that; you carry a ring of it with you, exactly as Overworld carries
+## its ground tiles.
+##
+## What makes freeing a chunk safe is that placement is DETERMINISTIC in the
+## world key (see _place_chunk's rng seed): walk away from a meadow, walk back,
+## and the same tufts stand in the same spots — including the flat stubble
+## wherever you mowed, because _cut_cells is a sparse world-space record that
+## outlives the chunk that drew it.
+##
+## Two halves, both metered:
+##   worker    _place_chunk over a batch of keys (pure reads, eight threads)
+##   main      _apply_chunk fills the MultiMeshes — ~2 ms a chunk, so a whole
+##             batch landing on one frame is a visible hitch. A few per frame.
+
+
+func warm(at: Vector3) -> void:
+	## Build the entire ring around `at` synchronously — boot and teleports call
+	## this so there is grass before the frame is shown, the same contract
+	## Overworld.warm() gives the ground under your feet.
+	## Threaded, not a serial loop. At 90 m the ring is ~190 chunks and the
+	## valley ones still walk voxel columns — placing them one at a time on the
+	## main thread was a twenty-second boot. This is the old _reseed_all shape:
+	## fan the whole ring across the pool, wait once, fill on the main thread.
+	if _job_gid >= 0:
+		WorkerThreadPool.wait_for_group_task_completion(_job_gid)
+		_job_gid = -1
+		_pending.clear()
+	_focus = at
+	_restream()
+	_apply_q.clear()
+	if _queue.is_empty():
+		_update_lod(at)
+		return
 	_bkeys.clear()
-	for cx in range(_ncx):
-		for cz in range(_ncz):
-			_bkeys.append(Vector2i(cx, cz))
+	for key: Vector2i in _queue:
+		_bkeys.append(key)
+	_queue.clear()
 	_bresults.resize(_bkeys.size())
 	var gid := WorkerThreadPool.add_group_task(_build_task, _bkeys.size(), -1, true, "Grass")
 	WorkerThreadPool.wait_for_group_task_completion(gid)
 	for n in range(_bkeys.size()):
 		if _bresults[n] is Dictionary:
 			_apply_chunk(_bkeys[n], _bresults[n] as Dictionary)
+	_bkeys.clear()
 	_bresults.clear()
+	_update_lod(at)
+
+
+func set_draw_distance(m: float) -> void:
+	## Esc → Draw Distance. One number moves the whole ladder: the cull ring,
+	## the detail ring, and the shader's fade. The fade HAS to move with it —
+	## left at 34→46 m against a 150 m ring, the far blades would pop in at
+	## full colour instead of rising out of the ground.
+	draw_dist = clampf(m, DRAW_MIN, DRAW_MAX)
+	detail_dist = draw_dist * DETAIL_CULL_F
+	if _gpu != null:
+		_gpu.set_draw_distance(draw_dist)
+	if _mat != null:
+		_mat.set_shader_parameter("fade_start", draw_dist * FADE_START_F)
+		_mat.set_shader_parameter("fade_end", draw_dist * FADE_END_F)
+	for key: Vector2i in _chunks:
+		for kind: String in _chunks[key]:
+			(_chunks[key][kind] as MultiMeshInstance3D).visibility_range_end = \
+				detail_dist if DETAIL_KINDS.has(kind) else draw_dist
+	_restream()
+
+
+func _chunk_dist(key: Vector2i) -> float:
+	## Distance to the chunk's nearest EDGE, not its centre. A 12.8 m chunk you
+	## are standing in the corner of is 0 m away, and banding it by its centre
+	## would swap the ground under your feet to a coarser mesh.
+	var c := _chunk_center(key)
+	return maxf(Vector2(c.x - _focus.x, c.z - _focus.z).length() - CHUNK_M * 0.5, 0.0)
+
+
+func _restream() -> void:
+	## Rebuild the wanted set from scratch, nearest first, and free what fell
+	## behind. Cheap enough to do on a tick: at 90 m that is a 19 × 19 scan.
+	##
+	## Freeing uses a slacker radius than wanting (STREAM_KEEP) so a chunk right
+	## on the boundary does not get freed and rebuilt every time you step back
+	## and forth across one metre.
+	var r := int(ceil(draw_dist / CHUNK_M)) + 1
+	var c0 := _chunk_key_at(_focus.x, _focus.z)
+	var keep := draw_dist * STREAM_KEEP
+	var want := {}
+	_queue.clear()
+	for dz in range(-r, r + 1):
+		for dx in range(-r, r + 1):
+			var key := Vector2i(c0.x + dx, c0.y + dz)
+			if _chunk_dist(key) > draw_dist:
+				continue
+			want[key] = true
+			## _pending is IN FLIGHT ONLY, never "queued": the queue is rebuilt
+			## from scratch here, so a key you walked away from before it was
+			## placed simply drops out, and walking back re-queues it.
+			if not _chunks.has(key) and not _pending.has(key):
+				_queue.append(key)
+	_queue.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return _chunk_dist(a) < _chunk_dist(b))
+	for key: Vector2i in _chunks.keys():
+		if want.has(key) or _chunk_dist(key) <= keep:
+			continue
+		for kind: String in _chunks[key]:
+			(_chunks[key][kind] as Node).queue_free()
+		_chunks.erase(key)
+		_chunk_lod.erase(key)
+
+
+func _stream_step() -> void:
+	## One batch in flight at a time, POLLED rather than waited on:
+	## wait_for_group_task_completion() blocks the main thread for the whole
+	## batch, which is exactly the hitch this is here to avoid.
+	if _job_gid >= 0:
+		if not WorkerThreadPool.is_group_task_completed(_job_gid):
+			return
+		WorkerThreadPool.wait_for_group_task_completion(_job_gid)   ## returns at once
+		_job_gid = -1
+		for n in range(_bkeys.size()):
+			if _bresults[n] is Dictionary:
+				_apply_q.append([_bkeys[n], _bresults[n]])
+			else:
+				_pending.erase(_bkeys[n])
+		_bkeys.clear()
+		_bresults.clear()
+		return
+	if _queue.is_empty():
+		return
+	_bkeys.clear()
+	for _i in range(mini(STREAM_BATCH, _queue.size())):
+		var key: Vector2i = _queue.pop_front()
+		_bkeys.append(key)
+		_pending[key] = true
+	_bresults.resize(_bkeys.size())
+	_job_gid = WorkerThreadPool.add_group_task(_build_task, _bkeys.size(), -1, true, "Grass")
+
+
+func _drain_applies() -> void:
+	var n := 0
+	while not _apply_q.is_empty() and n < APPLY_PER_FRAME:
+		var e: Array = _apply_q.pop_front()
+		var key: Vector2i = e[0]
+		_pending.erase(key)
+		_apply_chunk(key, e[1] as Dictionary)
+		n += 1
 
 
 func _build_task(n: int) -> void:
@@ -198,7 +443,12 @@ func _process(delta: float) -> void:
 	if p != null:
 		## The stealth question, answered by the same noise that grew the
 		## patches: standing in tall grass on the surface = concealed.
-		p.set("grass_hidden", p.global_position.y > -1.1
+		##
+		## v2.5: "on the surface" used to mean `y > -1.1`, which was true when
+		## the only surface in the game was a valley floor at y = 0. Katahdin's
+		## summit is at y 597 and the seabed at −27, so the test is now RELATIVE
+		## to the ground you are actually standing on.
+		p.set("grass_hidden", absf(p.global_position.y - _ground_y(p.global_position)) < 2.5
 			and is_tall_at(p.global_position.x, p.global_position.z))
 
 	## Rain darkens the meadow and makes it shine; the ground stays wet a while
@@ -218,6 +468,28 @@ func _process(delta: float) -> void:
 		_lod_t = 0.0
 		if p != null:
 			_update_lod(p.global_position)
+			## Fade the far blades into the ground THEY are standing on, not a
+			## fixed dark green. Out in the world the terrain's own tint is
+			## whatever the colour map says — sand at the shore, dark canopy
+			## inland — and a ring of grass dissolving into the wrong colour is
+			## exactly what makes a draw distance visible.
+			if _ow != null:
+				var gc := _ow.sample_color(p.global_position.x, p.global_position.z)
+				_mat.set_shader_parameter("ground_tint",
+					Color(gc.r * 0.62, gc.g * 0.62, gc.b * 0.62))
+
+	## The ring follows you. _restream picks WHAT to build on a tick (a 19 × 19
+	## scan is not free); _stream_step and _drain_applies run every frame because
+	## they are already metered and stalling either one shows up as a bald patch
+	## you can walk into.
+	_stream_t += delta
+	if _stream_t >= STREAM_TICK:
+		_stream_t = 0.0
+		if p != null and p.global_position.distance_to(_focus) > CHUNK_M * 0.5:
+			_focus = p.global_position
+			_restream()
+	_stream_step()
+	_drain_applies()
 
 	## Now and then the wind gets under the leaf fall and takes a FEW of them
 	## somewhere else. The carpet stays; a handful of it moves.
@@ -240,9 +512,20 @@ func _lod_for(d: float) -> int:
 
 
 func _chunk_center(key: Vector2i) -> Vector3:
-	var half := CHUNK_CELLS * CaveField.VOX * 0.5
-	return Vector3(field.origin.x + key.x * CHUNK_CELLS * CaveField.VOX + half, 0.0,
-		field.origin.z + key.y * CHUNK_CELLS * CaveField.VOX + half)
+	## WORLD-space at v2.5. The grid used to hang off field.origin and be
+	## clamped to the CaveField's 17 × 17 chunks, because that was the only
+	## ground there was. Now a key is just floor(world / 12.8) with no bound,
+	## so the same maths addresses a chunk on Katahdin and one in the valley.
+	return Vector3(float(key.x) * CHUNK_M + CHUNK_M * 0.5, 0.0,
+		float(key.y) * CHUNK_M + CHUNK_M * 0.5)
+
+
+func _ground_y(pos: Vector3) -> float:
+	## The surface under a world position. Overworld.ground_y() already returns
+	## 0.0 inside the spawn clearing (the CaveRegion's own grass top IS the
+	## ground there) and 0.0 with no terrain loaded at all, so this is one
+	## answer for both worlds and safe before the Overworld exists.
+	return Overworld.ground_y(pos) if _ow != null else 0.0
 
 
 func _update_lod(at: Vector3) -> void:
@@ -254,6 +537,12 @@ func _update_lod(at: Vector3) -> void:
 		var c := _chunk_center(key)
 		var d := maxf(Vector2(c.x - at.x, c.z - at.z).length() - half, 0.0)
 		var want := _lod_for(d)
+		## Band 3: not a mesh, a COUNT. Past the fade line the chunk keeps its
+		## LOD-2 mesh but draws only FAR_KEEP of its instances. Encoded into the
+		## same cached band value so a re-band is still one comparison — 0/1/2
+		## pick the mesh, +4 means "and thinned".
+		if d >= draw_dist * FADE_START_F:
+			want += 4
 		if int(_chunk_lod.get(key, -1)) == want:
 			continue
 		_chunk_lod[key] = want
@@ -261,7 +550,15 @@ func _update_lod(at: Vector3) -> void:
 		for kind: String in per_kind:
 			var mmi := per_kind[kind] as MultiMeshInstance3D
 			if mmi.multimesh != null:
-				mmi.multimesh.mesh = (_mesh[kind] as Array)[want]
+				mmi.multimesh.mesh = (_mesh[kind] as Array)[want & 3]
+				_band_count(mmi.multimesh, want >= 4)
+
+
+func _band_count(mm: MultiMesh, thin: bool) -> void:
+	## visible_instance_count draws the first N instances and leaves the buffer
+	## alone — changing it is one integer, not a reupload. -1 means all of them.
+	mm.visible_instance_count = maxi(int(float(mm.instance_count) * FAR_KEEP), 1) \
+		if thin else -1
 
 
 ## ------------------------------------------------------- the stealth read ---
@@ -273,6 +570,13 @@ func is_tall_at(wx: float, wz: float) -> bool:
 
 
 func _tall_noise_at(wx: float, wz: float) -> bool:
+	## v3: when the GPU field is up, BOTH sides read the SAME baked tile.
+	## FastNoiseLite here and a hand-rolled simplex in GLSL would agree to about
+	## three decimals and then disagree at the edge of every patch — and a
+	## disagreement here is a BALD RING: no fescue, because the shader thinks the
+	## patch is tall, and no bunchgrass, because this thinks it is not.
+	if _gpu != null:
+		return _gpu.tall_noise(wx, wz)
 	return _tall.get_noise_2d(wx, wz) > TALL_T
 
 
@@ -281,9 +585,45 @@ func _cut_cell(wx: float, wz: float) -> Vector2i:
 
 
 func _chunk_key_at(wx: float, wz: float) -> Vector2i:
-	var i := int((wx - field.origin.x) / CaveField.VOX)
-	var k := int((wz - field.origin.z) / CaveField.VOX)
-	return Vector2i(clampi(i / CHUNK_CELLS, 0, _ncx - 1), clampi(k / CHUNK_CELLS, 0, _ncz - 1))
+	## floor(), not int() — int() truncates toward zero, so every chunk west or
+	## north of the origin would land on its eastern/southern neighbour and the
+	## mower would rebuild the wrong chunk for half the map.
+	return Vector2i(int(floor(wx / CHUNK_M)), int(floor(wz / CHUNK_M)))
+
+
+func _cover_at(gy: float, fw: float) -> float:
+	## HOW MUCH GRASS THIS GROUND WANTS, 0 .. 1. Outside the valley the terrain
+	## already carries the answer — the colour map's forest weight is the same
+	## signal the tree scatter reads, so grass and woods agree about where the
+	## meadow ends without a second painted mask.
+	##
+	## Measured off the live bake (5,400 samples across the map):
+	##
+	##   tideline / seabed     fw 0.00    pale (0.47, 0.53, 0.39)
+	##   low coast             fw 0.14
+	##   coastal plain / farm  fw 0.33    (0.37, 0.51, 0.23)
+	##   inland forest         fw 0.62    (0.22, 0.37, 0.16)
+	##   summits 300-600 m     fw 0.59    -- the map does NOT thin out up high
+	##
+	## That last row is the one worth knowing: the colour map has no rock or
+	## alpine swatch, so Katahdin reads as forest to it.
+	##
+	## v2.6 (2026-09-03, Lemon: "make the entire land covered in short grass"):
+	## EVERY DRY CELL IS FULL MEADOW. The old graded answer — a twentieth on
+	## sand, ~45% under a closed canopy, 15% above the treeline, wrack at the
+	## tideline — is kept below behind `FULL_COVER` so it can come back with one
+	## flag flip. The water veto in `_place_chunk` is the only thing that says
+	## no now; the species MIX still reads `fw` (wood floors grow fern and moss,
+	## fields grow clover and timothy), so the forest still changes what grows,
+	## just not whether it grows.
+	if FULL_COVER:
+		return 1.0
+	if fw < 0.06:
+		return 0.05                                    ## sand, shingle, bare rock
+	var c := 1.0 - smoothstep(0.35, 0.85, fw) * 0.55   ## a closed canopy shades its floor
+	c *= 1.0 - smoothstep(320.0, 520.0, gy) * 0.85     ## the treeline
+	c *= smoothstep(_sea + 0.5, _sea + 4.0, gy)        ## the tideline is wrack, not meadow
+	return c
 
 
 func cut_at(center: Vector3, radius: float) -> bool:
@@ -291,7 +631,10 @@ func cut_at(center: Vector3, radius: float) -> bool:
 	## inside the swing circle. Short grass is spared, and because chunk seeds
 	## are deterministic the felled tufts turn into flat dried STUBBLE in the
 	## exact spots they stood — while the patch stops hiding anyone.
-	if field == null or center.y < -1.6 or center.y > 7.0:
+	## v2.5: this used to be `center.y < -1.6 or > 7.0`, which meant "near the
+	## valley floor" back when the valley floor was the only surface. Measured
+	## against the local ground it means the same thing everywhere on the map.
+	if field == null or absf(center.y - _ground_y(center)) > 3.0:
 		return false  ## no meadow down the throat or over the deeps
 	var any_new := false
 	var cut_count := 0
@@ -313,7 +656,11 @@ func cut_at(center: Vector3, radius: float) -> bool:
 			touched[_chunk_key_at(cw.x, cw.y)] = true
 	if any_new:
 		for k: Vector2i in touched:
-			_apply_chunk(k, _place_chunk(k))
+			## Only chunks that are actually STANDING need re-placing. One that
+			## has streamed out will read _cut_cells when it streams back and
+			## grow its stubble then — that record outlives the chunk on purpose.
+			if _chunks.has(k):
+				_apply_chunk(k, _place_chunk(k))
 		_burst_clippings(center, cut_count)
 	return any_new
 
@@ -322,10 +669,18 @@ func rebuild_area(lo: Vector3i, hi: Vector3i) -> void:
 	## The ground changed (dig / new mouth) — reseed the grass chunks over it.
 	if hi.y < CaveField.SY - 10:
 		return
-	for cx in range(maxi(int(lo.x / float(CHUNK_CELLS)), 0), mini(int(hi.x / float(CHUNK_CELLS)), _ncx - 1) + 1):
-		for cz in range(maxi(int(lo.z / float(CHUNK_CELLS)), 0), mini(int(hi.z / float(CHUNK_CELLS)), _ncz - 1) + 1):
+	## lo/hi arrive as VOXEL cell indices (CaveRegion speaks in cells). The
+	## chunk grid is world-space now, so go through world metres rather than
+	## dividing cell indices by CHUNK_CELLS — those two grids no longer line up.
+	var k0 := _chunk_key_at(field.origin.x + float(lo.x) * CaveField.VOX,
+		field.origin.z + float(lo.z) * CaveField.VOX)
+	var k1 := _chunk_key_at(field.origin.x + float(hi.x) * CaveField.VOX,
+		field.origin.z + float(hi.z) * CaveField.VOX)
+	for cx in range(mini(k0.x, k1.x), maxi(k0.x, k1.x) + 1):
+		for cz in range(mini(k0.y, k1.y), maxi(k0.y, k1.y) + 1):
 			var key := Vector2i(cx, cz)
-			_apply_chunk(key, _place_chunk(key))
+			if _chunks.has(key):
+				_apply_chunk(key, _place_chunk(key))
 
 
 ## --------------------------------------------------------------- placing ---
@@ -400,33 +755,58 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 	for _k in range(n_kinds):
 		xf_by.append([] as Array[Transform3D])
 		col_by.append([] as Array[Color])
-	var cell0x := key.x * CHUNK_CELLS
-	var cell0z := key.y * CHUNK_CELLS
 	## floor_point walks a voxel column top-down in interpreted GDScript, and
 	## at v2.2 density each cell gets ~13 tuft attempts × 3 lookups (self + two
 	## neighbours). Uncached, that walk was ~85% of the whole seed time
 	## (measured: 10.3 s of a 12 s seed). The floor of a CELL never changes
 	## within one placement pass, so memoise it per chunk — local Dictionary,
-	## thread-safe because nothing shares it.
+	## thread-safe because nothing shares it. Only the VALLEY pays this; the
+	## heightfield outside is a bilinear read off a byte array and needs no memo.
 	var floors := {}
+	var ox := float(key.x) * CHUNK_M
+	var oz := float(key.y) * CHUNK_M
+	var ylo := 1.0e20
+	var yhi := -1.0e20
 	for _i in range(TUFTS_PER_CHUNK):
-		var i := cell0x + rng.randi_range(0, CHUNK_CELLS - 1)
-		var k := cell0z + rng.randi_range(0, CHUNK_CELLS - 1)
-		if i < 2 or k < 2 or i > CaveField.SX - 3 or k > CaveField.SZ - 3:
-			continue  ## the rim wall grows no meadow
-		var wx := field.origin.x + (float(i) + rng.randf()) * CaveField.VOX
-		var wz := field.origin.z + (float(k) + rng.randf()) * CaveField.VOX
+		var wx := ox + rng.randf() * CHUNK_M
+		var wz := oz + rng.randf() * CHUNK_M
+		## WHICH GROUND ANSWERS HERE. Inside the CaveField footprint it is the
+		## voxel surface, so digging still uproots the grass over it; everywhere
+		## else it is the baked heightfield. The two never overlap and the seam
+		## is the field's own rim, which is inside the terrain's valley hole.
+		var i := int((wx - field.origin.x) / CaveField.VOX)
+		var k := int((wz - field.origin.z) / CaveField.VOX)
+		var on_field := i >= 2 and k >= 2 and i <= CaveField.SX - 3 and k <= CaveField.SZ - 3
+		var cover := 1.0
+		var gc := Color(1.0, 1.0, 1.0)
+		var fw := 0.0
+		var gy := 0.0
+		if not on_field:
+			if _ow == null:
+				continue      ## no heightfield loaded: the valley IS the world
+			gy = _ow.sample_height(wx, wz)
+			var wy := _ow.sample_water(wx, wz)
+			if wy != Overworld.NO_WATER and wy > gy - 0.15:
+				continue      ## nothing grows in the lake, the river or the sea
+			gc = _ow.sample_color(wx, wz)
+			fw = _ow._forest_weight(gc)
+			cover = _cover_at(gy, fw)
+			if cover <= 0.02:
+				continue
 		var in_tall := _tall_noise_at(wx, wz)
 		## SHORT GRASS EVERYWHERE (the baseline is lush on purpose — the player
 		## asked for no visible gaps); the noise only breathes variation into it.
+		## `cover` is the world's veto on top: full in an open field, about half
+		## under a closed canopy, a twentieth on sand, near nothing above the
+		## treeline. Inside the valley it is 1.0 and this reads as it always did.
 		if in_tall:
-			if rng.randf() > 0.235:
+			if rng.randf() > 0.235 * cover:
 				continue      ## HALF the v2.1 tall density (per Lemon), against
-				              ## a doubled draw: 3400 × 0.235 ≈ 1700 × 0.47.
-				              ## Chest-high blades overlap so much that half the
-				              ## tufts still reads as full cover, and wading
-				              ## through costs half the overdraw
-		elif rng.randf() > (0.88 + _density.get_noise_2d(wx, wz) * 0.10) * SHORT_KEEP:
+							  ## a doubled draw: 3400 × 0.235 ≈ 1700 × 0.47.
+							  ## Chest-high blades overlap so much that half the
+							  ## tufts still reads as full cover, and wading
+							  ## through costs half the overdraw
+		elif rng.randf() > (0.88 + _density.get_noise_2d(wx, wz) * 0.10) * SHORT_KEEP * cover:
 			continue
 		## ...but at the near scale it still CLUMPS — the gaps just tightened
 		## from "bare patches" to "seams". A meadow with zero structure reads as
@@ -434,18 +814,72 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 		## troughs of the noise.
 		if not in_tall and _clump.get_noise_2d(wx, wz) < -0.62:
 			continue
-		var p := _floor_cached(floors, i, k)
-		if p == Vector3.INF or p.y < -1.1 or p.y > 6.5:
-			continue  ## no grass down the throat or floating over caves
-		## Skip cliff faces: the neighbour column shouldn't drop far.
-		var px := _floor_cached(floors, mini(i + 1, CaveField.SX - 3), k)
-		if px == Vector3.INF or absf(px.y - p.y) > 0.6:
-			continue
-		var pz := _floor_cached(floors, i, mini(k + 1, CaveField.SZ - 3))
+		var p := Vector3.INF
+		var px := Vector3.INF
+		var pz := Vector3.INF
+		if on_field:
+			p = _floor_cached(floors, i, k)
+			if p == Vector3.INF or p.y < -1.1 or p.y > 6.5:
+				continue  ## no grass down the throat or floating over caves
+			## Skip cliff faces: the neighbour column shouldn't drop far.
+			px = _floor_cached(floors, mini(i + 1, CaveField.SX - 3), k)
+			if px == Vector3.INF or absf(px.y - p.y) > 0.6:
+				continue
+			pz = _floor_cached(floors, i, mini(k + 1, CaveField.SZ - 3))
+		else:
+			p = Vector3(wx, gy, wz)
+			px = Vector3(wx + CaveField.VOX, _ow.sample_height(wx + CaveField.VOX, wz), wz)
+			pz = Vector3(wx, _ow.sample_height(wx, wz + CaveField.VOX), wz + CaveField.VOX)
+			## SLOPE, and NOT the valley's rule. The voxel path rejects a
+			## neighbour more than 0.6 m away over 0.8 m, which on a blocky
+			## voxel surface means a genuine cliff FACE. On a smooth heightfield
+			## the same number is 37° — an ordinary Maine hillside. Measured on
+			## the deepwood slope at (1800, −2600): that rule threw away
+			## **332 of 400 tufts** and left a whole wooded hill bald.
+			##
+			## So grade it properly. Grass holds until the soil does not: full
+			## cover to 45°, thinning through the steeps, gone by 65° where
+			## there is nothing but rock and scree to hold on to.
+			##
+			## The ceiling is 65° and not 58° because of what the map actually
+			## is. Measured over 4,553 dry samples map-wide: 68.8% of the land
+			## is under 20°, but **10.5% is steeper than 58°** — the bake's 4 m
+			## heightfield plus PIN_PEAKS' crests and gullies make a lot of sharp
+			## micro-relief. `Overworld._plantable()` has NO slope test at all,
+			## so trees grow happily on those faces; cutting grass off at 58°
+			## put whole wooded hillsides on bare dirt under standing timber.
+			##
+			## v2.6: with FULL_COVER the slope veto is off too — Lemon wants
+			## every dry face green, cliffs included. The tuft's own tilt
+			## (below) still lays it partway onto steep ground so a wall reads
+			## as a mossy wall rather than a hedge of horizontal blades.
+			if not FULL_COVER:
+				var grade := Vector2(px.y - p.y, pz.y - p.y).length() / CaveField.VOX
+				if grade > 2.145:                              ## tan 65°: rock and scree
+					continue
+				if grade > 1.0 and rng.randf() > (2.145 - grade) / 1.145:
+					continue                                   ## tan 45°, faded out
+		ylo = minf(ylo, p.y)
+		yhi = maxf(yhi, p.y)
 
 		var moist := _moist.get_noise_2d(wx, wz)
 		var lush := _lush.get_noise_2d(wx, wz)
+		## THE FOREST CHANGES THE MIX, not only the density. Under a closed
+		## canopy the floor is shadier and damper, and _pick_kind already routes
+		## damp-and-poor ground to moss, fern and sedge — so nudging the two
+		## noises it reads is enough to make a wood floor grow like a wood floor
+		## while the hayfield keeps its clover and timothy. No second system,
+		## and the drifts still come from the noise rather than a dice roll.
+		if not on_field:
+			moist += fw * 0.22
+			lush -= fw * 0.16
 		var kind := _pick_kind(rng, in_tall, _cut_cells.has(_cut_cell(wx, wz)), moist, lush)
+		## v3. Off the voxel field, RED FESCUE belongs to the GPU — it is placed by
+		## the particle shader from the same heightfield, the same noise tiles and
+		## the same draw roll, so dropping it here removes the instances and not the
+		## grass. Everything else on this square metre is still ours.
+		if _gpu_on and not on_field and kind == K_STD:
+			continue
 
 		## Rich ground grows taller. One noise doing two jobs keeps the height
 		## variation and the colour variation agreeing with each other, which is
@@ -471,6 +905,16 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 		tint = tint * rng.randf_range(0.90, 1.10)
 		if kind == K_TALL or kind == K_SEDGE:
 			tint = tint * 0.88     ## the deep patches are shadier inside
+		if not on_field:
+			## GROW THE MEADOW OUT OF THE GROUND IT STANDS ON. Take the terrain
+			## colour's HUE but not its value — divide out its own mean — so a
+			## tuft on the shore goes warm and one under the canopy goes deep
+			## green without the whole meadow getting darker with the map. A
+			## grass ring that does not share the hue of the hillside beneath it
+			## reads as a green disc laid on top, which is precisely what a draw
+			## distance looks like when you can see it.
+			var gm := maxf((gc.r + gc.g + gc.b) / 3.0, 0.05)
+			tint = tint * Color(gc.r / gm, gc.g / gm, gc.b / gm).lerp(Color(1.0, 1.0, 1.0), 0.62)
 		(xf_by[kind] as Array[Transform3D]).append(t)
 		(col_by[kind] as Array[Color]).append(tint.srgb_to_linear())
 	var cols: Array = []
@@ -485,7 +929,15 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 	## (Measured while chasing v2.2's seed time: the main-thread fill is only
 	## ~0.3 s even at 614k instances — do NOT be tempted to pre-bake raw
 	## MultiMesh buffers here. The actual cost was floor_point, cached below.)
-	return {"xf": xf_by, "col": cols}
+	## The Y RANGE rides home with the placement so _apply_chunk can hand the
+	## renderer an honest AABB. A fixed −3 .. +9 m box was fine when every chunk
+	## sat on a flat valley floor; on a mountainside one chunk can span thirty
+	## metres, and a box that lies about that culls the meadow out from under
+	## you the moment you look down the slope.
+	if ylo > yhi:
+		ylo = 0.0
+		yhi = 0.0
+	return {"xf": xf_by, "col": cols, "y0": ylo, "y1": yhi}
 
 
 func _floor_cached(floors: Dictionary, i: int, k: int) -> Vector3:
@@ -518,11 +970,18 @@ func _apply_chunk(key: Vector2i, placed: Dictionary) -> void:
 	if not _chunks.has(key):
 		_chunks[key] = {}
 	var per_kind: Dictionary = _chunks[key]
-	var lod := int(_chunk_lod.get(key, 2))
-	var ox := field.origin.x + key.x * CHUNK_CELLS * CaveField.VOX
-	var oz := field.origin.z + key.y * CHUNK_CELLS * CaveField.VOX
-	var aabb := AABB(Vector3(ox, -3.0, oz),
-		Vector3(CHUNK_CELLS * CaveField.VOX, 12.0, CHUNK_CELLS * CaveField.VOX))
+	## A chunk that has just streamed in arrived at the RING EDGE, so the honest
+	## first guess is "far, and thinned" (2 | 4 — see _update_lod). The next LOD
+	## tick corrects it either way; guessing near would flash a full-density
+	## high-poly meadow on the horizon for a fifth of a second.
+	var lod := int(_chunk_lod.get(key, 6))
+	var ox := float(key.x) * CHUNK_M
+	var oz := float(key.y) * CHUNK_M
+	## The real span the placer measured, plus a metre and a half of headroom
+	## for the tallest bunchgrass and half a metre of root below.
+	var y0 := float(placed.get("y0", 0.0)) - 0.5
+	var y1 := float(placed.get("y1", 0.0)) + 1.8
+	var aabb := AABB(Vector3(ox, y0, oz), Vector3(CHUNK_M, maxf(y1 - y0, 1.0), CHUNK_M))
 	for ki in range(KINDS.size()):
 		var kind: String = KINDS[ki]
 		var xfs: Array[Transform3D] = xf_by[ki]
@@ -537,16 +996,16 @@ func _apply_chunk(key: Vector2i, placed: Dictionary) -> void:
 		if not per_kind.has(kind):
 			var mmi := MultiMeshInstance3D.new()
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			mmi.visibility_range_end = DETAIL_CULL if DETAIL_KINDS.has(kind) else CULL_END
+			mmi.visibility_range_end = detail_dist if DETAIL_KINDS.has(kind) else draw_dist
 			mmi.material_override = _mat
 			add_child(mmi)
 			per_kind[kind] = mmi
-		_fill_mm(per_kind[kind] as MultiMeshInstance3D, (_mesh[kind] as Array)[lod],
-			xfs, col_by[ki], aabb)
+		_fill_mm(per_kind[kind] as MultiMeshInstance3D, (_mesh[kind] as Array)[lod & 3],
+			xfs, col_by[ki], aabb, lod >= 4)
 
 
 func _fill_mm(mmi: MultiMeshInstance3D, mesh: ArrayMesh, transforms: Array[Transform3D],
-		colors: PackedColorArray, aabb: AABB) -> void:
+		colors: PackedColorArray, aabb: AABB, thin := false) -> void:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
@@ -558,6 +1017,7 @@ func _fill_mm(mmi: MultiMeshInstance3D, mesh: ArrayMesh, transforms: Array[Trans
 	## Instances live in world space around an identity node — hand the
 	## renderer an honest AABB or distant chunks cull wrong.
 	mm.custom_aabb = aabb
+	_band_count(mm, thin)
 	mmi.multimesh = mm
 
 
@@ -570,11 +1030,21 @@ func _build_meshes() -> void:
 	## segs, blades: the LOD ladder. A 4-segment blade genuinely arcs; a
 	## 1-segment blade is v1's flat triangle, which is all a tuft 40 m away
 	## has ever needed to be.
-	## Field grass. ~0.5 m standing, ~0.3 m across, tips leaning about 50°.
+	## Field grass — RED FESCUE, and at v2.4 it is MOWN-SHORT: 0.44 → 0.18 m
+	## standing, ~0.14 m across. Per Lemon: shorter short grass, and cheaper.
+	##
+	## Height is the fill-rate knob nothing else touches. Fescue is ~78% of
+	## every tuft in the world, and a blade half as tall covers half as many
+	## pixels; the near meadow was a wall of overlapping fragments and now it
+	## is a floor. The blades narrow with it (0.050 → 0.030 half-width) — a
+	## 0.10 m wide blade on a 0.18 m plant reads as a paddle, not grass.
+	##
+	## Blade count drops 5 → 4 at hi and mid as well. That is 28 triangles a
+	## near tuft instead of 35, on the kind there are 477,000 of.
 	_mesh["std"] = [
-		_tuft(0.44, 0.050, 5, 4, 0.35, 0.55),
-		_tuft(0.44, 0.050, 5, 2, 0.35, 0.55),
-		_tuft(0.44, 0.058, 3, 1, 0.35, 0.55),
+		_tuft(0.18, 0.030, 4, 4, 0.35, 0.55),
+		_tuft(0.18, 0.030, 4, 2, 0.35, 0.55),
+		_tuft(0.18, 0.036, 3, 1, 0.35, 0.55),
 	]
 	## The hiding grass: a bunchgrass stand about 1.5 m standing and 1 m across,
 	## straight for its bottom half and flopping over above that. This is the
@@ -591,8 +1061,14 @@ func _build_meshes() -> void:
 		_tuft(1.15, 0.034, 5, 2, 0.45, 2.10),
 		_tuft(1.15, 0.042, 3, 1, 0.45, 2.10),
 	]
-	var stub_hi := _stub(0.17, 0.052, 5)
-	_mesh["stub"] = [stub_hi, stub_hi, _stub(0.17, 0.060, 3)]
+	## Mown stubble comes down with the fescue. At v2.3 it was 0.17 m against
+	## 0.44 m of standing grass — an obvious shear line. Against 0.18 m of
+	## standing grass 0.17 m is invisible, and "I cut this" stops reading at
+	## all. The stumps drop to 0.07 m, which holds the SAME 39% of standing
+	## height the shear line has always had — the contrast is what reads, not
+	## the number.
+	var stub_hi := _stub(0.07, 0.032, 5)
+	_mesh["stub"] = [stub_hi, stub_hi, _stub(0.07, 0.037, 3)]
 	_mesh["clover"] = [_clover(3, 4), _clover(2, 3), _clover(1, 3)]
 	_mesh["fern"] = [_fern(3, 5), _fern(3, 0), _fern(2, 0)]
 	_mesh["flower"] = [_flower(5), _flower(4), _flower(0)]
@@ -1073,8 +1549,13 @@ func apply_state(d: Dictionary) -> void:
 			on[i] = true
 		pool["next"] = n % LITTER_CAP
 		pool["count"] = n
-	## Every chunk reseeds so the stubble matches the restored cut record.
-	_reseed_all()
+	## Every LIVE chunk reseeds so the stubble matches the restored cut record.
+	## Only the ring exists at v2.5, and that is enough: _cut_cells is a sparse
+	## world-space record, so a chunk streamed in later reads it and grows its
+	## stubble then. Re-placing 474,000 chunks to honour a save would be absurd.
+	var live: Array = _chunks.keys()
+	for key: Vector2i in live:
+		_apply_chunk(key, _place_chunk(key))
 
 
 ## ------------------------------- Diagnostics -------------------------------
@@ -1092,7 +1573,15 @@ func stats() -> Dictionary:
 			by_kind[kind] = int(by_kind.get(kind, 0)) + n
 			total += n
 	return {"chunks": _chunks.size(), "tufts": total, "by_kind": by_kind,
-		"cut_cells": _cut_cells.size()}
+		"cut_cells": _cut_cells.size(),
+		## v2.5: what the ring is doing right now. "chunks" is no longer the
+		## world — it is what is standing within draw_dist of you.
+		"draw_dist": draw_dist, "queued": _queue.size(),
+		"in_flight": _pending.size(), "awaiting_fill": _apply_q.size(),
+		"streaming": _ow != null,
+		## v3: the tufts this system no longer carries. `tufts` above is the
+		## MultiMesh half only — add these for what is actually standing.
+		"gpu": {} if _gpu == null else _gpu.stats()}
 
 
 func _build_material() -> void:
@@ -1127,9 +1616,19 @@ global uniform float season_phase;
 global uniform vec3 player_pos;
 global uniform float player_push;
 
-uniform float fade_start = 34.0;
-uniform float fade_end = 46.0;
-uniform float trample_radius = 1.35;
+// Draw distance is a SETTING now (Esc -> Draw Distance): set_draw_distance()
+// pushes both of these every time it moves. These defaults are the Medium
+// 90 m ring, so the shader is sane on the frame before the first push.
+uniform float fade_start = 52.2;
+uniform float fade_end = 70.2;
+// v2.7 — the trample is a set of DIALS now (Lemon: "far less dramatic"). It was
+// a 1.35 m radius with a 0.30 m sideways shove that applied even while you stood
+// still, so a 2.7 m ring of grass lay flat and slid around with you wherever you
+// went. Now: knee-wide, a soft edge, and it only really shows when you move.
+uniform float trample_radius = 0.80;
+uniform float trample_idle : hint_range(0.0, 0.6) = 0.045;
+uniform float trample_move : hint_range(0.0, 1.0) = 0.20;
+uniform float trample_flatten : hint_range(0.0, 1.0) = 0.30;
 uniform float wetness : hint_range(0.0, 1.0) = 0.0;
 uniform float snow_amount : hint_range(0.0, 1.0) = 1.0;
 uniform vec3 ground_tint : source_color = vec3(0.15, 0.16, 0.12);
@@ -1154,9 +1653,12 @@ uniform vec3 col_bluestem_cured  : source_color = vec3(0.62, 0.33, 0.20);
 //      so the whole meadow shares one limited palette like a sprite sheet;
 //   3. lighting is BANDED in light() — lit / mid / shade / dark, four flat
 //      tones, no smooth falloff and no specular smear.
-uniform float pixel_cells : hint_range(4.0, 32.0) = 13.0;
+// v2.4 — CHUNKIER. 13 cells down to 8 and 7 palette steps down to 5: on a
+// 0.18 m fescue that is a texel about 2 cm tall, so a blade reads as a short
+// stack of fat pixels instead of a smooth gradient with a grid on it.
+uniform float pixel_cells : hint_range(4.0, 32.0) = 8.0;
 uniform float pixel_side_cells : hint_range(1.0, 6.0) = 3.0;
-uniform float palette_steps : hint_range(3.0, 16.0) = 7.0;
+uniform float palette_steps : hint_range(3.0, 16.0) = 5.0;
 uniform float cell_jitter : hint_range(0.0, 0.5) = 0.14;
 
 varying float v_u;
@@ -1197,15 +1699,18 @@ void vertex() {
 	float flutter = sin(ph * 6.1 + v_hash * 3.0) * 0.20 * wind_strength;
 	vec3 off = wind_dir * ((0.10 + gust * 0.26 + flutter) * wind_strength) * bend;
 
-	// --- you, wading through: aside AND down. Grass you walk on lies down. --
+	// --- you, wading through: the grass PARTS at your shins. It does not lie
+	// down in a two-metre ring that follows you around (v2.7). The falloff is
+	// smoothstepped so there is no hard rim where the effect stops, and the
+	// idle term is small enough that standing still barely registers.
 	vec2 away = world.xz - player_pos.xz;
 	float d = length(away);
 	if (d < trample_radius) {
-		float k = 1.0 - d / trample_radius;
+		float k = 1.0 - smoothstep(0.35, 1.0, d / trample_radius);
 		vec2 dirn = (d > 0.0001) ? away / d : vec2(1.0, 0.0);
-		float shove = k * k * (0.30 + 0.60 * player_push);
+		float shove = k * (trample_idle + trample_move * player_push);
 		off.xz += dirn * shove;
-		off.y -= shove * 0.5 * bend;
+		off.y -= shove * trample_flatten * bend;
 	}
 
 	// A blade that has bent over is SHORTER standing up — it did not stretch,

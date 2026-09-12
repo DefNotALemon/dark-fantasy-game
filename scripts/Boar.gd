@@ -35,7 +35,7 @@ func _init() -> void:
 	## Charge -> hit -> barrel PAST -> swing wide -> back to circling.
 	always_moving = true
 	gait_rate = 1.1  ## quick little trotters
-	strong_runpast = 0.55
+	strong_runpast = 0.80   ## barrel a good ~9 m past before swinging wide
 	## Strong: the full-tilt charge from mid-range — knocks the player aside,
 	## just hard enough to clear them off the tusks' path (no launching).
 	strong_throws = true

@@ -370,8 +370,9 @@ static func _alpha(rig: Dictionary, a: float) -> void:
 
 const DUR := {
 	"amble": 4.0, "antler_thrash": 1.6, "banana_pose": 4.0, "bank_slide": 2.0,
-	"barrel_roll": 1.4, "bask": 6.0, "bat_ribbon": 2.2, "bear_huff": 1.2,
-	"bear_stand": 5.0, "berry_gorge": 3.0, "blow_spout": 3.0, "boat_wheel": 3.2,
+	"barrel_roll": 1.4, "bask": 6.0, "bat_ribbon": 2.2, "bear_grab": 2.5,
+	"bear_huff": 1.2, "bear_press": 3.6, "bear_stand": 5.0, "berry_gorge": 3.0,
+	"blow_spout": 3.0, "boat_wheel": 3.2,
 	"bob_walk": 2.6, "breach": 4.0, "burrow_dive": 1.0, "cache_run": 2.4,
 	"camp_case": 3.6, "camp_rob": 2.4, "caterwaul": 2.9, "cattail_feed": 3.0,
 	"caw": 1.55, "cheek_stuff": 2.2, "chick_ride": 4.0, "chorus_hole": 2.0,
@@ -806,6 +807,8 @@ static func play(rig: Dictionary, sig: String, t: float, delta: float, c: Node =
 		## --- bears --------------------------------------------------------
 		"bear_stand": _bear_stand(rig, t, u)
 		"bear_huff": _bear_huff(rig, t, u)
+		"bear_grab": _bear_grab(rig, t, u)
+		"bear_press": _bear_press(rig, t, u)
 		"log_rip": _log_rip(rig, t, u)
 		"berry_gorge": _berry_gorge(rig, t, u)
 		"tree_climb": _tree_climb(rig, t, u)
@@ -1292,6 +1295,110 @@ static func _bear_huff(rig: Dictionary, t: float, u: float) -> void:
 		_ri(rig, "knees", i, -0.55 * swing)
 	_pk(rig, "root", Vector3(0, 0.03 * u * _bounce(_seg(t, 0.90, 1.0), 5.0, 11.0), 0))
 	_ears(rig, 0.80)
+
+
+static func _bear_grab(rig: Dictionary, t: float, u: float) -> void:
+	## THE JAW GRAB (Lemon, 2026-08-29). Lunge with the head dropping, clamp,
+	## haul the whole front end up with the catch swinging from the mouth,
+	## wrench it twice, then WHIP the head left and let go — the throw is the
+	## head, not the paws. Critter._grab_tick deals the damage and hangs the
+	## player off the jaw pivot every frame, so the clip and the mechanics
+	## cannot drift apart.
+	var lunge := _ease_out(_seg(t, 0.0, 0.14))          ## nose drops, body loads
+	var clamp_k := _snap(_seg(t, 0.14, 0.22))           ## the bite lands
+	var rear := _ease_io(_seg(t, 0.22, 0.40))           ## front end hauls up
+	var fling := _ease_in(_seg(t, 0.70, 0.80))          ## the sideways whip
+	var settle := _ease_io(_seg(t, 0.82, 1.0))          ## back to all fours
+	var up := rear * (1.0 - settle)
+	var down := lunge * (1.0 - clamp_k)                 ## only before the clamp
+
+	## Body: load down-forward into the lunge, then rear back to lift the prey.
+	_rk(rig, "body", -0.26 * down + 0.52 * up, 0.30 * fling * (1.0 - settle))
+	_pk(rig, "body", Vector3(0, -0.06 * u * down + 0.17 * u * up,
+		-0.10 * u * down + 0.06 * u * up))
+	## The shake: two hard wrenches while carrying, riding on the hold window.
+	var hold := _seg(t, 0.24, 0.68)
+	var shake := (_pulse(hold, 0.24, 0.10) + _pulse(hold, 0.64, 0.10)) * up
+	## Head: down into the clamp, up for the carry, wrenching side to side,
+	## then the whip — the nose sweeps hard LEFT (+yaw) as the mouth opens.
+	_rk(rig, "neck", -0.55 * down + 0.34 * up - 0.10 * shake)
+	_rk(rig, "head", -0.62 * down + 0.24 * up + 0.14 * shake,
+		0.42 * sin(hold * TAU * 2.1) * shake + 1.05 * fling * (1.0 - settle * 0.7))
+	## Jaw: gapes for the clamp, half-shut around the body, opens to let go.
+	_jaw_open(rig, 1.25 * down + 0.55 * up * (1.0 - fling) + 0.95 * fling * (1.0 - settle))
+	_ears(rig, 0.9 * maxf(down, up))
+	## Front hips ride the rear-up arc (the bear_stand lesson: the hips are
+	## parented to root, so the arc must be written onto the PIVOTS).
+	var k := up * 0.41
+	for i in 2:
+		var side := -1.0 if i == 0 else 1.0
+		_pi(rig, "legs", i, Vector3(0, 0.63 * u * 0.95 * k, 0.30 * u * 0.69 * k))
+		_ri(rig, "legs", i, 0.30 * down - 0.72 * k + 0.10 * shake * side)
+		_ri(rig, "knees", i, -0.30 * down - 0.40 * k)
+	## Hind end takes the weight.
+	for i in range(2, 4):
+		_ri(rig, "legs", i, 0.30 * k + 0.18 * down)
+		_ri(rig, "knees", i, -0.26 * k - 0.16 * down)
+	## The release recoils the whole animal a step; one squash on the settle.
+	_pk(rig, "root", Vector3(0.04 * u * fling * (1.0 - settle), -0.045 * u * down, 0))
+	var squash := _pulse(t, 0.86, 0.06)
+	_sk(rig, "body", Vector3(1.0 + 0.05 * squash, 1.0 - 0.08 * squash, 1.0))
+
+
+static func _bear_press(rig: Dictionary, t: float, u: float) -> void:
+	## THE PRESS (Lemon, 2026-08-29). Up onto the hind legs — but this one is
+	## not reading the air, it is choosing you: it bends over at the top,
+	## brings the whole front end down ON the player, leans there biting,
+	## then drives forward to shove them flat and steps off to the side.
+	## Critter._press_tick holds the player under the chest and lands the
+	## bites on the jaw pulses below.
+	var rise := _ease_out(_seg(t, 0.0, 0.26))           ## up it goes
+	var bend := _ease_io(_seg(t, 0.26, 0.44))           ## and folds over you
+	var shove := _snap(_seg(t, 0.74, 0.84))             ## the push-down
+	var off := _ease_io(_seg(t, 0.84, 1.0))             ## back to all fours
+	var up := rise * (1.0 - off)
+	## Body: full rear, then pitch back down over the target while STAYING
+	## tall — bent over you, not standing over you. The shove drives it
+	## forward and down straight through where you were standing.
+	_rk(rig, "body", 1.15 * up - 0.72 * bend * up - 0.28 * shove * (1.0 - off))
+	_pk(rig, "body", Vector3(0,
+		(0.28 * up - 0.10 * bend * up) * u,
+		(0.13 * up - 0.34 * bend * up - 0.16 * shove * (1.0 - off)) * u))
+	## The lean BREATHES: its weight settles onto you in slow pushes.
+	var lean_hold := _seg(t, 0.44, 0.74)
+	var breathe_w := sin(lean_hold * TAU * 1.6) * bend * (1.0 - shove)
+	_pk(rig, "root", Vector3(0,
+		(-0.03 * breathe_w - 0.05 * shove * (1.0 - off)) * u, 0))
+	## Head and neck: craned down at the thing under it, working at it.
+	_rk(rig, "neck", 0.30 * up - 0.88 * bend * up - 0.20 * shove)
+	_rk(rig, "head", 0.18 * up - 0.46 * bend * up + 0.10 * breathe_w,
+		0.24 * sin(lean_hold * TAU * 2.3) * bend)
+	## Two bites while leaning (the brain's damage ticks land on these), and
+	## the jaw hangs half-open through the lean — it is TALKING to you.
+	var bite := _pulse(t, 0.48, 0.05) + _pulse(t, 0.64, 0.05)
+	_jaw_open(rig, 0.30 * bend + 0.85 * bite + 0.35 * shove * (1.0 - off))
+	_ears(rig, 0.95 * up)
+	## Front hips: the full bear_stand arc on the way up, then they come
+	## FORWARD with the bend — the paws land on the player, press with the
+	## breathing weight, and punch down with the shove.
+	var reach := bend * up
+	for i in 2:
+		var side := -1.0 if i == 0 else 1.0
+		_pi(rig, "legs", i, Vector3(0,
+			(0.63 * 0.95 * up - 0.38 * reach) * u,
+			(0.30 * 0.69 * up - 0.22 * reach) * u))
+		_ri(rig, "legs", i,
+			-1.05 * up + 1.55 * reach + 0.10 * breathe_w + 0.30 * shove,
+			0.0, side * (0.14 * up - 0.06 * reach))
+		_ri(rig, "knees", i, -0.48 * up + 0.10 * reach - 0.22 * shove)
+	## Hind legs straighten under the whole show, exactly like the stand.
+	for i in range(2, 4):
+		_pi(rig, "legs", i, Vector3(0, 0.07 * u * up, -0.05 * u * up))
+		_ri(rig, "legs", i, 0.52 * up)
+		_ri(rig, "knees", i, -0.30 * up)
+	## Coming off: one heavy landing squash as the front feet take ground.
+	var squash := _pulse(t, 0.90, 0.06)
+	_sk(rig, "body", Vector3(1.0 + 0.07 * squash, 1.0 - 0.11 * squash, 1.0))
 
 
 static func _log_rip(rig: Dictionary, t: float, u: float) -> void:

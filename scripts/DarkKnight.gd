@@ -13,6 +13,7 @@ func _init() -> void:
 	mass = 140.0
 	skin_tile = "cloth"
 	display_name = "Dark Knight"
+	monster = true           ## cave dweller — hunts you on Peaceful too
 	max_health = 165.0       ## armored champion — soaks a lot of hits
 	wander_speed = 1.2
 	chase_speed = 4.2

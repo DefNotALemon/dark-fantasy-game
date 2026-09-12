@@ -81,6 +81,16 @@ var state: int = State.CALM
 var foe: Node3D = null       ## INFIGHTING: a live grudge against another
 							 ## creature overrides the player as the target
 var dying := false
+## --- Game mode (GameMode.gd) ---------------------------------------------
+## `monster` is what separates a MONSTER from an animal: a monster hunts you
+## because that is what it is, so Peaceful leaves it alone — a cave that
+## cannot hurt you is just a room. Set true in Goblin / Kobold / Orc / Ogre /
+## Skeleton / DarkKnight. Everything else — boars, horses, all 73 dex
+## entries — is an animal, and on Peaceful an animal never starts it.
+@export var monster := false
+## Struck by the player, ever. Peaceful lets a provoked animal be a real
+## animal again for the rest of its life: hit the bear, and the bear is a bear.
+var provoked := false
 var confused := false   ## menu-spawned mobs: wander in lost circles, never
 						## aggro on proximity — snaps out of it when hit
 
@@ -372,7 +382,8 @@ func _physics_process(delta: float) -> void:
 			if mp:
 				var mto := mp.global_position - global_position
 				mto.y = 0.0
-				if mto.length() <= attack_range + 0.4 and mp.has_method("take_damage") and _can_hit(mp):
+				if mto.length() <= attack_range + 0.4 and mp.has_method("take_damage") and _can_hit(mp) \
+						and not _target_down(mp):
 					mp.take_damage(attack_damage, global_position, false, Vector3.INF, self)
 				## The swing doesn't care whose ribs it finds: any OTHER
 				## creature in the arc catches it too — and grudges are born
@@ -436,7 +447,12 @@ func _physics_process(delta: float) -> void:
 		var proned: bool = "prone" in player and bool(player.get("prone"))
 		var crouched: bool = "crouching" in player and bool(player.get("crouching"))
 		eff_aggro = aggro_radius * (0.22 if proned else (0.35 if crouched else 0.6))
-	if state == State.CALM and player and dist < eff_aggro and not confused and _can_see(player):
+	## THE MODE GATE (GameMode.gd). On Peaceful a cave dweller notices you
+	## late, and an animal that has never felt your blade is never allowed to
+	## start it at all — it can watch you all day, it just cannot commit.
+	eff_aggro *= GameMode.aggro_mult(self)
+	if state == State.CALM and player and dist < eff_aggro and not confused and _can_see(player) \
+			and GameMode.may_engage(self, player):
 		_set_agitated(true)
 	elif state == State.AGITATED and (player == null or dist > leash_radius):
 		_set_agitated(false)
@@ -544,6 +560,16 @@ func _set_agitated(on: bool) -> void:
 		climbing = false  ## calm creatures come back down to earth
 		_set_telegraph_glow(false)
 		_pick_wander()
+
+
+func peace_settle() -> void:
+	## Peaceful has just been switched on and this creature has no quarrel
+	## with you (GameMode.settle picks who): it stops, mid-stride, where it
+	## stands. A grudge against ANOTHER creature survives untouched — that
+	## fight was never yours to call off.
+	if dying or foe != null:
+		return
+	_set_agitated(false)
 
 
 static func _swing_arc(p: float, chamber: float, through: float) -> float:
@@ -838,7 +864,9 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 		strong_rehit = maxf(0.0, strong_rehit - delta)
 		velocity.x = strong_dir.x * strong_speed
 		velocity.z = strong_dir.z * strong_speed
-		if dist <= strong_hit_range and strong_hits_done < strong_multi_hits and strong_rehit <= 0.0 and _can_hit(player):
+		_face(strong_dir, delta, 7.0)  ## the nose follows the line of the charge (and the veer)
+		if dist <= strong_hit_range and strong_hits_done < strong_multi_hits and strong_rehit <= 0.0 \
+				and _can_hit(player) and not _target_down(player):
 			strong_hits_done += 1
 			strong_rehit = strong_hit_interval
 			if player.has_method("take_damage"):
@@ -852,6 +880,13 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 						## Shoved to the side; the mob keeps its momentum and barrels PAST.
 						throw = Vector3(-strong_dir.z, 0.0, strong_dir.x) * _throw_side * strong_throw_power
 						strong_time = maxf(strong_time, strong_runpast)  ## keep running past after the hit
+						## VEER (Lemon, 2026-08-29): bend the rest of the run
+						## OFF the player's capsule, opposite the side they
+						## were flung, so the charge visibly carries THROUGH
+						## and away instead of grinding to a stop against the
+						## body it just hit.
+						strong_dir = (strong_dir + Vector3(-strong_dir.z, 0.0, strong_dir.x) \
+							* (-_throw_side) * 0.30).normalized()
 				player.take_damage(strong_damage, global_position, strong_breaks_guard, throw, self)
 		if strong_time <= 0.0:
 			strong_active = false
@@ -868,7 +903,8 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 	## IS their strike, and between passes they just keep circling.
 	if dist > attack_range or always_moving:
 		was_in_melee = false
-		if strong_cd <= 0.0 and dist >= strong_min_range and dist <= strong_max_range:
+		if strong_cd <= 0.0 and dist >= strong_min_range and dist <= strong_max_range \
+				and not _target_down(player):
 			_start_strong(dist)
 		elif duelist and dist <= duel_range:
 			## Duel: CIRCLE the player (orbit at a steady radius), leaning slightly
@@ -907,7 +943,7 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 		else:
 			_steer(dir * chase_speed, delta, 14.0)
 	else:
-		if strong_from_melee and strong_cd <= 0.0:
+		if strong_from_melee and strong_cd <= 0.0 and not _target_down(player):
 			_start_strong(dist)
 			return
 		if not was_in_melee:
@@ -920,6 +956,10 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 			_shuffle_around(delta, dir, dist)
 		else:
 			_steer(Vector3.ZERO, delta, 18.0)
+		if _target_down(player):
+			## They are DOWN. Hold the swing and keep jockeying — the fight
+			## resumes when they find their feet, not a frame before.
+			attack_cd = maxf(attack_cd, 0.35)
 		if attack_cd <= 0.0 and melee_anim <= 0.0:
 			attack_cd = attack_cooldown
 			melee_anim = MELEE_ANIM_TIME  ## start the swing; damage lands mid-animation
@@ -1077,6 +1117,12 @@ func _shuffle_around(delta: float, dir: Vector3, dist: float) -> void:
 
 
 func _get_player() -> Node3D:
+	## SPECTATOR MODE (scripts/EditorMode.gd): while the map editor's camera is
+	## out, the body is parked and the world is not allowed to see it. This one
+	## return covers all nine mobs AND all 73 wildlife species, because Critter
+	## extends Enemy and every hunt, flee, charge and grudge reads through here.
+	if EditorMode.active:
+		return null
 	var players := get_tree().get_nodes_in_group("player")
 	if players.size() > 0 and players[0] is Node3D:
 		return players[0]
@@ -1120,11 +1166,31 @@ func _can_hit(target: Node3D) -> bool:
 	return _can_see(target)
 
 
+func _target_down(t: Node3D) -> bool:
+	## MERCY RULE (Lemon, 2026-08-29): a body already on the ground is not a
+	## target. Nothing lines up a NEW attack on a downed player (or a
+	## ragdolled creature) — they break off, keep circling, and the fight
+	## resumes when it finds its feet. The rise counts as down, so the first
+	## swing after a knockdown is never instant.
+	if t == null:
+		return false
+	if "kd_phase" in t:
+		return String(t.get("kd_phase")) != ""
+	return "knocked" in t and bool(t.get("knocked"))
+
+
 func take_damage(amount: float, _from_pos = null, _strong = false, _throw = null, attacker: Node = null) -> void:
 	## (Extra args let the same call shape that hits the Player hit a creature
 	## — a mob whose target became another mob reuses its attack code as-is.)
 	if dying:
 		return
+	## WHO STARTED IT (Peaceful). A blow from another creature is the grudge
+	## below and never counts against you. A blow with NO attacker behind it
+	## is the player's signature — the sword, the axe and the pick all call
+	## take_damage bare — so this creature has earned the right to fight back
+	## for the rest of its life, in any mode.
+	if attacker == null or (attacker is Node and (attacker as Node).is_in_group("player")):
+		provoked = true
 	## INFIGHTING: struck by another creature — the grudge is MUTUAL. Both
 	## drop whatever they were doing and go for each other's throats.
 	if attacker is Enemy and attacker != self:
