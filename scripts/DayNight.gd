@@ -15,6 +15,13 @@ const DAY_SECONDS := 1200.0     ## 20 real minutes per 24 game hours
 ## was the signature dusk; with the arc pinned to dawn/nightfall above, 19.7 is
 ## where that light lives now. One number — put it back if you miss it.)
 const START_HOUR := 19.7
+## Which day of the 96-day year a fresh world opens on. This is NOT cosmetic:
+## foliage.gdshader defoliates by season_phase, and phase 0 is the FIRST day of
+## spring — before the flush — so a world booted on day 0 stands every maple,
+## birch and oak bare until game-day ~15, and only the evergreens keep a crown.
+## 30 is mid-summer (phase 0.3125), which is also what Wind.gd declares as the
+## global's default. Set to 0.0 for a bare-branch spring start.
+const START_DAY := 30.0
 const DAWN_HOUR := 6.0
 const NIGHTFALL_HOUR := 20.6
 
@@ -25,7 +32,7 @@ var title_cb: Callable                  ## World's title hook (skips underground
 var hour := START_HOUR
 ## Days since the world began. One season is 24 of these, one year 96
 ## (Wind.DAYS_PER_SEASON) — this is what makes autumn ever arrive.
-var day := 0.0
+var day := START_DAY
 ## How fast the clock runs. 1.0 is the authored 20-minute day; 0.0 freezes the
 ## sun where it stands. The sky menu (' key) drives this — nothing else should.
 var time_scale := 1.0
@@ -36,6 +43,7 @@ var moon: DirectionalLight3D
 ## Environment toward these when the player is above ground.
 var surf_ambient := 0.45
 var surf_fog := Color(0.42, 0.48, 0.46)
+var sky_horizon := Color(0.40, 0.42, 0.40)   ## [water] what the lakes reflect
 
 ## Keyframes around the clock, blended smoothly (the table wraps past midnight):
 ## [hour, sky_top, sky_horizon, ambient, fog_color, sun_energy, sun_color, moon_energy]
@@ -125,6 +133,7 @@ func _apply() -> void:
 		sky_mat.ground_bottom_color = Color(0.05, 0.06, 0.055)
 	surf_ambient = float(s[3])
 	surf_fog = s[4] as Color
+	sky_horizon = s[2] as Color
 
 	## Sun + moon ride one great wheel: 06:00 sunrise, 12:00 overhead, the moon
 	## always directly opposite. The procedural sky draws the sun disc for free.

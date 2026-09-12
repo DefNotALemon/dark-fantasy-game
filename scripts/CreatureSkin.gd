@@ -532,6 +532,7 @@ func _gather_globals() -> void:
 		_g.resize(bone_nodes.size())
 		_g[0] = Transform3D.IDENTITY
 	for i in range(1, bone_nodes.size()):
+
 		var n := bone_nodes[i] as Node3D
 		if n == null or not is_instance_valid(n):
 			_g[i] = _rest_global[i]

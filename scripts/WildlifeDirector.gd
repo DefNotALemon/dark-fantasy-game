@@ -72,6 +72,28 @@ func _ready() -> void:
 	_tele = Telegraph.get_bus(self)
 
 
+## ================================= Sky ====================================
+
+
+func _wx() -> Dictionary:
+	## [weather] The ONE place this Director asks what the sky is doing.
+	## World owns the Weather node; a world that has none — the headless
+	## suites, the old build, a test harness — gets an empty dictionary back,
+	## which Weatherwise reads as a clear day. So wildlife without weather
+	## behaves exactly as it did before this existed.
+	var w := get_parent()
+	if w == null or not w.has_method("weather"):
+		return {}
+	var wx = w.call("weather")
+	if wx == null or not is_instance_valid(wx):
+		return {}
+	## `level` is where the sky is HEADED and `_from` is where it came from —
+	## Weather.gd's own vocabulary. The gap between them is the front, and the
+	## front is what stirs the big herbivores before the rain lands.
+	return Weatherwise.env(int(wx.level), int(wx.get("_from")),
+		float(wx.get("_blend")), _hour)
+
+
 ## ================================ Clock ===================================
 
 
@@ -83,9 +105,12 @@ func set_clock(hour: float, day: float) -> void:
 	if s != _last_season:
 		_last_season = s
 		_on_season_turn(s)
+	var wx := _wx()
 	for c in live:
 		if is_instance_valid(c):
 			c.set_clock(_hour, _phase)
+			## [weather] ...and how badly it wants to be under something.
+			c.weather_cover = Weatherwise.cover_urge(c.species, wx)
 	for sw in swarms:
 		if is_instance_valid(sw):
 			sw.set_visible_for(_hour, _phase)
@@ -138,6 +163,11 @@ func _process(delta: float) -> void:
 	_maybe_big_night()
 	## The player's own noise goes on the wire — crashing through the brush
 	## empties the woods ahead of you, and that IS the stealth mechanic.
+	## [weather] The bus carries the sky, so that both halves of the alarm
+	## network — the player's own noise going out, and the relay carrying the
+	## word on — know what the weather is doing to hearing.
+	if _tele != null and is_instance_valid(_tele):
+		_tele.weather = _wx()
 	if _tele != null and is_instance_valid(_tele) and player.has_method("get") :
 		var v = player.get("velocity")
 		if v is Vector3:
@@ -170,14 +200,43 @@ func _cull() -> void:
 ## =============================== Spawning =================================
 
 
+## [water] The map's own regions, when the Overworld is up. The dex zones
+## are map v1's ten plus the habitats; the bake's region names are Maine's.
+const REGION_ZONE := {
+	"MOOSEHEAD": "moosehead", "KATAHDIN": "katahdin", "BAXTER STATE PARK": "katahdin",
+	"100-MILE WILDERNESS": "katahdin", "AROOSTOOK": "county", "ALLAGASH": "county",
+	"MAHOOSUCS": "western_peaks", "RANGELEY LAKES": "western_peaks", "BIGELOW RANGE": "western_peaks",
+	"CASCO BAY": "beacon_coast", "MIDCOAST": "beacon_coast", "PENOBSCOT BAY": "beacon_coast",
+	"DOWN EAST": "dawnwatch", "ACADIA": "dawnwatch", "GULF OF MAINE": "gulf",
+	"KENNEBEC R.": "kennebec_seat", "ANDROSCOGGIN R.": "freeport_road", "PENOBSCOT R.": "bangor_gate",
+}
+const WATER_ZONE_R := 36.0        ## this close to water, the water's zone wins
+
+
 func _zone_at(pos: Vector3) -> String:
-	## Placeholder zoning until the painted map becomes data. Radial rings,
-	## plus wet ground wherever the world says there is water.
+	## With the overworld: the water first (a loon is a lake thing wherever
+	## the lake is), then the bake's named region, then the woods by their
+	## density. Without it: the old radial rings around the valley.
+	if Overworld.inst != null and Overworld.inst._loaded:
+		var nw: Dictionary = Overworld.nearest_water(pos, WATER_ZONE_R)
+		if float(nw.get("dist", INF)) <= WATER_ZONE_R:
+			if bool(nw.get("sea", false)):
+				return "gulf" if Overworld.is_water_at(pos) else "beacon_coast"
+			return "lake"
+		var rn: String = Overworld.inst.region_name_at(pos)
+		if REGION_ZONE.has(rn):
+			return String(REGION_ZONE[rn])
+		var w: float = Overworld.inst._plantable(pos.x, pos.z)
+		return "deep_woods" if w > 0.45 else "field"
 	var u := clampf(pos.length() / maxf(world_radius, 1.0), 0.0, 1.0)
 	for r in ZONE_RINGS:
 		if u >= float(r["r0"]) and u < float(r["r1"]):
 			return String(r["zone"])
 	return "deep_woods"
+
+
+func _map_on() -> bool:
+	return Overworld.inst != null and Overworld.inst._loaded
 
 
 func _ground_at(pos: Vector3) -> Vector3:
@@ -197,7 +256,9 @@ func _spawn_point() -> Vector3:
 		var ang := _rng.randf() * TAU
 		var rad := _rng.randf_range(SPAWN_RING.x, SPAWN_RING.y)
 		var p: Vector3 = player.global_position + Vector3(cos(ang) * rad, 0, sin(ang) * rad)
-		if p.length() > world_radius * 0.98:
+		if not _map_on() and p.length() > world_radius * 0.98:
+			continue   ## [water] the whole map is fair game once it exists
+		if _map_on() and not Overworld.in_bounds(p):
 			continue
 		## Behind the player is better than in front of them.
 		if player.has_method("get"):
@@ -237,6 +298,7 @@ func _roll_species(zone: String) -> String:
 	var cands := CritterDex.species_for_zone(zone)
 	if cands.is_empty():
 		return ""
+	var wx := _wx()
 	var pool: Array = []
 	var total := 0.0
 	for e in cands:
@@ -261,6 +323,15 @@ func _roll_species(zone: String) -> String:
 		if CritterDex.flag(k, "dusk", false):
 			var dusk := (_hour >= 18.6 and _hour < 21.2) or (_hour >= 4.6 and _hour < 7.4)
 			w *= 1.8 if dusk else 0.45
+		## [weather] What the SKY does to this animal — the same shape as the
+		## dusk term directly above it, and deliberately in the same place: an
+		## OFFSET through the multiplier chain that was already here, never a
+		## replacement for the roll. It is also the only gate that can return
+		## zero, which is how `rain_only` finally means something: the Red Eft
+		## is not rare on a dry day, it is absent.
+		w *= Weatherwise.out_mult(k, wx)
+		if w <= 0.0:
+			continue
 		pool.append({"key": k, "w": w})
 		total += w
 	if pool.is_empty() or total <= 0.0:
@@ -274,15 +345,57 @@ func _roll_species(zone: String) -> String:
 
 
 func _has_water_near() -> bool:
-	## The blockout has no lakes yet. When it does, point this at them; until
-	## then beavers and loons are placed by the hand-seed pass below rather
-	## than rolled, so they never end up grazing a dry hillside.
+	## [water] the map's lakes and the Gulf, else the old "water" group.
+	if _map_on() and player != null:
+		return float(Overworld.nearest_water(player.global_position, 60.0).get("dist", INF)) < 60.0
 	return not get_tree().get_nodes_in_group("water").is_empty()
+
+
+## [water] A water animal spawns IN water: a turtle or a fish on the bed of
+## the shallows (a snapper wants 0.4-1.6 m so it can lie under a swimmer),
+## a loon on the surface, an otter or a moose on the shore. Returns INF when
+## there is no such spot within reach of `at`.
+func _water_spot(key: String, at: Vector3) -> Vector3:
+	var rigf := String(CritterDex.DEX[key].get("rig", "")) if CritterDex.DEX.has(key) else ""
+	var ambusher: bool = bool(CritterDex.flag(key, "ambush", false))
+	var best := Vector3.INF
+	## rings out from `at`, a random start angle per ring: the shallows a
+	## snapper wants are a strip a few metres wide along the shore, and a
+	## handful of random throws into a 26 m disc missed it one time in six
+	var a0 := _rng.randf() * TAU
+	for ri in range(9):
+		var rad := 1.5 + 3.0 * float(ri)
+		for k in range(12):
+			var ang := a0 + TAU * float(k) / 12.0 + float(ri) * 0.3
+			var p := at + Vector3(cos(ang) * rad, 0.0, sin(ang) * rad)
+			var dep := Overworld.water_depth_at(p)
+			if rigf == "HERP" or rigf == "FISH":
+				var lo := 0.4 if ambusher else 0.3
+				var hi := 2.2 if ambusher else 6.0
+				if dep < lo or dep > hi:
+					continue
+				return Vector3(p.x, Overworld.ground_y(p) + 0.12, p.z)
+			elif rigf == "BIRD_WATER":
+				if dep < 0.6:
+					continue
+				return Vector3(p.x, Overworld.water_y(p) + 0.05, p.z)
+			else:
+				## the shore: dry ground within a few metres of the water
+				if dep > 0.0:
+					continue
+				if float(Overworld.nearest_water(p, 8.0).get("dist", INF)) > 8.0:
+					continue
+				return _ground_at(p)
+	return best
 
 
 func _place(key: String, at: Vector3, zone: String) -> Critter:
 	if at == Vector3.INF:
 		return null
+	if _map_on() and bool(CritterDex.flag(key, "water", false)):
+		at = _water_spot(key, at)   ## [water]
+		if at == Vector3.INF:
+			return null
 	var c := Critter.make(key)
 	c._zone = zone
 	get_parent().add_child(c)
@@ -329,6 +442,7 @@ func _try_swarm() -> void:
 	if at == Vector3.INF:
 		return
 	var zone := _zone_at(at)
+	var wx := _wx()
 	var pool: Array = []
 	for e in CritterDex.species_for_zone(zone):
 		var k := String(e["key"])
@@ -337,6 +451,13 @@ func _try_swarm() -> void:
 		if CritterDex.flag(k, "audio_only", false):
 			continue
 		if not CritterDex.is_awake(k, _hour, _phase):
+			continue
+		## [weather] Swarms come through their OWN door and their own budget,
+		## so the weight term above cannot reach them and this is the second
+		## call site rather than a duplicate of the first. Rain knocks insects
+		## out of the air: in a full storm the blackflies are simply gone,
+		## which is the only relief from them in this game that is not smoke.
+		if _rng.randf() > Weatherwise.out_mult(k, wx):
 			continue
 		pool.append(k)
 	if pool.is_empty():
@@ -447,6 +568,12 @@ func _legend_check() -> void:
 
 
 func _legend_gate(key: String, condition: bool, chance: float, at_range: float) -> void:
+	## [weather] `fog_only` is the project's other never-read weather flag, and
+	## this is where it finally decides something: the Specter Moose wants the
+	## soft grey band, not a clear night and not the inside of a thunderstorm.
+	## Folded into `condition` rather than bolted on, so the retirement branch
+	## below sends one home when the sky clears, exactly as it does at dawn.
+	condition = condition and Weatherwise.legend_allows(key, _wx())
 	var placed: Variant = legends_placed.get(key, null)
 	if placed != null and is_instance_valid(placed):
 		## Already out there. Retire it when the condition lapses so a specter

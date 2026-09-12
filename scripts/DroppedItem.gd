@@ -9,6 +9,12 @@ extends Node3D
 const REST_HEIGHT := 0.07    ## resting offset above the ground hit
 const TOSS_SPIN := 3.2       ## tumble rate while airborne
 const LIFE := 600.0          ## safety: fade out after 10 minutes on the floor
+## ...except for things you took OUT OF THE WORLD rather than out of your pack.
+## Timber is the case that matters: fell a tree, buck it into six logs, carry
+## two home and come back for the rest, and a ten-minute fuse means the wood is
+## gone. The CarryLogs this replaced never expired, and neither do these.
+## Set "keep": true on the item dict (FallenTrunk does it for every log).
+const KEEPS := {"Log": true, "Wood": true}
 
 var item := {}               ## {name, weight, count, slot [, material]}
 var velocity := Vector3.ZERO
@@ -33,11 +39,16 @@ func display_name() -> String:
 	return String(item.get("name", "item"))
 
 
+func _keeps() -> bool:
+	return bool(item.get("keep", false)) or KEEPS.has(String(item.get("name", "")))
+
+
 func _physics_process(delta: float) -> void:
-	_life -= delta
-	if _life <= 0.0:
-		queue_free()
-		return
+	if not _keeps():
+		_life -= delta
+		if _life <= 0.0:
+			queue_free()
+			return
 	if _resting:
 		## The world keeps moving under still things: floors get DUG out from
 		## beneath loot, and sleep-shifts redraw whole caves. Re-check the
@@ -271,8 +282,16 @@ func _build_rucksack() -> void:
 
 func _build_billet() -> void:
 	## A split of firewood: a stubby round with sawn faces, lying on its side.
-	var wood := Color(0.28, 0.19, 0.12).lerp(Color(0.34, 0.23, 0.14), randf())
-	_add_branch(0.40, 0.085, wood, Vector3(0, 0.085, 0), Vector3(90, 0, 0))
-	_add_branch(0.02, 0.085, Color(0.52, 0.39, 0.21), Vector3(0, 0.085, -0.20), Vector3(90, 0, 0))
-	_add_branch(0.02, 0.085, Color(0.52, 0.39, 0.21), Vector3(0, 0.085, 0.20), Vector3(90, 0, 0))
-	_add_branch(0.30, 0.055, wood, Vector3(0.11, 0.055, 0.03), Vector3(90, 12, 0))
+	## A LOG is the same thing at timber scale — it came off a trunk you felled,
+	## and it has to read as a piece of that trunk from across a clearing, not
+	## as another handful of kindling. One number, and no second mesh to keep
+	## in step. The bark colour follows the species when the trunk sent one.
+	var log_sized := String(item.get("name", "")) == "Log"
+	var k := 2.6 if log_sized else 1.0
+	var wood: Color = item.get("bark", Color(0.28, 0.19, 0.12).lerp(Color(0.34, 0.23, 0.14), randf()))
+	var heart := Color(0.52, 0.39, 0.21)
+	_add_branch(0.40 * k, 0.085 * k, wood, Vector3(0, 0.085 * k, 0), Vector3(90, 0, 0))
+	_add_branch(0.02, 0.085 * k, heart, Vector3(0, 0.085 * k, -0.20 * k), Vector3(90, 0, 0))
+	_add_branch(0.02, 0.085 * k, heart, Vector3(0, 0.085 * k, 0.20 * k), Vector3(90, 0, 0))
+	if not log_sized:
+		_add_branch(0.30, 0.055, wood, Vector3(0.11, 0.055, 0.03), Vector3(90, 12, 0))

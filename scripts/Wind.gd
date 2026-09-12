@@ -14,13 +14,16 @@ extends Node
 ## Wired up by World.gd:   add_child(Wind.new())
 ## ===========================================================================
 
-const BASE_MIN := 0.10          ## never fully still — dead air reads as a bug
-const BASE_MAX := 0.45
-const GUST_MAX := 0.55          ## added on top of base during a gust
+## Ghost-of-Tsushima rule: the wind in this world BLOWS, always. The base
+## never drops low enough for the canopy to sit still, and gusts roll through
+## often. Calm is a mood the game does not have.
+const BASE_MIN := 0.32          ## never fully still — dead air reads as a bug
+const BASE_MAX := 0.60
+const GUST_MAX := 0.50          ## added on top of base during a gust
 const STORM_MAX := 1.0
 
 const DIR_DRIFT := 0.06         ## radians/sec the prevailing direction wanders
-const GUST_PERIOD := Vector2(4.0, 11.0)   ## seconds between gust peaks
+const GUST_PERIOD := Vector2(2.6, 6.5)    ## seconds between gust peaks
 
 ## How hard the player has to be moving before foliage notices. Walking barely
 ## parts a branch; sprinting or swinging shoves it out of the way.
@@ -86,15 +89,19 @@ func _process(delta: float) -> void:
 	if _gust_t >= _gust_next:
 		_gust_t = 0.0
 		_gust_next = randf_range(GUST_PERIOD.x, GUST_PERIOD.y) * (1.0 - storm * 0.6)
-		_gust = randf_range(0.35, 1.0)
+		_gust = randf_range(0.55, 1.0)
 	var gust_env := 0.0
 	if _gust_next > 0.0:
 		var u := clampf(_gust_t / maxf(_gust_next * 0.55, 0.01), 0.0, 1.0)
 		gust_env = sin(u * PI) * _gust        ## rises, peaks, passes
 
-	var base := lerpf(BASE_MIN, BASE_MAX, 0.5 + 0.5 * sin(_t * 0.07))
+	## The base BREATHES on two detuned waves so the lulls between gusts still
+	## roll instead of flatlining — the canopy must never sit still.
+	var base := lerpf(BASE_MIN, BASE_MAX,
+		0.5 + 0.3 * sin(_t * 0.23) + 0.2 * sin(_t * 0.071 + 2.1))
 	var strength := base + gust_env * GUST_MAX
 	strength = lerpf(strength, STORM_MAX, storm * 0.8)
+	strength = minf(strength, 1.05)
 
 	## --- the player, for branch-parting ---
 	## World.gd builds the wind before the player is in the tree, so find them
@@ -131,8 +138,22 @@ static func phase_for_day(day: float) -> float:
 	return fposmod(day, DAYS_PER_YEAR) / DAYS_PER_YEAR
 
 
+## The last published phase, readable at RUNTIME.
+##
+## `RenderingServer.global_shader_parameter_GET()` is EDITOR-ONLY: in a running
+## game it returns null and logs "This function should never be used outside
+## the editor", so the global is write-only once you press play. Anything on
+## the game side that needs to know the season -- TreeImpostor, which shoots
+## the distant forest's photograph and must not shoot it in a bare spring --
+## reads this instead. -1.0 means nothing has published yet, which is NOT the
+## same as phase 0.0 (the first day of spring, where every deciduous tree is
+## held bare).
+static var phase := -1.0
+
+
 static func publish_season(day: float) -> void:
-	RenderingServer.global_shader_parameter_set("season_phase", phase_for_day(day))
+	phase = phase_for_day(day)
+	RenderingServer.global_shader_parameter_set("season_phase", phase)
 
 
 static func season_name(day: float) -> String:

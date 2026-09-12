@@ -14,6 +14,7 @@ func _init() -> void:
 	mass = 40.0
 	skin_tile = "bone"
 	display_name = "Skeleton"
+	monster = true           ## cave dweller — hunts you on Peaceful too
 	max_health = 60.0
 	wander_speed = 1.0
 	chase_speed = 3.4

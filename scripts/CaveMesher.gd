@@ -8,12 +8,12 @@ class_name CaveMesher
 
 const CHUNK := 16                ## cells per chunk side
 const PIX := 1.1                 ## color texel size (m) — the PIXELATED rock
-                                 ## texture: strata sampled on a coarse grid
-                                 ## with a per-cell value roll, so the walls
-                                 ## read as chunky pixel-art patches instead
-                                 ## of clean gradients. Geometry stays smooth
-                                 ## (edge-interpolated verts, no jitter) —
-                                 ## smooth to WALK, pixelated to LOOK AT.
+								 ## texture: strata sampled on a coarse grid
+								 ## with a per-cell value roll, so the walls
+								 ## read as chunky pixel-art patches instead
+								 ## of clean gradients. Geometry stays smooth
+								 ## (edge-interpolated verts, no jitter) —
+								 ## smooth to WALK, pixelated to LOOK AT.
 
 ## Palette (vertex colors; material uses them as albedo)
 const GRASS := Color(0.16, 0.24, 0.14)   ## matches the World ground slab

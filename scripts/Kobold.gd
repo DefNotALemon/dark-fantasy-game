@@ -12,6 +12,7 @@ func _init() -> void:
 	mass = 25.0
 	skin_tile = "scale"
 	display_name = "Kobold"
+	monster = true           ## cave dweller — hunts you on Peaceful too
 	max_health = 30.0        ## fragile fodder
 	wander_speed = 2.0
 	chase_speed = 4.6

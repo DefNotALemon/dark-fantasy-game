@@ -1,0 +1,78 @@
+{
+ "generator": "tools/watersounds.py",
+ "version": 1,
+ "seed": 20260901,
+ "sample_rate": 44100,
+ "sounds": {
+  "lake_lap": {
+   "file": "lake_lap.wav",
+   "seconds": 9.2,
+   "loop": true
+  },
+  "sea_surf": {
+   "file": "sea_surf.wav",
+   "seconds": 12.8,
+   "loop": true
+  },
+  "underwater_bed": {
+   "file": "underwater_bed.wav",
+   "seconds": 7.0,
+   "loop": true
+  },
+  "swim_stroke_1": {
+   "file": "swim_stroke_1.wav",
+   "seconds": 0.75,
+   "loop": false
+  },
+  "swim_stroke_2": {
+   "file": "swim_stroke_2.wav",
+   "seconds": 0.75,
+   "loop": false
+  },
+  "swim_stroke_3": {
+   "file": "swim_stroke_3.wav",
+   "seconds": 0.75,
+   "loop": false
+  },
+  "splash_in": {
+   "file": "splash_in.wav",
+   "seconds": 1.3,
+   "loop": false
+  },
+  "splash_out": {
+   "file": "splash_out.wav",
+   "seconds": 1.0,
+   "loop": false
+  },
+  "gulp": {
+   "file": "gulp.wav",
+   "seconds": 0.9,
+   "loop": false
+  },
+  "fill_skin": {
+   "file": "fill_skin.wav",
+   "seconds": 1.8,
+   "loop": false
+  },
+  "bubbles": {
+   "file": "bubbles.wav",
+   "seconds": 1.4,
+   "loop": false
+  },
+  "snapper_hiss": {
+   "file": "snapper_hiss.wav",
+   "seconds": 1.0,
+   "loop": false
+  },
+  "drowned_rise": {
+   "file": "drowned_rise.wav",
+   "seconds": 2.8,
+   "loop": false
+  },
+  "drowned_grip": {
+   "file": "drowned_grip.wav",
+   "seconds": 0.7,
+   "loop": false
+  }
+ }
+}

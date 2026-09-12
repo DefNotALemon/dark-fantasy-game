@@ -14,6 +14,7 @@ func _init() -> void:
 	mass = 420.0
 	skin_tile = "skin"
 	display_name = "Ogre"
+	monster = true           ## cave dweller — hunts you on Peaceful too
 	max_health = 210.0       ## a real damage sponge
 	wander_speed = 1.1
 	chase_speed = 3.0          ## slow to move

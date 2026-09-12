@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "next_id": 2,
+  "notes": [
+    {
+      "body": "make the bedroll not spawn on the ground",
+      "created": "2026-09-03 12:17:16",
+      "id": "note_0001",
+      "owner": "",
+      "pos": [
+        1.8,
+        0.0,
+        2.1
+      ],
+      "tag": "todo",
+      "title": "bedroll"
+    }
+  ],
+  "paths": [],
+  "saved": "2026-09-11T15:51:05",
+  "zones": []
+}

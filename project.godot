@@ -10,17 +10,26 @@ config_version=5
 
 [application]
 
-config/name="The Withering"
+config/name="Myrkfell"
 config/description="Gritty low-poly dark fantasy open-world survival RPG (prototype)."
 run/main_scene="res://scenes/World.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
+
+[autoload]
+
+_mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
+
 [rendering]
 
+limits/global_shader_variables/buffer_size=1048576
 environment/defaults/default_clear_color=Color(0.1, 0.12, 0.16, 1)

@@ -36,6 +36,15 @@ const BED_FADE := 3.5            ## seconds to cross-fade one bed into another
 const DISTANT_GAP := Vector2(11.0, 34.0)   ## seconds between far-off voices
 const CALL_MIN_GAP := 0.35       ## never stack two copies of the same voice
 
+## Birds are 24 of the 66 species in the dex and by far the chattiest — every
+## perch, raptor, waterbird and ground bird fires an idle call, so the bed ends
+## up being mostly beak. Trimmed at the one choke point every one-shot passes
+## through (Lemon 2026-08-30: "turn bird audio down"). Push it further toward
+## -20 to keep the illusion but hear the forest again; 0.0 restores the shouting.
+const BIRD_TRIM_DB := -9.0
+static var _bird_calls: Dictionary = {}   ## call key -> true
+static var _bird_calls_built := false
+
 ## Distance model. A loon carries; a chipmunk does not.
 const CARRY := {
 	"loon_wail": 260.0, "loon_yodel": 240.0, "loon_tremolo": 200.0,
@@ -151,7 +160,9 @@ func _stream(key: String) -> AudioStream:
 		if bool(info.get("loop", false)):
 			w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 			w.loop_begin = 0
-			w.loop_end = 0
+			## Same zero-length-loop bug as WaterAudio had: the ambience bed
+			## played exactly once per session. See FireAudio.wav_loop_end.
+			w.loop_end = FireAudio.wav_loop_end(w.get_length(), w.mix_rate)
 		else:
 			w.loop_mode = AudioStreamWAV.LOOP_DISABLED
 	_streams[key] = s
@@ -186,7 +197,7 @@ func _play(key: String, at: Vector3, vol_db: float) -> void:
 	v.stream = s
 	v.global_position = at
 	v.max_distance = float(CARRY.get(key, CARRY_DEFAULT))
-	v.volume_db = vol_db
+	v.volume_db = vol_db + (BIRD_TRIM_DB if is_bird_call(key) else 0.0)
 	v.pitch_scale = randf_range(0.94, 1.07)   ## no two individuals sound alike
 	v.play()
 
@@ -196,6 +207,24 @@ func _free_voice() -> AudioStreamPlayer3D:
 		if not v.playing:
 			return v
 	return null
+
+
+static func is_bird_call(key: String) -> bool:
+	## Which keys are birds is not a hand-written list — it is derived from the
+	## dex once, so a species added later is trimmed automatically. Every rig
+	## whose name starts with BIRD_ (RAPTOR / PERCH / WATER / GROUND) donates
+	## every call slot it owns.
+	if not _bird_calls_built:
+		_bird_calls_built = true
+		for k in CritterDex.keys():
+			if not CritterDex.rig_of(String(k)).begins_with("BIRD_"):
+				continue
+			var calls: Dictionary = CritterDex.get_profile(String(k)).get("call", {})
+			for slot in calls.keys():
+				var ck := String(calls[slot])
+				if ck != "":
+					_bird_calls[ck] = true
+	return _bird_calls.has(key)
 
 
 ## ============================ The distant ones ============================

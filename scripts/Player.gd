@@ -17,7 +17,8 @@ class_name Player
 ##                 climbed instead, hands planting, camera dipping into the
 ##                 pull; works mid-air too (grab as you fall), costs stamina
 ##   V ........... camera: FP -> third person (right shoulder); short press in
-##                 TP swaps shoulders; HOLD 1.5 s glides back to first person.
+##                 TP cycles right -> CENTRED -> left; HOLD 1.5 s glides back
+##                 to first person.
 ##                 Every switch animates; last setting is remembered
 ##   C ........... toggle CROUCH (from prone, C rises to the crouch)
 ##   X ........... toggle PRONE (from prone, X stands you all the way up).
@@ -31,7 +32,10 @@ class_name Player
 ##   Alt/Option .. sheathe / unsheathe sword (the shield stows/draws with it;
 ##                 THE HUNCH — settings toggle — auto-draws the moment anything
 ##                 turns hostile and auto-sheathes after 6.7 quiet seconds)
-##   M ........... mob spawn menu
+##   M ........... THE MAP — the whole of Maine, towns, peaks and lakes, with
+##                 you on it. Wheel zooms, right-drag pans; in GOD MODE a left
+##                 click anywhere on it travels you there
+##   K ........... mob spawn menu
 ##   G ........... CREATIVE menu (dev): every item in the game — swords /
 ##                 armor sets / ores for all 10 metals, plus the mundane kit
 ##   Tab ......... menu (1 Inventory / 2 Stats / 3 Progression / 4 Bestiary)
@@ -56,6 +60,14 @@ const DASH_SPEED := 16.0
 const DASH_TIME := 0.18
 const JUMP_VELOCITY := 4.5
 const STEP_HEIGHT := 0.45   ## auto-climb steps up to ~1/4 the player's height
+## --- wedged in the timber (Lemon 2026-09-01: "I walked into a fallen tree and
+## got stuck") --- how long you may ask to move, and get nowhere, before the
+## body shoves itself clear. See _unwedge.
+const UNSTICK_WINDOW := 0.7   ## seconds of asking
+const UNSTICK_MOVED := 0.09   ## metres in that window that still count as moving
+const UNSTICK_PROBE := 0.28   ## how far each of the 8 escape probes reaches
+const UNSTICK_PUSH := 3.4     ## m/s of shove out of the pocket
+const UNSTICK_HOP := 2.4      ## ...and up, because pockets have floors
 const MOUSE_SENS := 0.0025
 
 const SWING_TIME := 0.42
@@ -74,6 +86,37 @@ const COMMIT_REACH := 0.9        ## the step buys you this much extra range
 const COMMIT_LOW_HP := 0.30      ## at or under this, it also feeds the other tree
 const COMBO_RESET := 0.75    ## idle this long and the combo restarts at hit 1
 const SHEATH_TIME := 0.40
+
+## --- GOD MODE (scripts/GodEditor.gd -- F1) ---------------------------------
+## The map-authoring mode. `god` pins health/stamina/thirst/breath and refuses
+## every source of damage; `flying` is Minecraft flight (double-tap Space) with
+## collision parked; `god_speed` is the scroll wheel, and it multiplies walking
+## AND flying, so wheel-up is faster wherever you are and wheel-down comes back
+## down to 1.0 = the ordinary walk.
+const GOD_FLY_SPEED := 12.0    ## m/s at god_speed 1.0
+const GOD_FLY_BOOST := 3.2     ## Shift, while flying
+const GOD_SPEED_MIN := 0.35
+const GOD_SPEED_MAX := 24.0
+const GOD_DOUBLE_TAP_MS := 320
+var god := false
+var flying := false
+var god_speed := 1.0
+var godmode: GodEditor = null
+var pad: Node = null             ## the gamepad translator (scripts/Pad.gd)
+var _space_tap_ms := 0
+var _god_mask_saved := -1      ## collision_mask parked while noclipping
+
+## --- SPECTATOR MODE (scripts/EditorCam.gd) ---------------------------------
+## `editing` means the camera has LEFT THE BODY. The character stands where you
+## stepped out of them, collision_layer parked at 0 and EditorMode.active true,
+## so nothing in the world can see, reach or hunt them; the editor camera flies
+## on its own. Closing the editor puts you back in their head.
+## `god_sticky` is the panel's GOD toggle: it decides whether the body you go
+## BACK to is invulnerable. Spectating is invulnerable either way.
+var editing := false
+var god_sticky := false
+var _editor_cam_mode := ""     ## the view you were using before you stepped out
+var _god_layer_saved := -1     ## collision_layer parked while the body is out
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 
@@ -98,14 +141,23 @@ var pack_reach := 0.0   ## 0..1 — hands are IN the pack (inventory open)
 ## TAP Q over an item to lash it to the first free slot, HOLD Q to choose
 ## exactly which slot it rides in. Saved with the character. ---
 const WHEEL_SLOTS := 8
+const WHEEL_R_WORLD := 165.0   ## the world radial: big, pinned to the screen centre
+const WHEEL_R_PLACE := 92.0    ## the inventory slot-picker: compact, dropped at the cursor
 var wheel: Array[String] = ["Wooden Shield", "Torch", "Bedroll", "Health Potion",
 	"", "", "", ""]
 var wheel_open := false          ## world: held-Q radial is up (look is frozen)
 var wheel_place_open := false    ## inventory: held-Q slot picker is up
 var _wheel_vec := Vector2.ZERO   ## accumulated mouse drag while the wheel is up
 var _wheel_sel := -1
+var _wheel_origin := Vector2.ZERO ## screen point the ring is drawn AND measured around
+var _wheel_radius := WHEEL_R_WORLD
+var _wheel_slot_box := Vector2(150, 26)
+var _wheel_center_box := Vector2(240, 30)
+var _wheel_slot_font := 16
+var _wheel_center_font := 19
 var _q_held := false
 var _q_down_ms := 0
+var _q_down_mouse := Vector2.ZERO ## where the cursor sat the instant Q went down
 var _q_inv_idx := -1             ## the inventory row Q went down on
 var wheel_panel: Control
 var wheel_slot_labels: Array[Label] = []
@@ -218,9 +270,12 @@ var bob_t := 0.0             ## slow "breathing" sway of held items when standin
 var gait_phase := 0.0        ## radians through the walk cycle
 var gait_amount := 0.0       ## eased 0..1 — how deep into the walk we are
 var head_bob := Vector2.ZERO ## smoothed camera offset (x sway, y footfall dip)
+var _step_idx := -9999       ## [steps] which half-stride we are in; a change is a foot down
 var land_dip := 0.0          ## soft knee-bend of the view after landing
 var _was_on_floor := true
 var _fall_speed := 0.0       ## how hard we were falling just before touchdown
+var _fall_grace := false     ## F2 drop-in: the next landing is free
+var _fall_grace_hold := 0.0  ## ...and the frame you drop in cannot spend it early
 
 ## --- Fall damage: gravity keeps its receipts. Safe to ~6 m; past that the
 ## landing takes flesh, and a truly hard one folds your legs (knockdown). ---
@@ -248,6 +303,9 @@ var health_show := 0.0
 var stam_show := 0.0
 var xp_show := 0.0
 var combat_timer := 99.0      ## time since last combat action
+## What the last `Slumber.night()` returned, held between the blackout
+## starting and the player getting up. Empty when nobody is asleep.
+var _slept: Dictionary = {}
 var level := 1
 
 ## One row per gain-log entry: {label, kind, amount, life}. A single array —
@@ -257,7 +315,7 @@ var log_rows: Array[Dictionary] = []
 
 ## --- Menus (M = mob spawner; Tab = Inventory | Stats | Progression) ---
 const TAB_PANEL_SIZE := Vector2(840, 540)  ## every page shares this one size
-var menu_open := ""              ## "", "spawn", "tab"
+var menu_open := ""              ## "", "map", "spawn", "tab"
 var spawn_panel: PanelContainer
 var tab_panel: PanelContainer
 var tab_page := "inventory"      ## which page the Tab menu is showing
@@ -326,9 +384,40 @@ var pickup_prompt: Label                ## "[E] Pick up ..." hint, bottom-center
 var _drop_target: DroppedItem = null    ## the dropped item currently looked at
 var _bed_target: Node3D = null          ## the bedroll under the gaze (E = pack up)
 var _debris_target: RockDebris = null   ## a landed rock under the gaze (E = gather)
+var _fire_target: Firepit = null        ## a fire pit under the gaze (E = light / feed)
 var _log_target: CarryLog = null        ## a felled log under the gaze (E = shoulder it)
 
-## --- LOGS ON YOUR SHOULDER. A log is not an inventory item; it's a burden.
+## ------------------------- THE REACH-AND-GRAB -----------------------------
+## Taking something off the ground is an ACT now, not a teleport into the pack.
+## You drop into a crouch, the steel rides home, an OPEN HAND goes out to the
+## thing, the fist closes on it, and the arm carries it back over the shoulder
+## into the rucksack -- then the blade comes straight back out if it was out
+## when you reached, and otherwise the arm just falls back to your side.
+## LEFT CLICK does it as well as E, so long as the thing is inside GRAB_REACH;
+## past that left click is still a swing, and E still snaps it up the old way.
+const GRAB_REACH := 2.2          ## m from the waist -- an arm's length and a lean
+const GRAB_T_DOWN := 0.30        ## crouch, and the blade rides home
+const GRAB_T_OUT := 0.30         ## the open hand travels out to it
+const GRAB_T_HOLD := 0.12        ## fingers close
+const GRAB_T_BACK := 0.32        ## up and back over the shoulder, into the pack
+const GRAB_T_UP := 0.28          ## stand, and the steel comes back out
+const GRAB_ARM_OUT := 1.25       ## rotation.x at full reach (POSITIVE = forward)
+const GRAB_ARM_FLARE := 0.30     ## elbow flares off the ribs on the way out
+const GRAB_ARM_STOW := -2.05     ## hand up BEHIND the shoulder, at the pack flap
+var reach_phase := ""             ## "" | "down" | "out" | "hold" | "back" | "up"
+var reach_t := 0.0               ## seconds into the current phase
+var reach_node: Node3D = null     ## the thing being taken, still out in the world
+var reach_kind := ""              ## "item" | "debris" | "log"
+var reach_spot := Vector3.ZERO    ## where it lay -- put back if the pack refuses
+var reach_held := false           ## true once the fist has closed on it
+var reach_redraw := false         ## the sword was drawn when you reached
+var reach_was_crouch := false     ## the stance to come back up to
+var reach_was_prone := false
+var reach_out := 0.0        ## 0..1 -- arm out at the ground
+var reach_stow := 0.0         ## 0..1 -- arm back over the shoulder
+
+## --- LOGS. Retired 2026-08-30: a log IS an inventory item now, and the stuff
+## below is dead weight kept only so old saves and ~15 call sites still load.
 ## Look at one and press E to swing it up (four is all a back will take), and
 ## it rides there VISIBLY until something makes you let go. A shoulder is not
 ## a pocket: jump, climb, crouch, go prone, take a hit, or reach into your
@@ -372,12 +461,30 @@ const KD_RISE := 1.05            ## staggering back upright
 var kd_phase := ""               ## "" | "fall" | "down" | "rise"
 var kd_t := 0.0
 var kd_bounce := 0.0             ## ragdoll settle: the head bounces off the dirt and damps out
+## --- MANHANDLED (the bear, mostly) ---
+var grabbed_by: Node3D = null    ## a jaw has you: your body hangs off its grab_anchor()
+var grab_t := 0.0
+var pressed_by: Node3D = null    ## an animal's weight is on you: you can barely move
+var press_t := 0.0
 
 ## --- Settings (Esc) — applied live, saved to user://settings.cfg ---
 const SETTINGS_PATH := "user://settings.cfg"
+## The blurb under the World row, rewritten as you pick. Indexed by
+## GameMode.Mode — Peaceful, Normal, Hardcore.
+const MODE_NOTES: Array[String] = [
+	"Nothing starts a fight with you. The bear still rears up and huffs — it\njust never means it, unless you swing first. The caves still have things in\nthem: half the pack, noticing you late, every blow at 40%. Falls, fire and\nfalling timber still cost exactly what they cost. Wounds close three times faster.",
+	"The world as it was built. Everything that wants to kill you is allowed to\ntry, and every number is the one it was tuned to.",
+	"Normal, meaner — and you get one. Die and this save is SEALED: it can never\nbe loaded again, in this session or any other. New Run is the only way on, and\nit starts you with what you woke up with.",
+]
 var settings_panel: PanelContainer
 var creative_panel: PanelContainer   ## G — every item in the game, one click away
 var sky_panel: SkyMenu               ## ' — scrub the clock, force the weather
+## M — the map. Loaded by path, not by class_name: Player is the one script
+## MapPanel talks back to, and a name-level cycle between the two is exactly
+## the kind of thing that turns into a parse error on a cold open.
+const MapPanelScript := preload("res://scripts/MapPanel.gd")
+const PadScript := preload("res://scripts/Pad.gd")
+var map_panel: PanelContainer         ## M — the map of Maine
 var set_rt := false              ## "ray-traced" lighting preset (SDFGI et al.)
 var set_shadows := 1             ## 0 low / 1 medium / 2 high
 var set_fullscreen := false
@@ -387,7 +494,19 @@ var set_fov := 75.0
 var set_hunch := true            ## the hunch: auto draw on aggro / auto sheathe when calm
 var set_lefty := false           ## Main Hand: mirror the whole kit for southpaws
 var set_blood := true            ## Blood: off swaps red for a neutral impact puff
+var set_fall_dmg := false        ## Fall damage: OFF by default (Lemon, 2026-09-02).
+								 ## Gates the hard-landing knockdown too -- that
+								 ## was the half god mode did not already cover.
 var set_clouds := 1              ## Clouds: 0 off / 1 painterly / 2 volumetric
+var set_draw := 90.0             ## Draw Distance, m — how far the meadow reaches.
+								 ## The grass streams across 78 km² now, so this
+								 ## is the one number that decides what it costs:
+								 ## area squares, so 45 -> 90 m is 4x the tufts.
+								 ## GrassSystem.set_draw_distance() takes it.
+var set_gamemode := 1            ## World: 0 Peaceful / 1 Normal / 2 Hardcore (GameMode.gd)
+var gamemode_note: Label         ## the blurb under the World row, rewritten per mode
+var _newborn := {}               ## the sheet you woke up with, snapshotted at the end
+								 ## of _ready — Hardcore's "New Run" is this and nothing else
 var _settings_widgets := {}      ## id -> {btns: [[value, Button]...]} or {label: Label}
 var save_status: Label           ## "Last save: ..." line under the Save/Load row
 const MENU_SCALE := 1.67         ## all menus render 67% larger (clamped to the screen)
@@ -428,6 +547,9 @@ var sleep_phase := ""            ## "" | "lying" | "black" | "rising"
 ## shoulders; HOLD 1.5 s in TP = glide back into first person. Every switch
 ## animates (the arm lerps), walls pull the perch in, last setting persists. ---
 var cam_mode := "fp"             ## "fp" | "tp" (saved to settings)
+var cam_snap := 0.0              ## >0 right after entering TP: the perch glides
+								 ## out FAST so the lens never lingers at eye
+								 ## height, seeing from where the head should be
 
 ## --- SKELETON + RAGDOLL (CreatureSkin) ---
 ## The third-person body is baked into a Skeleton3D + one skinned PSX mesh
@@ -503,12 +625,19 @@ const AXE_HIT_AT := 0.52         ## damage lands AT the visual impact — which
 const AXE_STAMINA := 15.0
 const AXE_RANGE := 2.8
 const AXE_DMG_MULT := 1.35       ## × base_damage (STR rides along)
+## How far off the trunk's centreline the crosshair has to sit before the
+## wood gets to choose the shoulder. Inside this the tree reads as square-on
+## and the swing goes back to alternating. Metres, measured ACROSS the trunk.
+const AXE_SIDE_DEADZONE := 0.04
 ## Carried UPRIGHT like the sword; swings blend out of the vertical carry
 ## into arcs authored on the old forward-tilted base (see pickaxe note).
 const AXE_REST_POS := Vector3(0.34, -0.32, -0.48)
 const AXE_REST_ROT := Vector3(80.0, -10.0, 6.0)
-const AXE_BASE_POS := Vector3(0.34, -0.36, -0.50)    ## swing-arc origin (old rest)
-const AXE_BASE_ROT := Vector3(22.0, -16.0, 8.0)
+const AXE_BASE_POS := Vector3(0.34, -0.34, -0.50)    ## swing-arc origin (old rest)
+## Pitch here used to be 22 deg — the whole arc started nose-down, which is why
+## even a flat stroke read as a chop. A feller's cut is LEVEL: the haft stays
+## roughly parallel to the ground and the work is all in the hips.
+const AXE_BASE_ROT := Vector3(6.0, -16.0, 4.0)
 
 ## Two felling strokes, alternating, each with the sword's three beats:
 ## [chamber, impact, follow-through] as [rot_offset, pos_offset] from the base
@@ -517,22 +646,29 @@ const AXE_BASE_ROT := Vector3(22.0, -16.0, 8.0)
 ## THE HEAD LEADS THE HAND. That is the whole fix. The old arc yawed the axe
 ## one way while the hand travelled the other, so the head trailed BACKWARD
 ## through the sweep — hauled left, thrown right, edge dragging behind the
-## wrist the whole way. Read the numbers as a pair now: on the forehand, yaw
-## runs -54 -> -6 -> +46 (right, through centre, out to the left) while the
-## hand runs +0.20 -> +0.02 -> -0.20 (the same trip). Pitch drops 40 -> -12 ->
-## -30, so the head comes DOWN through the cut, and z drives to -0.30 at the
+## wrist the whole way. Read the numbers as a pair: on the forehand, yaw runs
+## -80 -> -4 -> +72 (right, through centre, out to the left) while the hand
+## runs +0.30 -> +0.02 -> -0.30 (the same trip), and z drives to -0.32 at the
 ## impact so the whole thing travels AWAY from the camera where the swing
 ## should live. The backhand is the mirror.
+##
+## HORIZONTAL (Lemon 2026-09-01: "more from the side, like a horizontal
+## swing"). Pitch used to run 40 -> -12 -> -30 and the hand fell 0.12 -> -0.16:
+## a felling chop, driven down. It is now nearly LEVEL — pitch 12 -> -4 -> -10,
+## hand 0.03 -> -0.02 -> -0.03 — so the head travels flat across the cut at the
+## height you are aiming at, and everything that used to be vertical travel has
+## gone into a WIDER lateral sweep instead. The wedge in the trunk is a
+## horizontal V; the stroke that makes it should be too.
 const AXE_KEYS := [
-	[  ## forehand: hauled over the RIGHT shoulder, swept down across to the LEFT
-		[Vector3(40.0, -54.0, -18.0), Vector3(0.20, 0.12, 0.10)],
-		[Vector3(-12.0, -6.0, -6.0), Vector3(0.02, -0.06, -0.30)],
-		[Vector3(-30.0, 46.0, 16.0), Vector3(-0.20, -0.16, -0.10)],
+	[  ## forehand: coiled out to the RIGHT, whipped flat across to the LEFT
+		[Vector3(12.0, -80.0, -14.0), Vector3(0.30, 0.03, 0.12)],
+		[Vector3(-4.0, -4.0, -4.0), Vector3(0.02, -0.02, -0.32)],
+		[Vector3(-10.0, 72.0, 12.0), Vector3(-0.30, -0.03, -0.10)],
 	],
-	[  ## backhand: hauled over the LEFT shoulder, swept down across to the RIGHT
-		[Vector3(38.0, 56.0, 20.0), Vector3(-0.18, 0.12, 0.10)],
-		[Vector3(-12.0, 6.0, 6.0), Vector3(-0.02, -0.06, -0.30)],
-		[Vector3(-28.0, -48.0, -16.0), Vector3(0.22, -0.16, -0.10)],
+	[  ## backhand: coiled out to the LEFT, whipped flat across to the RIGHT
+		[Vector3(11.0, 82.0, 16.0), Vector3(-0.28, 0.03, 0.12)],
+		[Vector3(-4.0, 4.0, 4.0), Vector3(-0.02, -0.02, -0.32)],
+		[Vector3(-9.0, -74.0, -12.0), Vector3(0.32, -0.03, -0.10)],
 	],
 ]
 var axe_vm: Node3D               ## axe viewmodel (right hand + haft + head)
@@ -591,6 +727,17 @@ func _ready() -> void:
 	## Stick to stairs going down, so stepping off small ledges doesn't launch you.
 	floor_snap_length = STEP_HEIGHT
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	## THE CONTROLLER (scripts/Pad.gd). It posts the same key and mouse events
+	## the keyboard does, so there is still only one definition of every action;
+	## the sticks are the only thing it has to do for itself.
+	pad = PadScript.new()
+	pad.name = "Pad"
+	add_child(pad)
+	pad.player = self
+	## THE NEWBORN SNAPSHOT: exactly what you woke up with, taken before the
+	## world has had a chance to happen to you. Hardcore's "New Run" restores
+	## this dictionary and nothing else (see _on_new_run_pressed).
+	_newborn = save_state()
 
 
 func _box(parent: Node, size: Vector3, color: Color, pos: Vector3, rot := Vector3.ZERO, metal := false) -> MeshInstance3D:
@@ -971,6 +1118,9 @@ func _build_body() -> void:
 	camera = Camera3D.new()
 	cam_anim.add_child(camera)
 	camera.current = true
+	## [terrain] far plane: Katahdin is five kilometres out; the default
+	## 4000 m far plane clips the ranges off the horizon.
+	camera.far = 9000.0
 	camera.near = 0.02  ## tight near plane: hugging a cave wall can't poke
 						## the lens through it and show the void beyond
 
@@ -1109,6 +1259,19 @@ func _build_hud() -> void:
 	var sp := _make_bar(10.0, Color(0.85, 0.72, 0.28))   ## stamina (amber)
 	stamina_bar = sp[0]
 	stamina_fill = sp[1]
+	var th := _make_bar(6.0, Color(0.40, 0.66, 0.92))    ## [water] thirst (blue)
+	thirst_bar = th[0]
+	thirst_fill = th[1]
+	thirst_bar.modulate.a = 0.10
+	var wm := _make_bar(6.0, Color(0.92, 0.62, 0.34))    ## [exposure] warmth (amber)
+	warmth_bar = wm[0]
+	warmth_fill = wm[1]
+	warmth_bar.modulate.a = 0.10
+	var br := _make_bar(5.0, Color(0.75, 0.92, 1.0))     ## [water] breath (pale)
+	breath_bar = br[0]
+	breath_fill = br[1]
+	breath_bar.modulate.a = 0.0
+	breath_bar.visible = false
 	var hpp := _make_bar(16.0, Color(0.82, 0.16, 0.16))  ## health (red)
 	health_bar = hpp[0]
 	health_fill = hpp[1]
@@ -1172,12 +1335,24 @@ func _build_hud() -> void:
 	## hang it on the HUD and treat it like the other panels.
 	sky_panel = SkyMenu.new()
 	hud_layer.add_child(sky_panel)
+	## M — the map builds itself too (scripts/MapPanel.gd); it only needs to
+	## know whose arrow to draw and whose god flag to ask about.
+	map_panel = MapPanelScript.new()
+	hud_layer.add_child(map_panel)
+	map_panel.player = self
+	## The god editor builds itself too (scripts/GodEditor.gd) -- F1 opens it.
+	godmode = GodEditor.new()
+	hud_layer.add_child(godmode)
 	_build_wheel_ui()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if input_locked:
 		return  ## blackout / bed animation — even the eyes stay still
+	## SPECTATOR: mouse motion turns the CAMERA, not the parked body. Returning
+	## here matters -- without it your character spins on the spot while you fly.
+	if godmode != null and godmode.take_motion(event):
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if wheel_open:
 			## The wheel owns the mouse: the drag picks a slot, the world
@@ -1189,6 +1364,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		pitch = clampf(pitch - event.relative.y * MOUSE_SENS * set_sens, -1.4, 1.4)
 		head.rotation.x = pitch
 		_update_head_offset()
+
+
+func _pad_move() -> Vector3:
+	## The left stick, in the same shape the WASD blocks write. Zero when no
+	## pad is plugged in or nothing is being pushed.
+	if pad == null:
+		return Vector3.ZERO
+	return pad.move_vec()
 
 
 func _update_head_offset() -> void:
@@ -1214,6 +1397,8 @@ func _stance_settle_pulse() -> void:
 
 func _set_cam_mode(m: String) -> void:
 	cam_mode = m
+	if m == "tp":
+		cam_snap = 1.0   ## fast-glide the perch out — never look out of the skull
 	_add_log_msg("Camera: %s" % ("third person" if m == "tp" else "first person"), Color(0.8, 0.8, 0.8))
 	_save_settings()  ## "then it'll go by your last setting"
 
@@ -1232,7 +1417,13 @@ func _update_camera_arm(delta: float) -> void:
 	_update_head_offset()
 	var want := Vector3.ZERO
 	if cam_mode == "tp":
-		want = Vector3(0.55 * cam_shoulder, 0.32, 2.6)
+		## cam_shoulder is +1 right, -1 left, and 0 = CENTRED (Lemon
+		## 2026-08-30: "add the middle view to the third person camera").
+		## Dead centre puts your own back between the crosshair and the world,
+		## so the middle view sits a little higher and a little further out —
+		## you are looking OVER the character, not through him.
+		var centred: float = 1.0 - minf(absf(cam_shoulder), 1.0)
+		want = Vector3(0.55 * cam_shoulder, 0.32 + 0.14 * centred, 2.6 + 0.45 * centred)
 		var from := head.global_position
 		var to := head.to_global(want)
 		var space := get_world_3d().direct_space_state
@@ -1242,11 +1433,22 @@ func _update_camera_arm(delta: float) -> void:
 		if not hit.is_empty():
 			var full := from.distance_to(to)
 			want *= clampf((from.distance_to(hit.position as Vector3) - 0.22) / maxf(full, 0.001), 0.06, 1.0)
-	cam_arm.position = cam_arm.position.lerp(want, clampf(delta * 6.0, 0.0, 1.0))
+	## Entering third person snaps the perch out FAST (cam_snap): the lens must
+	## never hang at eye height showing the world from where the head should be.
+	cam_snap = maxf(0.0, cam_snap - delta * 3.0)
+	var glide := 34.0 if cam_snap > 0.0 else 6.0
+	cam_arm.position = cam_arm.position.lerp(want, clampf(delta * glide, 0.0, 1.0))
 	## The third-person HEAD only exists from outside (in FP the camera sits
 	## inside it), and it tips subtly to follow your gaze up and down.
 	if tp_head:
-		tp_head.visible = cam_mode == "tp"
+		## The head only exists from OUTSIDE — and only once the camera has
+		## actually GOT outside. While the lens is still gliding out of the
+		## skull (entering third person), or a wall has shoved the perch back
+		## into it, showing the head means looking at the world from behind
+		## the inside of your own face. Gate it on real camera distance.
+		var cam_out := camera.global_position.distance_to(head.global_position) \
+			if camera else 0.0
+		tp_head.visible = cam_mode == "tp" and cam_out > 0.85
 		tp_head.rotation.x = pitch * 0.45
 	## Third person hides the floating first-person hands — the body itself
 	## performs: head, both arms, and body-held twins of every weapon (sword /
@@ -1263,11 +1465,36 @@ func _update_camera_arm(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if input_locked:
 		return  ## nothing gets through a blackout
+	## GOD MODE gets first refusal on every event while its panel is up, so
+	## the editor and the game can never both act on one click or one key.
+	## GodEditor.eat_input returns true when it has taken the event.
+	if godmode != null and godmode.eat_input(event):
+		return
+	if god and menu_open == "" and event is InputEventMouseButton \
+			and (godmode == null or not godmode.visible):
+		## The wheel is the speed dial even with the panel closed -- but not
+		## while a menu owns the cursor, or it fights the map's zoom.
+		var gmb := event as InputEventMouseButton
+		if gmb.pressed and gmb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			god_speed = clampf(god_speed * 1.22, GOD_SPEED_MIN, GOD_SPEED_MAX)
+			return
+		if gmb.pressed and gmb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			god_speed = clampf(god_speed / 1.22, GOD_SPEED_MIN, GOD_SPEED_MAX)
+			if absf(god_speed - 1.0) < 0.06:
+				god_speed = 1.0
+			return
 	if event is InputEventMouseButton:
 		if kd_phase != "":
 			return  ## flat on the ground — no swinging, no drawing, nothing
 		if event.button_index == MOUSE_BUTTON_LEFT and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 			if event.pressed:
+				if reach_phase != "":
+					return          ## the hand is already out -- let it finish
+				## LOOT BEFORE STEEL: something on the ground, under the gaze,
+				## inside arm's reach and nothing hunting you -- left click
+				## reaches for it instead of swinging at it.
+				if _try_grab(true):
+					return
 				if current_weapon == "bow":
 					_bow_start_draw()
 				elif current_weapon == "pickaxe":
@@ -1300,15 +1527,49 @@ func _input(event: InputEvent) -> void:
 				if cam_mode == "fp":
 					_set_cam_mode("tp")
 				else:
-					cam_shoulder = -cam_shoulder
-					_add_log_msg("Camera: %s shoulder" % ("right" if cam_shoulder > 0.0 else "left"), Color(0.8, 0.8, 0.8))
+					## right -> CENTRED -> left -> right
+					if cam_shoulder > 0.5:
+						cam_shoulder = 0.0
+					elif cam_shoulder < -0.5:
+						cam_shoulder = 1.0
+					else:
+						cam_shoulder = -1.0
+					_add_log_msg("Camera: %s" % _cam_side_name(), Color(0.8, 0.8, 0.8))
 					_save_settings()
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_CTRL:
 				if menu_open == "" and mount == null and kd_phase == "":  ## menus shouldn't leak dashes/jumps into the game
 					_try_dash()
+			KEY_F1:
+				## F1 IS GOD MODE. Opens the editor panel and turns god on.
+				_toggle_menu("god")
+			KEY_F2:
+				## F2 DROPS YOU IN. The body comes to wherever the spectator
+				## camera is floating, you land in it, and the editor closes
+				## into ordinary survival play. Only means anything while the
+				## editor is up -- GodEditor.eat_input takes it first unless
+				## the map is over the panel, which is why it also lives here.
+				if godmode != null and godmode.visible:
+					godmode.drop_in_here()
 			KEY_SPACE:
+				## GOD: double-tap Space toggles flight, Minecraft-style. While
+				## flying, Space is "up" and never a jump.
+				if god:
+					var tap := Time.get_ticks_msec()
+					if tap - _space_tap_ms < GOD_DOUBLE_TAP_MS:
+						flying = not flying
+						if not flying:
+							velocity = Vector3.ZERO
+						_space_tap_ms = 0
+						if godmode != null:
+							godmode._flag("fly", flying)
+						_add_log_msg("Flight %s" % ("on" if flying else "off"),
+							Color(0.62, 0.92, 1.0))
+					else:
+						_space_tap_ms = tap
+					if flying:
+						return
 				if menu_open == "" and kd_phase == "" and not climbing:
 					if mount != null:
 						mount.request_jump()
@@ -1322,6 +1583,9 @@ func _input(event: InputEvent) -> void:
 				## trapped under a log forever is a bug, not a story beat.
 				if pinned_by != null:
 					_pin_reload()
+				elif menu_open == "" and _water_target != Vector3.INF and _bed_target == null \
+						and mount == null and _has_waterskin() >= 0 and not _water_is_sea:
+					_fill_waterskin()   ## [water]
 				elif menu_open == "":
 					_try_interact()
 			KEY_ALT:
@@ -1338,14 +1602,21 @@ func _input(event: InputEvent) -> void:
 				if not _q_held:
 					_q_held = true
 					_q_down_ms = Time.get_ticks_msec()
+					## Remember the cursor NOW — the inventory ring is built
+					## around this point 350 ms later, not around wherever the
+					## mouse has drifted to by then.
+					_q_down_mouse = get_viewport().get_mouse_position()
 					_q_inv_idx = -1
 					if menu_open == "" and kd_phase == "":
 						_wheel_show(true)
 					elif menu_open == "tab" and tab_page == "inventory" and hovered_item_idx >= 0:
 						_q_inv_idx = hovered_item_idx
 			KEY_E:
-				if menu_open == "" and kd_phase == "" and _drop_target != null \
+				if menu_open == "" and kd_phase == "" and _try_grab(false):
+					pass    ## the reach: crouch, open hand, over the shoulder
+				elif menu_open == "" and kd_phase == "" and _drop_target != null \
 						and is_instance_valid(_drop_target):
+					## Seen but out past arm's reach -- the old snap still takes it.
 					_pickup_dropped(_drop_target)
 				elif menu_open == "" and kd_phase == "" and _bed_target != null \
 						and is_instance_valid(_bed_target):
@@ -1359,7 +1630,15 @@ func _input(event: InputEvent) -> void:
 				elif menu_open == "" and kd_phase == "" and _log_target != null \
 						and is_instance_valid(_log_target):
 					_hoist_log(_log_target)
+				elif menu_open == "" and kd_phase == "" and _fire_target != null \
+						and is_instance_valid(_fire_target):
+					_use_firepit(_fire_target)   ## [fire]
+				elif menu_open == "" and kd_phase == "" and _water_target != Vector3.INF:
+					_drink_water()   ## [water]
 			KEY_M:
+				## M IS THE MAP. (The mob menu it used to open moved to K.)
+				_toggle_menu("map")
+			KEY_K:
 				_toggle_menu("spawn")
 			KEY_G:
 				_toggle_menu("creative")
@@ -1369,7 +1648,7 @@ func _input(event: InputEvent) -> void:
 					_v_down_ms = Time.get_ticks_msec()
 					_v_consumed = false
 			KEY_C:
-				if menu_open == "" and kd_phase == "" and mount == null and not climbing:
+				if menu_open == "" and kd_phase == "" and mount == null and not climbing and not swimming:
 					## C toggles CROUCH (per Lemon — the old C-cycle is gone).
 					## From prone, C lifts you one stance, to the crouch.
 					if prone:
@@ -1387,7 +1666,7 @@ func _input(event: InputEvent) -> void:
 						_drop_carried_logs("you crouched")
 						_add_log_msg("Crouched", Color(0.8, 0.8, 0.8))
 			KEY_X:
-				if menu_open == "" and kd_phase == "" and mount == null and not climbing:
+				if menu_open == "" and kd_phase == "" and mount == null and not climbing and not swimming:
 					## X toggles PRONE. From standing OR crouching you go flat;
 					## from prone you come all the way back up to your feet.
 					## (crouching stays true while prone — stealth reads it.)
@@ -1441,12 +1720,34 @@ func _input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	since_last_attack += delta
+	## SPECTATOR: the camera is out. The body is parked and owns nothing --
+	## checked FIRST, above the knockdown and grab branches, because none of
+	## those may run on a body the world is not allowed to touch.
+	if editing:
+		_editor_freeze(delta)
+		return
+
+	## Leaving flight (or god) puts the collision mask back exactly as found.
+	if _god_mask_saved >= 0 and not (god and flying):
+		collision_mask = _god_mask_saved
+		_god_mask_saved = -1
 
 	## Knocked flat (a horse's hoof, mostly): you eat dirt, lie there, and get
 	## up slow — and everything out there is free to keep hitting you through
 	## the entire fall-and-rise. Handles its own frame, then bails.
 	if kd_phase != "":
 		_update_knockdown(delta)
+		return
+
+	## In the jaws (the bear's grab): the animal's clip owns your position —
+	## you hang off its mouth. You keep your eyes; it keeps everything else.
+	if grabbed_by != null:
+		_update_grabbed(delta)
+		return
+
+	## GOD FLIGHT owns the frame: noclip, no gravity, no gait, no stamina.
+	if god and flying:
+		_god_fly(delta)
 		return
 
 	## Blackout / bed animation: the body stands (or lies) quietly — gravity
@@ -1474,6 +1775,11 @@ func _physics_process(delta: float) -> void:
 		_update_mounted(delta)
 		return
 
+	## [terrain] Chest-deep in a lake or the Gulf of Maine you SWIM. Owns the
+	## frame while it lasts -- see _update_swim.
+	if _update_swim(delta):
+		return
+
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 
@@ -1481,7 +1787,8 @@ func _physics_process(delta: float) -> void:
 		block_broken_timer -= delta
 	var was_blocking := blocking
 	blocking = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and block_broken_timer <= 0.0 \
-		and current_weapon == "sword"  ## both hands are busy with the bow
+		and current_weapon == "sword" \
+		and (godmode == null or not godmode.visible)  ## RMB is look-drag in god mode
 	## Parry timing: how fresh is this guard? (A block raised within PARRY_WINDOW
 	## of the hit landing counts as a perfect guard.)
 	if blocking and not was_blocking:
@@ -1511,11 +1818,25 @@ func _physics_process(delta: float) -> void:
 		jump_queued = false
 		if _try_climb():
 			_drop_carried_logs("both hands went to the ledge")
-		elif is_on_floor():
+		elif is_on_floor() and pressed_by == null:  ## no jumping out from under a bear
 			velocity.y = JUMP_VELOCITY
 			crouching = false  ## jumping stands you up
 			prone = false
 			_drop_carried_logs("you jumped")
+
+	## LEANED ON: an animal's weight (the bear's press). It ends when the
+	## animal says so, when it dies, or when you tear yourself out of reach —
+	## a dash, mostly. Movement continues below at a crushed crawl.
+	if pressed_by != null:
+		press_t += delta
+		var pb := pressed_by
+		if pb == null or not is_instance_valid(pb) \
+				or ("dying" in pb and bool(pb.get("dying"))) or press_t > 3.4 \
+				or global_position.distance_to(pb.global_position) > 4.2:
+			pressed_by = null
+			press_t = 0.0
+		else:
+			cam_shake = maxf(cam_shake, 0.05)
 
 	## Movement direction from raw keys (relative to facing).
 	move_input = Vector3.ZERO
@@ -1523,6 +1844,15 @@ func _physics_process(delta: float) -> void:
 	if Input.is_key_pressed(KEY_S): move_input.z += 1.0
 	if Input.is_key_pressed(KEY_A): move_input.x -= 1.0
 	if Input.is_key_pressed(KEY_D): move_input.x += 1.0
+	## CONTROLLER: the left stick adds into the same vector. dir is normalised
+	## below, so a half-pushed stick would walk as fast as a key — pad_push
+	## keeps the analog part and scales the speed with it instead.
+	var pad_mv := _pad_move()
+	var pad_push := 1.0
+	if pad_mv != Vector3.ZERO:
+		if move_input == Vector3.ZERO:
+			pad_push = clampf(pad_mv.length(), 0.35, 1.0)
+		move_input += pad_mv
 	var dir := (transform.basis * move_input).normalized()
 	dir.y = 0.0
 
@@ -1550,6 +1880,9 @@ func _physics_process(delta: float) -> void:
 		speed = minf(speed, SPEED * 0.22)  ## a crawl — belly to the ground
 	elif crouching:
 		speed = minf(speed, SPEED * 0.45)  ## low and slow — the hunter's walk
+	if pressed_by != null:
+		speed *= 0.12   ## pinned under an animal's weight — struggling, not walking
+	speed *= pad_push   ## how far the left stick is actually pushed
 
 	## Hit-stun (thrown out of an action) overrides input; otherwise dash; otherwise glide.
 	if hitstun_timer > 0.0:
@@ -1585,6 +1918,7 @@ func _physics_process(delta: float) -> void:
 			_record_progress("marathoner", whole)
 	_update_gait(delta)
 	_step_up(delta)
+	_unwedge(delta, dir != Vector3.ZERO)
 	_apply_step_smooth(delta)
 	_update_body_arms(delta)
 	_update_hud(delta)
@@ -1603,6 +1937,9 @@ func _update_action_camera(delta: float) -> void:
 		return
 	var rot := Vector3.ZERO   ## degrees
 	var pos := Vector3.ZERO
+	var byaw := 0.0           ## torso YAW for the third-person body — the
+							  ## shoulders coil against a slash and twist
+							  ## through it (fed to body_rig at the bottom)
 	var hand := -1.0 if set_lefty else 1.0  ## mirrored hands = mirrored leans
 
 	if attacking and current_weapon == "sword":
@@ -1639,6 +1976,10 @@ func _update_action_camera(delta: float) -> void:
 			rot.y = sweep * -2.6 * ramp * dirn * hand
 			rot.x = env * 0.8 * ramp
 			pos.x = sweep * 0.028 * ramp * dirn * hand
+		## The TORSO goes with the cut: coiled slightly against it through the
+		## chamber, twisted THROUGH it with the edge. This is what makes the
+		## third-person slash read from the shoulders, not just the wrist.
+		byaw = sweep * 7.0 * ramp * dirn
 		pos.z = env * -0.022 * ramp
 		if committed:
 			rot.x += env * 1.5
@@ -1649,10 +1990,11 @@ func _update_action_camera(delta: float) -> void:
 		## Side swings ROLL the lens through the sweep, forehand and back.
 		## ...and the lens rolls WITH the stroke. Mirrored along with the arc:
 		## the forehand now travels right-to-left, so the head leans that way.
-		rot.z = enva * (-2.8 if axe_side == 0 else 2.8) * hand
-		rot.y = enva * (1.6 if axe_side == 0 else -1.6) * hand
-		rot.x = enva * 1.1
-		pos.y = enva * -0.015
+		rot.z = enva * (-3.6 if axe_side == 0 else 3.6) * hand
+		rot.y = enva * (2.4 if axe_side == 0 else -2.4) * hand
+		rot.x = enva * 0.4   ## barely any nod now — the stroke is flat, not down
+		byaw = enva * (12.0 if axe_side == 0 else -12.0)  ## hips behind the cleave
+		pos.y = enva * -0.008
 	elif pick_swinging:
 		var pp := clampf(pick_t / maxf(PICK_TIME, 0.01), 0.0, 1.0)
 		var envp := sin(pp * PI)
@@ -1677,6 +2019,14 @@ func _update_action_camera(delta: float) -> void:
 		hands_root.position = hands_root.position.lerp(
 			Vector3(0, -0.36, 0.08) * pe, clampf(delta * 9.0, 0.0, 1.0))
 
+	## The reach: your eyes go down with the hand and come back up with it, and
+	## the torso turns a little as the arm swings the thing over the shoulder.
+	if reach_phase != "" or reach_out > 0.001 or reach_stow > 0.001:
+		var gr := reach_out * reach_out * (3.0 - 2.0 * reach_out)
+		rot.x += gr * 9.0
+		rot.z += reach_stow * 2.0 * hand
+		pos.y += gr * -0.05
+
 	## Impact: landed hits kick the lens forward and it eases right back.
 	if cam_punch > 0.0:
 		cam_punch = maxf(0.0, cam_punch - delta * 5.0)
@@ -1693,13 +2043,23 @@ func _update_action_camera(delta: float) -> void:
 	## Not while you're on your back — _update_knockdown owns the rig then.
 	if body_rig and kd_phase == "":
 		body_rig.rotation_degrees = body_rig.rotation_degrees.lerp(
-			Vector3(clampf(rot.x, -8.0, 8.0) * 0.55, 0.0, clampf(rot.z, -6.0, 6.0) * 0.6), k)
+			Vector3(clampf(rot.x, -8.0, 8.0) * 0.55, byaw, clampf(rot.z, -6.0, 6.0) * 0.6), k)
 
 
 func _frame_fx_and_regen(delta: float) -> void:
+	if god:
+		## GOD MODE pins the four bars every frame, so nothing drains while
+		## you are laying out a town. Done here because every stance -- on
+		## foot, flying, mounted, face-down -- comes through this one function.
+		health = max_health
+		stamina = max_stamina
+		stamina_delay = 0.0
+		thirst = THIRST_MAX
+		breath = 100.0
 	## The upkeep every stance shares — on foot, in the saddle, or face-down in
 	## the dirt: camera shake, held-item animation, stamina/health regen, and
 	## the progression timers.
+	_update_grab(delta)          ## advance the reach BEFORE the camera reads it
 	_update_action_camera(delta)
 	_update_wheel_hold(delta)
 	if bedroll_bundle:
@@ -1733,13 +2093,21 @@ func _frame_fx_and_regen(delta: float) -> void:
 	if stamina_delay > 0.0:
 		stamina_delay -= delta
 	if stamina < max_stamina and not blocking and not sprinting and not drawing and stamina_delay <= 0.0:
-		stamina = minf(max_stamina, stamina + stamina_regen * delta)
+		stamina = minf(max_stamina, stamina + stamina_regen * _thirst_regen_mult() * delta)
+	_thirst_tick(delta)
+	_exposure_tick(delta)
+	_cold_tick(delta)
+	## breath comes back on land here; the swim and grab frames drain it
+	if not swimming and grabbed_by == null and breath < 100.0:
+		_breath_tick(delta, 0.0)
 
 	## Very slow regen, only a few seconds after the last combat action.
 	## CON makes the wounds close faster.
 	combat_timer += delta
-	if combat_timer > COMBAT_HEAL_DELAY and health < max_health:
-		health = minf(max_health, health + stats.heal_rate() * delta)
+	## Peaceful closes wounds about three times faster and starts sooner;
+	## Hardcore drags both out. Normal is exactly the tuned numbers.
+	if combat_timer > COMBAT_HEAL_DELAY * GameMode.heal_delay_mult() and health < max_health:
+		health = minf(max_health, health + stats.heal_rate() * GameMode.heal_rate_mult() * delta)
 
 	## Progression timers + Death's Door: you hit the brink earlier — climbing
 	## back past 60% (which only regen can do) scores the recovery.
@@ -1769,12 +2137,537 @@ func _any_enemy_mad_at_me() -> bool:
 	return false
 
 
+## --- swimming (the overworld's lakes and the Gulf of Maine) -----------------
+## Overworld.water_y() says where the surface is. Water SWIM_DEPTH above your
+## feet floats you: the body settles with the eyes just clear of the surface,
+## WASD paddles, Space climbs, C dives, sprint is not a thing. Paddling drains
+## stamina and at zero you crawl. There is no drowning yet -- the map rim would
+## make a two-kilometre swim out to sea a death with no warning -- so the sea
+## is a boundary you can turn back from, not a trap. Everything else about the
+## body (knockdown, grab, mount, climb) is checked BEFORE this in
+## _physics_process, so none of it has to know about water.
+var swimming := false
+var _swim_face := 0.0                  ## eased "how submerged is the lens"
+var _water_tint: ColorRect = null
+const SWIM_DEPTH := 1.15               ## water this far above the feet floats you
+const SWIM_EXIT_DEPTH := 0.75          ## ...and this shallow puts them back down
+const SWIM_SPEED := 3.4
+const SWIM_ACCEL := 7.0
+const SWIM_VERT := 2.4                 ## Space up / C down, m/s
+const SWIM_FLOAT_EYE := 0.30           ## the surface sits this far under the eyes
+const SWIM_DRAIN := 3.0                ## stamina a second while paddling
+const SWIM_STROKE_GAP := 0.95          ## seconds between stroke sounds
+
+## --- thirst, breath, the waterskin (water pass, 2026-09-01) ----------------
+## THIRST is a survival meter: full to empty in THIRST_DAYS game days at rest,
+## faster sprinting or swimming. Under THIRST_LOW stamina comes back at half
+## pace; at zero the body starts to fail (THIRST_DAMAGE_PER_S, and it CAN
+## finish you). Settings -> Thirst has two positions and swaps live:
+##   Survival  the meter, as above
+##   Light     no meter -- drinking is a stamina top-up and a 90 s "refreshed"
+##             regen boost, and nothing punishes you for never drinking.
+## Drink at any fresh water (look at it, E); the sea is brine and says so.
+## The WATERSKIN in your pack holds SKIN_FILLS draughts, refilled at fresh
+## water with F. BREATH: forty seconds with your ears under, coming back
+## three times as fast; at zero you drown by DROWN_DAMAGE_PER_S.
+const THIRST_MAX := 100.0
+const THIRST_DAYS := 1.5
+const THIRST_LOW := 30.0
+const THIRST_DRAUGHT := 40.0           ## a long drink at the shore
+const SKIN_DRAUGHT := 35.0             ## one pull on the waterskin
+const SKIN_FILLS := 3
+const SKIN_WEIGHT := 0.6
+const SKIN_WATER_WEIGHT := 0.5         ## per draught carried
+const THIRST_DAMAGE_PER_S := 0.4
+const THIRST_SPRINT_MULT := 1.8
+const THIRST_SWIM_MULT := 1.35
+const REFRESHED_SECONDS := 90.0
+const BREATH_SECONDS := 40.0
+const BREATH_REGEN := 3.0              ## x the drain rate, coming back
+const DROWN_DAMAGE_PER_S := 5.0
+const DRINK_REACH := 1.9               ## how far ahead the shore may be
+var thirst := THIRST_MAX
+var breath := 100.0
+var set_thirst_mode := 0               ## 0 Survival / 1 Light  (Settings)
+var set_refract := true                ## Settings -> Water Refraction
+var thirst_show := 0.0
+var breath_show := 0.0
+var thirst_bar: Control
+var thirst_fill: ColorRect
+var breath_bar: Control
+var breath_fill: ColorRect
+var _water_target := Vector3.INF       ## fresh (or salt) water under the gaze
+var _water_is_sea := false
+var _drink_cd := 0.0
+var _thirst_msg_t := 0.0
+var _drown_msg_t := 0.0
+var _stroke_t := 0.0
+var _refreshed_t := 0.0
+var _struggle_space_held := false
+var _struggle_click_held := false
+
+
+static func thirst_rate_per_sec() -> float:
+	return THIRST_MAX / (THIRST_DAYS * DayNight.DAY_SECONDS)
+
+
+## 0 = ears in the air, 1 = fully under (eased). World reads it for the fog.
+func submerged() -> float:
+	return _swim_face
+
+
+func thirst_survival() -> bool:
+	return set_thirst_mode == 0
+
+
+## --- exposure and warmth (2026-09-10, SYSTEMS) -----------------------------
+## The model is scripts/Exposure.gd and every degree of it is a pure function.
+## What lives here is the wiring: build the environment once a frame, hand it
+## to `exposure.step()`, and do as the report says. No decision is taken in
+## this file, which is why the whole feature is testable without a Player.
+const EXPOSURE_SHELTER_UP := 7.0        ## how far overhead we look for a roof
+const EXPOSURE_SHELTER_RECHECK := 1.5   ## seconds between shelter rays
+
+var exposure := Exposure.new()
+
+## [coldscreen] What the cold LOOKS like. Exposure has handed out a `felt`
+## in degrees and a `sway_extra()` every frame since 4ac02b1 and nothing
+## read either. Breath is the AIR (ambient, so a man at a hearth still
+## sees it); the shiver and the grade are the BODY (warmth, from the
+## shiver line down). Owns one overlay and one particle node and takes no
+## decision: `step()` returns a report and `present()` draws it.
+var cold := ColdScreen.new()
+var set_warmth_mode := 0                ## 0 Survival / 1 Light  (Settings)
+var warmth_show := 0.0
+var warmth_bar: Control
+var warmth_fill: ColorRect
+var _exposure_sheltered := false
+var _exposure_shelter_t := 0.0
+
+
+func warmth_survival() -> bool:
+	return set_warmth_mode == 0
+
+
+func _exposure_roof() -> bool:
+	## One ray straight up, EXPOSURE_SHELTER_RECHECK seconds apart. A roof
+	## takes the wind AND the precipitation off you, which is the whole reason
+	## to build one before you are cold rather than after.
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return false
+	var from := global_position + Vector3(0.0, 1.2, 0.0)
+	var q := PhysicsRayQueryParameters3D.create(from,
+			from + Vector3(0.0, EXPOSURE_SHELTER_UP, 0.0))
+	q.exclude = [get_rid()]
+	var hit: Dictionary = space.intersect_ray(q)
+	return not hit.is_empty()
+
+
+func _exposure_env() -> Dictionary:
+	## Everything Exposure needs, gathered from the four places that hold it.
+	## Nothing here decides anything; it reads.
+	var w := get_tree().get_first_node_in_group("world")
+	var wx: Object = null
+	var dn: Object = null
+	var under := false
+	if w != null:
+		if w.has_method("weather"):
+			wx = w.call("weather")
+		if w.has_method("daynight"):
+			dn = w.call("daynight")
+		if w.has_method("underground"):
+			under = bool(w.call("underground"))
+	var hour := 12.0
+	var day := 30.0
+	if dn != null:
+		hour = float(dn.get("hour"))
+		day = float(dn.get("day"))
+	var level := 0
+	var intensity := 0.0
+	var snowing := false
+	var wind := 0.0
+	if wx != null:
+		level = int(wx.get("level"))
+		intensity = clampf(float(wx.get("intensity")), 0.0, 1.0)
+		if wx.has_method("is_snowing"):
+			snowing = bool(wx.call("is_snowing"))
+		var wnode: Object = wx.get("wind")
+		if wnode != null:
+			wind = clampf(float(wnode.get("last_strength")), 0.0, 1.0)
+	return Exposure.env({
+		"season": Exposure.season_for_day(day),
+		"hour": hour,
+		"y": global_position.y,
+		"level": level,
+		"intensity": intensity,
+		"snowing": snowing,
+		"wind": wind,
+		"sheltered": _exposure_sheltered,
+		"underground": under,
+		"fire_c": Exposure.fire_c(get_tree().get_nodes_in_group("fires"), global_position),
+		## NOT `tp_torch.visible`: that node exists from boot, and its
+		## visibility is also gated on `cam_mode == "tp"`, so reading it gave
+		## the player a lit torch's 3.5 C for ever in third person and none of
+		## it in first. What is actually in the left hand is `offhand_shown`
+		## (found live, 2026-09-10).
+		"torch": String(offhand_shown).contains("Torch") \
+			or String(offhand_shown2).contains("Torch"),
+		"asleep": false,
+		"swimming": swimming,
+		## WHAT IS ON YOUR BACK. `Garments` prices the five armour slots
+		## in degrees; `equipment` also carries a sword and an offhand,
+		## which `worn_metals()` leaves out rather than relying on the
+		## other file to ignore them.
+		"worn": worn_metals(),
+		## AND WHERE YOU ARE STANDING. `Seasons.base_c_at()` is the
+		## season's contribution to the air HERE, on this place's own
+		## calendar, and it has had no caller since it shipped. With it,
+		## a winter night in Aroostook is genuinely colder than the same
+		## night on Casco Bay -- twelve degrees apart on day 66, when the
+		## north is in winter and the south has not finished autumn.
+		"base_c": Seasons.base_c_at(day, global_position),
+		"mode": Exposure.mode_now(),
+		"survival": warmth_survival(),
+	})
+
+
+func _exposure_tick(delta: float) -> void:
+	warmth_show = maxf(0.0, warmth_show - delta)
+	if god:
+		## The map-authoring mode pins health, stamina and thirst; it pins this
+		## too, or an afternoon spent building in a winter sky kills you.
+		exposure.warmth = Exposure.WARMTH_MAX
+		exposure.wet = 0.0
+		return
+	_exposure_shelter_t -= delta
+	if _exposure_shelter_t <= 0.0:
+		_exposure_shelter_t = EXPOSURE_SHELTER_RECHECK
+		_exposure_sheltered = _exposure_roof()
+	var r: Dictionary = exposure.step(_exposure_env(), delta)
+	var crossed := String(r["crossed"])
+	if crossed != "" and Exposure.MESSAGES.has(crossed):
+		var m: Array = Exposure.MESSAGES[crossed]
+		_add_log_msg(String(m[0]), m[1] as Color)
+		warmth_show = 3.0
+	var dmg := float(r["damage"])
+	if dmg > 0.0 and invuln_timer <= 0.0 and health > 0.0:
+		health = maxf(0.0, health - dmg)
+		health_show = 1.0
+		## THE COLD IS A WOUND, NOT A STATUS. Without this the out-of-combat
+		## regen a few lines down in `_process` outruns WARMTH_DAMAGE_PER_S
+		## and a soaked man at zero warmth in a winter gale sits at a hundred
+		## health for ever -- which is what he did, live, before this line.
+		combat_timer = 0.0
+		if health <= 0.0:
+			_die()
+
+
+func _cold_tick(delta: float) -> void:
+	## [coldscreen] Attached lazily: the HUD layer and the head are built by
+	## different passes of _ready, and `attach()` is idempotent.
+	##
+	## Deliberately called OUTSIDE `_exposure_tick`'s god-mode early return.
+	## God mode pins warmth at the maximum, so the shiver and the grade turn
+	## themselves off with no branch here -- and an afternoon spent building
+	## in a winter sky still has your breath in front of you, which is the
+	## correct answer and falls out of the model for free.
+	cold.attach(head, hud_layer)
+	var ex := ColdScreen.exertion_of(sprinting, stamina / maxf(1.0, max_stamina))
+	var rep: Dictionary = cold.step(_exposure_env(), exposure.warmth, ex, delta)
+	cold.present(rep)
+	var sh := float(rep["shake"])
+	if sh > 0.0:
+		## Fed into the EXISTING shake path rather than writing camera.position:
+		## that line already decays, already composes with the walk-cycle bob,
+		## and already loses to a real impact -- which is the right priority.
+		cam_shake = maxf(cam_shake, sh)
+
+
+## Stamina regen multiplier from thirst: half when parched, 1.5 while
+## refreshed (Light mode's reward for drinking), else 1.
+func _thirst_regen_mult() -> float:
+	if _refreshed_t > 0.0:
+		return 1.5
+	if thirst_survival() and thirst < THIRST_LOW:
+		return 0.5
+	return 1.0
+
+
+func _thirst_tick(delta: float) -> void:
+	_refreshed_t = maxf(0.0, _refreshed_t - delta)
+	_drink_cd = maxf(0.0, _drink_cd - delta)
+	_thirst_msg_t = maxf(0.0, _thirst_msg_t - delta)
+	if not thirst_survival():
+		return
+	var rate := thirst_rate_per_sec()
+	if sprinting:
+		rate *= THIRST_SPRINT_MULT
+	elif swimming:
+		rate *= THIRST_SWIM_MULT
+	var before := thirst
+	thirst = maxf(0.0, thirst - rate * delta)
+	if before >= THIRST_LOW and thirst < THIRST_LOW:
+		_add_log_msg("Thirsty -- your wind is going", Color(0.85, 0.80, 0.55))
+		thirst_show = 3.0
+	elif before >= 10.0 and thirst < 10.0:
+		_add_log_msg("Parched. Find water.", Color(1.0, 0.70, 0.40))
+		thirst_show = 3.0
+	if thirst <= 0.0 and invuln_timer <= 0.0 and health > 0.0:
+		health = maxf(0.0, health - THIRST_DAMAGE_PER_S * delta)
+		health_show = 1.0
+		## THIRST IS A WOUND, NOT A STATUS — the same bug the cold had, in the
+		## same shape, and it has been sitting here since the meter was
+		## written. `_process`'s out-of-combat regen waits only on
+		## `combat_timer`, and dying of thirst is not a combat action, so a man
+		## at zero water healed faster than he bled and sat at full health for
+		## ever. Fixed for warmth by 4ac02b1; this is the other half of it.
+		combat_timer = 0.0
+		if _thirst_msg_t <= 0.0:
+			_thirst_msg_t = 12.0
+			_add_log_msg("Your body is failing without water", Color(1.0, 0.45, 0.30))
+		if health <= 0.0:
+			_die()
+
+
+## Ears under: the air goes; back in the air it comes back three times as
+## fast. `under` is the eased submersion so a bob at the surface is free.
+func _breath_tick(delta: float, under: float) -> void:
+	_drown_msg_t = maxf(0.0, _drown_msg_t - delta)
+	var drain := 100.0 / BREATH_SECONDS
+	if under > 0.5:
+		var was := breath
+		breath = maxf(0.0, breath - drain * delta)
+		breath_show = 1.5
+		if was > 25.0 and breath <= 25.0:
+			_add_log_msg("Air running out", Color(0.75, 0.90, 1.0))
+		if breath <= 0.0 and invuln_timer <= 0.0 and health > 0.0:
+			health = maxf(0.0, health - DROWN_DAMAGE_PER_S * delta)
+			health_show = 1.0
+			cam_shake = maxf(cam_shake, 0.06)
+			if _drown_msg_t <= 0.0:
+				_drown_msg_t = 3.0
+				_add_log_msg("Drowning!", Color(1.0, 0.40, 0.30))
+			if health <= 0.0:
+				_die()
+	else:
+		if breath < 100.0:
+			breath = minf(100.0, breath + drain * BREATH_REGEN * delta)
+			breath_show = 1.0
+
+
+## --- drinking ----------------------------------------------------------------
+## The gaze check: the point DRINK_REACH ahead at foot height. Fresh water
+## whose surface is within reach of your hands is drinkable; while swimming,
+## the water you are in is (if your head is out of it).
+func _update_water_target() -> void:
+	_water_target = Vector3.INF
+	_water_is_sea = false
+	if menu_open != "" or kd_phase != "" or grabbed_by != null or mount != null:
+		return
+	if swimming:
+		if _swim_face < 0.5 and Overworld.is_water_at(global_position):
+			_water_target = global_position
+			_water_is_sea = Overworld.water_is_sea(global_position)
+		return
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.001:
+		return
+	var p := global_position + fwd.normalized() * DRINK_REACH
+	if not Overworld.is_water_at(p):
+		return
+	var wy := Overworld.water_y(p)
+	if absf(wy - global_position.y) > 1.5:
+		return
+	_water_target = Vector3(p.x, wy, p.z)
+	_water_is_sea = Overworld.water_is_sea(p)
+
+
+func _has_waterskin() -> int:
+	return _find_item_index("Waterskin")
+
+
+func _skin_fills(idx: int) -> int:
+	if idx < 0 or idx >= inventory.size():
+		return 0
+	return int(inventory[idx].get("fills", 0))
+
+
+func _set_skin_fills(idx: int, n: int) -> void:
+	if idx < 0 or idx >= inventory.size():
+		return
+	n = clampi(n, 0, SKIN_FILLS)
+	inventory[idx]["fills"] = n
+	inventory[idx]["weight"] = SKIN_WEIGHT + SKIN_WATER_WEIGHT * float(n)
+	_refresh_inventory_ui()
+
+
+func _apply_drink(amount: float, what: String) -> void:
+	if thirst_survival():
+		thirst = minf(THIRST_MAX, thirst + amount)
+		thirst_show = 2.5
+	else:
+		stamina = minf(max_stamina, stamina + amount * 0.6)
+		stam_show = 1.5
+		_refreshed_t = REFRESHED_SECONDS
+	cam_punch = maxf(cam_punch, 0.25)
+	_add_log_msg(what, Color(0.62, 0.82, 1.0))
+
+
+## E at water. Repeats as fast as you can swallow.
+func _drink_water() -> void:
+	if _water_target == Vector3.INF or _drink_cd > 0.0:
+		return
+	if _water_is_sea:
+		_drink_cd = 1.0
+		_add_log_msg("Brine. It would only make it worse.", Color(0.85, 0.85, 0.75))
+		return
+	_drink_cd = 1.1
+	WaterAudio.play(self, "gulp", global_position + Vector3.UP * 1.2, -2.0)
+	_apply_drink(THIRST_DRAUGHT, "You drink deep" if thirst_survival() else "Cold water -- you feel it in your legs")
+
+
+## F at water with a skin in the pack.
+func _fill_waterskin() -> void:
+	var idx := _has_waterskin()
+	if idx < 0 or _water_target == Vector3.INF or _drink_cd > 0.0:
+		return
+	if _water_is_sea:
+		_drink_cd = 1.0
+		_add_log_msg("You do not fill a skin from the sea", Color(0.85, 0.85, 0.75))
+		return
+	if _skin_fills(idx) >= SKIN_FILLS:
+		_add_log_msg("The waterskin is full", Color(0.8, 0.8, 0.8))
+		return
+	_drink_cd = 1.4
+	_set_skin_fills(idx, SKIN_FILLS)
+	WaterAudio.play(self, "fill_skin", global_position + Vector3.UP * 0.6, -3.0)
+	_add_log_msg("Waterskin filled -- %d draughts" % SKIN_FILLS, Color(0.62, 0.82, 1.0))
+
+
+## Click the Waterskin in the pack (or the wheel): one pull.
+func _drink_skin(idx: int) -> void:
+	var n := _skin_fills(idx)
+	if n <= 0:
+		_add_log_msg("The waterskin is empty -- fill it at fresh water (F)", Color(0.9, 0.75, 0.4))
+		return
+	if thirst_survival() and thirst >= THIRST_MAX - 1.0:
+		_add_log_msg("Not thirsty -- save it", Color(0.8, 0.8, 0.8))
+		return
+	_set_skin_fills(idx, n - 1)
+	WaterAudio.play(self, "gulp", global_position + Vector3.UP * 1.2, -4.0)
+	_apply_drink(SKIN_DRAUGHT, "A pull on the waterskin -- %d left" % (n - 1))
+
+
+## Old saves have no skin; every wanderer gets one.
+func _ensure_waterskin() -> void:
+	if _has_waterskin() >= 0:
+		return
+	inventory.append({"name": "Waterskin", "weight": SKIN_WEIGHT + SKIN_WATER_WEIGHT * float(SKIN_FILLS),
+		"count": 1, "slot": "", "fills": SKIN_FILLS, "keep": true})
+
+
+func _update_swim(delta: float) -> bool:
+	var wy: float = Overworld.water_y(global_position)
+	var depth: float = (wy - global_position.y) if wy != Overworld.NO_WATER else -1.0
+	if not swimming:
+		if depth < SWIM_DEPTH:
+			_set_water_tint(0.0)
+			return false
+		swimming = true
+		crouching = false
+		prone = false
+		sprinting = false
+		_fall_speed = 0.0
+		velocity.y = maxf(velocity.y, -2.0)     ## the water takes the fall
+		_drop_carried_logs("you went into the water")
+		_add_log_msg("Swimming", Color(0.62, 0.80, 1.0))
+		WaterAudio.play(self, "splash_in", global_position, 0.0)
+		_stroke_t = 0.4
+	elif depth < SWIM_EXIT_DEPTH:
+		swimming = false
+		_fall_speed = 0.0
+		_set_water_tint(0.0)
+		WaterAudio.play(self, "splash_out", global_position, -3.0)
+		return false
+
+	## --- the swim frame ---
+	move_input = Vector3.ZERO
+	if Input.is_key_pressed(KEY_W): move_input.z -= 1.0
+	if Input.is_key_pressed(KEY_S): move_input.z += 1.0
+	if Input.is_key_pressed(KEY_A): move_input.x -= 1.0
+	if Input.is_key_pressed(KEY_D): move_input.x += 1.0
+	move_input += _pad_move()   ## CONTROLLER: left stick
+	var dir := (transform.basis * move_input).normalized()
+	dir.y = 0.0
+	var tired := stamina <= 0.0
+	var spd := SWIM_SPEED * stats.speed_mult() * (0.45 if tired else 1.0)
+	var hv := Vector3(velocity.x, 0.0, velocity.z).move_toward(dir * spd, SWIM_ACCEL * delta)
+	velocity.x = hv.x
+	velocity.z = hv.z
+	## never under the bed: a hold (snapper, the Drowned) or a shove can put
+	## the body inside the heightfield, and from inside it falls straight
+	## through to the -60 m net and the valley
+	var bed_y: float = Overworld.ground_y(global_position)
+	if global_position.y < bed_y + 0.15:
+		global_position.y = bed_y + 0.15
+		velocity.y = maxf(velocity.y, 0.0)
+	## buoyancy: the feet settle where the surface is SWIM_FLOAT_EYE under the eyes
+	var float_y := wy - (_eye_h - SWIM_FLOAT_EYE)
+	var want_vy := clampf((float_y - global_position.y) * 3.0, -2.2, 2.2)
+	if Input.is_key_pressed(KEY_SPACE) and not tired:
+		want_vy = SWIM_VERT
+	elif Input.is_key_pressed(KEY_C):
+		want_vy = -SWIM_VERT
+	velocity.y = move_toward(velocity.y, want_vy, 9.0 * delta)
+	if dir != Vector3.ZERO or want_vy > 0.5:
+		stamina = maxf(0.0, stamina - SWIM_DRAIN * stats.stamina_cost_mult() * delta)
+		stamina_delay = maxf(stamina_delay, 0.4)
+		_stroke_t -= delta
+		if _stroke_t <= 0.0:
+			_stroke_t = SWIM_STROKE_GAP * (0.7 if tired else 1.0)
+			WaterAudio.play(self, "swim_stroke_%d" % randi_range(1, 3),
+				global_position + Vector3.UP * 0.9, -8.0 if _swim_face > 0.5 else -3.0)
+	jump_queued = false
+	_frame_fx_and_regen(delta)
+	move_and_slide()
+	## the lens under the surface wears a blue-green veil
+	var cam_y := camera.global_position.y if camera != null else global_position.y + _eye_h
+	_set_water_tint(1.0 if cam_y < wy - 0.05 else 0.0)
+	_breath_tick(delta, _swim_face)
+	_was_on_floor = false
+	_update_body_arms(delta)
+	_update_hud(delta)
+	_update_log(delta)
+	return true
+
+
+func _set_water_tint(on: float) -> void:
+	if _water_tint == null:
+		if hud_layer == null or on <= 0.0:
+			return
+		_water_tint = ColorRect.new()
+		_water_tint.name = "WaterTint"
+		_water_tint.color = Color(0.05, 0.20, 0.28, 0.0)
+		_water_tint.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_water_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud_layer.add_child(_water_tint)
+		hud_layer.move_child(_water_tint, 0)
+	_swim_face = lerpf(_swim_face, on, 0.35)
+	_water_tint.color.a = 0.32 * _swim_face   ## the fog does the rest (World)
+	_water_tint.visible = _swim_face > 0.01
+	WaterAudio.set_submerged(self, _swim_face)
+
+
 func _update_darkness() -> void:
 	## Edge-triggered like the hunch: entering the dark pulls the torch out
 	## (with the shield when you own both); stepping back into the light
 	## restores whatever you carried before — unless you chose otherwise
 	## with Q while it was dark.
-	var dark := global_position.y < -3.0
+	## [terrain] Depth from the LOCAL surface, not raw y: the map runs to -27
+	## at the sea floor, and raw y drew the torch on every beach in Maine.
+	var dark := Overworld.depth_below_surface(global_position) > 3.0
 	if not dark:
 		var w := get_tree().get_first_node_in_group("world")
 		if w != null and w.has_method("is_dark_out"):
@@ -1844,7 +2737,10 @@ func _update_hunch(delta: float) -> void:
 	## TODO(design): should the hunch also yank you off the pickaxe/bow onto
 	## the sword when something jumps you mid-mining? For now it minds the
 	## sword only — tools are a choice.
-	if not set_hunch or current_weapon != "sword" or mount != null or kd_phase != "":
+	## The reach owns both hands: the hunch may not yank the blade out from
+	## under it (it would fight the sheathe every frame of the crouch).
+	if not set_hunch or current_weapon != "sword" or mount != null \
+			or kd_phase != "" or reach_phase != "":
 		hunch_aggro_prev = false
 		hunch_calm_t = 0.0
 		return
@@ -1885,6 +2781,7 @@ func _update_mounted(delta: float) -> void:
 		if Input.is_key_pressed(KEY_S): mi.z += 1.0
 		if Input.is_key_pressed(KEY_A): mi.x -= 1.0
 		if Input.is_key_pressed(KEY_D): mi.x += 1.0
+		mi += _pad_move()   ## CONTROLLER: the left stick works the reins too
 	mount.ride_input = Vector2(mi.x, mi.z)
 	mount.ride_run = Input.is_key_pressed(KEY_SHIFT) and mi != Vector3.ZERO
 	move_input = Vector3.ZERO
@@ -1917,6 +2814,81 @@ func _try_interact() -> void:
 			_sleep(b as Node3D)
 			return
 	_try_mount_toggle()
+
+
+func _use_firepit(f: Firepit) -> void:
+	## E on a fire pit. ONE VERB, and what it does is decided by what is burning
+	## and what you are carrying:
+	##
+	##   burning          -> feed it, if you have wood
+	##   embers + wood    -> back up to a flame; embers never need a torch
+	##   cold + lit torch -> strike it, and put your first log straight in
+	##   nothing to give  -> it says what it wants
+	##
+	## No new binding: E is already the interact verb that drinks, packs the
+	## bedroll, gathers rock and hoists a log.
+	if f == null or not is_instance_valid(f):
+		return
+	var idx := -1
+	var fuel_name := ""
+	for nm in Firepit.FUEL_ITEMS.keys():
+		var i := _find_item_index(str(nm))
+		if i >= 0:
+			idx = i
+			fuel_name = str(nm)
+			break
+	var torch: bool = offhand_shown.contains("Torch") or offhand_shown2.contains("Torch")
+
+	if f.burning() and f.state == Firepit.State.LIT:
+		if idx < 0:
+			_add_log_msg("Burning -- about %d min left. It wants wood."
+				% int(f.minutes_left()), Color(1.0, 0.78, 0.45))
+			return
+		if not _spend_fuel_item(idx):
+			return
+		f.feed(Firepit.fuel_value(fuel_name))
+		_add_log_msg("%s on the fire -- about %d min of burning"
+			% [fuel_name, int(f.minutes_left())], Color(1.0, 0.72, 0.36))
+		return
+
+	if f.state == Firepit.State.EMBERS and idx >= 0:
+		if not _spend_fuel_item(idx):
+			return
+		f.feed(Firepit.fuel_value(fuel_name))
+		_add_log_msg("The embers take the %s and come back up" % fuel_name.to_lower(),
+			Color(1.0, 0.72, 0.36))
+		return
+
+	if not f.can_light():
+		_add_log_msg("The wind takes every spark -- it needs a roof over it",
+			Color(0.72, 0.80, 0.92))
+		return
+	if not torch:
+		if f.state == Firepit.State.EMBERS:
+			_add_log_msg("Embers, still warm -- feed them before they go",
+				Color(1.0, 0.78, 0.45))
+		else:
+			_add_log_msg("Nothing to light it with -- a lit torch would do it",
+				Color(0.80, 0.80, 0.80))
+		return
+	if not f.light():
+		return
+	if idx >= 0 and _spend_fuel_item(idx):
+		f.feed(Firepit.fuel_value(fuel_name))
+	_add_log_msg("The fire takes -- about %d min of burning" % int(f.minutes_left()),
+		Color(1.0, 0.72, 0.36))
+
+
+func _spend_fuel_item(idx: int) -> bool:
+	## One off the stack, the same shape _place_bedroll spends its bedroll.
+	if idx < 0 or idx >= inventory.size():
+		return false
+	var it: Dictionary = inventory[idx]
+	it.count = int(it.count) - 1
+	if int(it.count) <= 0:
+		_remove_inventory_index(idx)
+	_refresh_inventory_ui()
+	return true
 
 
 func _pack_bedroll(bed: Node3D) -> void:
@@ -1958,6 +2930,65 @@ func _place_bedroll(idx: int) -> void:
 	_refresh_inventory_ui()
 
 
+func _night_ahead() -> Dictionary:
+	## Everything `Slumber` needs, read off the world at the moment the player
+	## lies down. The sky is NOT forecast — you are walked against the weather
+	## you went to bed in, because a forecast would be a lie you cannot see
+	## into. The one thing that does change over the night is the FIRE, which
+	## is the one thing you had a choice about, so its fuel comes along with
+	## its heat.
+	var e := _exposure_env()
+	var season := int(e.get("season", 0))
+	var hour := float(e.get("hour", 21.0))
+	var planned := Slumber.hours_until(hour, Slumber.wake_hour(season))
+	if god or not warmth_survival():
+		## God mode pins the meter and Light mode has no meter to pin. The
+		## night still PASSES — that is the bug being fixed — it just cannot
+		## wake anybody.
+		return {
+			"warmth": exposure.warmth, "wet": exposure.wet,
+			"hours_slept": planned, "hours_planned": planned,
+			"woke": Slumber.WOKE_DAWN, "hour": Slumber.hour_after(hour, planned),
+			"days": Slumber.days_crossed(hour, planned), "rest": 1.0,
+			"coldest": 0.0, "fire_out_h": -1.0, "steps": 0,
+		}
+	var fire0 := float(e.get("fire_c", 0.0))
+	var fuel := 0.0
+	for f in get_tree().get_nodes_in_group("fires"):
+		var pit := f as Node3D
+		if pit == null or not ("fuel" in pit):
+			continue
+		if pit.global_position.distance_to(global_position) > Firepit.FIRE_RANGE:
+			continue
+		fuel = maxf(fuel, float(pit.get("fuel")))
+	return Slumber.night(e, exposure.warmth, exposure.wet, planned, fire0, fuel)
+
+
+func _apply_slept() -> void:
+	## What the night was worth. A whole one closes the whole wound, exactly as
+	## sleeping always did — taking that away would be a nerf nobody asked for
+	## — and a night broken at four in the morning closes the fraction of it
+	## you actually got. The reward for a warm camp is an UNINTERRUPTED night,
+	## not a stronger one.
+	var r: Dictionary = _slept
+	var rest := clampf(float(r.get("rest", 1.0)), 0.0, 1.0)
+	health = Slumber.heal_to(health, max_health, rest)
+	stamina = Slumber.heal_to(stamina, max_stamina, rest)
+	health_show = 2.0
+	if not r.is_empty():
+		exposure.warmth = clampf(float(r.get("warmth", exposure.warmth)),
+				0.0, Exposure.WARMTH_MAX)
+		exposure.wet = clampf(float(r.get("wet", exposure.wet)), 0.0, 1.0)
+		warmth_show = 3.0
+		if thirst_survival():
+			thirst = Slumber.thirst_after(thirst, thirst_rate_per_sec(),
+					float(r.get("hours_slept", 0.0)))
+			thirst_show = 3.0
+	var line: Array = Slumber.wake_line(r)
+	_add_log_msg(String(line[0]), line[1] as Color)
+	_slept = {}
+
+
 func _sleep(_bed: Node3D) -> void:
 	## Sleep until dawn — as a SEQUENCE now: lie down onto the bedroll (eyes
 	## sink and tilt), BLACK SCREEN while the underground reseeds and re-carves
@@ -1966,7 +2997,7 @@ func _sleep(_bed: Node3D) -> void:
 	if _any_enemy_mad_at_me():
 		_add_log_msg("No sleep — something out there means you harm", Color(1.0, 0.62, 0.35))
 		return
-	if global_position.y < -1.5:
+	if Overworld.depth_below_surface(global_position) > 1.5:
 		## The shift re-carves the deep — sleeping down there would entomb you.
 		## TODO(design): step 9's player stability bubble lifts this rule.
 		_add_log_msg("Too deep to sleep — the shifting earth would swallow you", Color(1.0, 0.62, 0.35))
@@ -1990,9 +3021,17 @@ func _sleep(_bed: Node3D) -> void:
 
 func _sleep_blackout() -> void:
 	var w := get_tree().get_first_node_in_group("world")
-	if w == null or not bool(w.call("sleep_at_bed")):
+	if w == null:
+		_sleep_rise()
+		return
+	## Walk the night BEFORE the clock moves, because how much of it you
+	## actually get is what the clock is then moved BY. A man the cold wakes at
+	## four in the morning wakes the world at four in the morning.
+	_slept = _night_ahead()
+	if not bool(w.call("sleep_at_bed", float(_slept.get("hours_slept", 0.0)))):
 		## The earth's still settling (deep threads busy) — wake back up.
 		_add_log_msg("Restless — the earth is still settling. Try again shortly.", Color(0.8, 0.8, 0.8))
+		_slept = {}
 		_sleep_rise()
 		return
 	sleep_phase = "black"
@@ -2010,10 +3049,14 @@ func _sleep_poll() -> void:
 		return
 	if w.has_method("set_blackout"):
 		w.call("set_blackout", false, "")
-	health = max_health
-	stamina = max_stamina
-	health_show = 2.0
-	_add_log_msg("You sleep. Dawn comes — and the deep has moved.", Color(0.85, 0.9, 1.0))
+	## [coldscreen] Read BEFORE _apply_slept(), which clears `_slept`. A
+	## night that ended at four in the morning because the fire went out
+	## should not open the same way as one that ran to dawn: it holds the
+	## dark longer, comes up slower, and opens on a hard shiver. Until
+	## this, the whole difference was one line of log text.
+	var woke_cold := String(_slept.get("woke", Slumber.WOKE_DAWN)) == Slumber.WOKE_COLD
+	_apply_slept()
+	cold.wake(woke_cold)
 	_sleep_rise()
 
 
@@ -2113,6 +3156,7 @@ func thrown_from_mount(h: Node3D) -> void:
 
 
 func horse_kick(dmg: float, from_pos: Vector3, attacker: Node = null) -> void:
+	dmg *= GameMode.creature_damage_mult(attacker)   ## hooves are a creature too
 	## Two hooves like hammers. Timing still saves you — a dash's i-frames or a
 	## perfect guard turn it aside — but anything less puts you on the ground.
 	if invuln_timer > 0.0:
@@ -2146,6 +3190,8 @@ func horse_kick(dmg: float, from_pos: Vector3, attacker: Node = null) -> void:
 
 func _start_knockdown(_from_pos: Vector3, fling := Vector3.ZERO) -> void:
 	## Down you go. Cancels everything in your hands; protects NOTHING.
+	if god:
+		return  ## ...except god mode. Every knockdown path funnels through here.
 	attacking = false
 	draw_attack = false
 	drawing = false
@@ -2176,6 +3222,48 @@ func _body_up() -> void:
 	## Start standing the visible body back up (blend from the ragdoll pose).
 	if body_skin != null and body_skin.ragdoll:
 		body_skin.ragdoll_stop()
+
+
+func _stand_up_hard() -> void:
+	## End a knockdown OUT OF ORDER — dying face-down, or reloading a save while
+	## pinned — instead of walking the "rise" phase that normally cleans up.
+	##
+	## THE BUG THIS FIXES: _update_knockdown lays the visible body down by
+	## writing body_rig.rotation_degrees.x = 82 AND body_rig.position.z = -0.95,
+	## and ONLY the end of "rise" (kd_phase -> "") ever undoes them. Skip that
+	## and the tilt quietly heals itself in _update_action_camera's lerp, but
+	## NOTHING anywhere else writes body_rig.position — so the body stands a
+	## metre in FRONT of the lens for the rest of the run, which in first person
+	## reads exactly as "my camera is several feet behind my player". Death and
+	## load both take that shortcut, so both come through here.
+	if pinned_by != null or _pin_watch != null:
+		pinned_by = null
+		pin_t = 0.0
+		_hide_pin_prompt()
+		if _pin_watch != null and is_instance_valid(_pin_watch):
+			_pin_watch.queue_free()
+		_pin_watch = null
+	kd_phase = ""
+	kd_t = 0.0
+	kd_bounce = 0.0
+	swimming = false
+	_set_water_tint(0.0)
+	## The manhandle states die here too — death and load must never leave
+	## you hanging off a jaw that no longer has you (same class of bug as the
+	## body_rig shift below: an out-of-order exit has to undo EVERYTHING).
+	grabbed_by = null
+	grab_t = 0.0
+	pressed_by = null
+	press_t = 0.0
+	if body_col:
+		body_col.set_deferred("disabled", false)
+	_body_up()
+	if body_rig != null:
+		body_rig.position = Vector3.ZERO
+		body_rig.rotation_degrees.x = 0.0
+	if camera != null:
+		camera.rotation_degrees.z = 0.0
+	_update_head_offset()
 
 
 func _update_knockdown(delta: float) -> void:
@@ -2276,6 +3364,163 @@ func notify(text: String, col := Color(0.9, 0.9, 1.0)) -> void:
 	_add_log_msg(text, col)
 
 
+## ================= Manhandled (bear jaws / bear weight) ====================
+
+
+func creature_grab(attacker: Node3D, dmg: float) -> String:
+	## A jaw closes on you (Lemon, 2026-08-29). Timing still saves you — dash
+	## i-frames slip it, a perfect guard turns it into a stagger — but
+	## anything less and you are IN THE MOUTH: your body hangs off the animal
+	## (its grab_anchor(), read every frame) until it throws you or something
+	## hits it hard enough that it lets go.
+	if god or grabbed_by != null or pressed_by != null or mount != null or kd_phase != "" \
+			or input_locked or climbing or attacker == null:
+		return "no"
+	if invuln_timer > 0.0:
+		if dash_timer > 0.0 and dodge_cd <= 0.0:
+			dodge_cd = 0.5
+			_add_log_msg("Dodged!", Color(0.55, 0.95, 1.0))
+			_record_progress("untouchable", 1)
+		return "dodged"
+	if blocking and block_held_time <= PARRY_WINDOW:
+		block_held_time = 999.0
+		block_impact = 0.22
+		cam_shake = maxf(cam_shake, 0.12)
+		_add_log_msg("Parried!", Color(1.0, 0.95, 0.55))
+		if attacker.has_method("on_parried"):
+			attacker.on_parried()
+		_record_progress("perfect_guard", 1)
+		return "parried"
+	_drop_carried_logs("the jaws closed on you")
+	take_damage(dmg, attacker.global_position, true, Vector3.INF, attacker)
+	if health <= 0.0 or kd_phase != "":
+		return "no"   ## the clamp itself finished it — nothing left to carry
+	grabbed_by = attacker
+	grab_t = 0.0
+	attacking = false
+	draw_attack = false
+	drawing = false
+	bow_draw = 0.0
+	blocking = false
+	climbing = false
+	pick_swinging = false
+	dash_timer = 0.0
+	hitstun_timer = 0.0
+	velocity = Vector3.ZERO
+	if body_col:
+		body_col.set_deferred("disabled", true)   ## carried: no capsule fights
+	cam_shake = maxf(cam_shake, 0.5)
+	_add_log_msg("It has you!", Color(1.0, 0.40, 0.25))
+	return "grabbed"
+
+
+func _update_grabbed(delta: float) -> void:
+	grab_t += delta
+	blocking = false
+	sprinting = false
+	var b := grabbed_by
+	## [water] a holder that keeps its own clock (the snapper, the Drowned)
+	## says how long it may keep you; a jaw without one gets the bear's 4.5 s
+	var hold_max := 4.5
+	if is_instance_valid(b) and b.has_method("hold_seconds"):
+		hold_max = float(b.call("hold_seconds"))
+	if b == null or not is_instance_valid(b) or ("dying" in b and bool(b.get("dying"))) \
+			or grab_t > hold_max:
+		grab_release(Vector3.ZERO)   ## whatever held you stopped holding
+		return
+	## [water] STRUGGLE: Space or the attack button, each press once, tells a
+	## holder that listens. The Drowned and the snapper count them.
+	if b.has_method("struggled"):
+		var sp := Input.is_key_pressed(KEY_SPACE)
+		var cl := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if sp and not _struggle_space_held:
+			b.call("struggled")
+		if cl and not _struggle_click_held:
+			b.call("struggled")
+		_struggle_space_held = sp
+		_struggle_click_held = cl
+	## [water] held under: the tint, the muffle and the breath all follow the
+	## lens against the surface, exactly as they do when you swim
+	var wy_g: float = Overworld.water_y(global_position)
+	if wy_g != Overworld.NO_WATER:
+		var cam_y_g := camera.global_position.y if camera != null else global_position.y + _eye_h
+		_set_water_tint(1.0 if cam_y_g < wy_g - 0.05 else 0.0)
+		_breath_tick(delta, _swim_face)
+	if b.has_method("grab_anchor"):
+		var a: Dictionary = b.call("grab_anchor")
+		var target: Vector3 = a.get("pos", global_position)
+		global_position = global_position.lerp(target, clampf(delta * 22.0, 0.0, 1.0))
+	velocity = Vector3.ZERO
+	## You hang and you thrash: the lens rolls with the shaking, the visible
+	## body dangles. Mouse-look stays yours — you watch it happen.
+	cam_shake = maxf(cam_shake, 0.10)
+	if camera:
+		camera.rotation_degrees.z = lerpf(camera.rotation_degrees.z,
+			13.0 * sin(grab_t * 8.5), clampf(delta * 8.0, 0.0, 1.0))
+	if body_rig:
+		body_rig.rotation_degrees.x = lerpf(body_rig.rotation_degrees.x, 38.0,
+			clampf(delta * 10.0, 0.0, 1.0))
+	_frame_fx_and_regen(delta)
+	_update_hud(delta)
+	_update_log(delta)
+
+
+func grab_release(vel: Vector3) -> void:
+	## The jaw opens. With a real throw vector you leave sideways and eat
+	## dirt; with none you are simply dropped where it stood.
+	if grabbed_by == null:
+		return
+	var from := (grabbed_by as Node3D).global_position if is_instance_valid(grabbed_by) \
+		else global_position + Vector3.BACK
+	grabbed_by = null
+	grab_t = 0.0
+	if body_col:
+		body_col.set_deferred("disabled", false)
+	if camera:
+		camera.rotation_degrees.z = 0.0
+	if body_rig:
+		body_rig.rotation_degrees.x = 0.0
+		body_rig.position = Vector3.ZERO
+	if vel.length() > 0.5:
+		_add_log_msg("Thrown!", Color(1.0, 0.45, 0.30))
+		_start_knockdown(from, Vector3(vel.x, 0.0, vel.z))
+		velocity.y = maxf(velocity.y, vel.y + 1.2)
+	else:
+		hitstun_timer = 0.45
+		velocity = Vector3.ZERO
+
+
+func creature_press(attacker: Node3D) -> bool:
+	## The other bad place to be (Lemon, 2026-08-29): the animal reared up
+	## and came down ON you. You are not carried — you are UNDER it: barely
+	## able to move, no jumping out, and a dash is the one honest way out
+	## from underneath before the shove puts you flat.
+	if god or pressed_by != null or grabbed_by != null or mount != null or kd_phase != "" \
+			or input_locked or climbing or attacker == null:
+		return false
+	if invuln_timer > 0.0:
+		return false
+	pressed_by = attacker
+	press_t = 0.0
+	_drop_carried_logs("the weight came down on you")
+	cam_shake = maxf(cam_shake, 0.4)
+	_add_log_msg("It leans its weight onto you!", Color(1.0, 0.55, 0.30))
+	return true
+
+
+func creature_press_end(fling: Vector3) -> void:
+	## The lean ends: shoved flat (a real fling), or simply released.
+	if pressed_by == null:
+		return
+	var from := (pressed_by as Node3D).global_position if is_instance_valid(pressed_by) \
+		else global_position + Vector3.BACK
+	pressed_by = null
+	press_t = 0.0
+	if fling.length() > 0.5 and kd_phase == "" and mount == null:
+		_add_log_msg("Shoved down!", Color(1.0, 0.45, 0.30))
+		_start_knockdown(from, Vector3(fling.x, 0.0, fling.z))
+
+
 func _update_gait(delta: float) -> void:
 	## The one shared stride. Amplitude eases toward "how fast are we actually
 	## moving" so animations breathe in and out instead of snapping, and the
@@ -2285,13 +3530,36 @@ func _update_gait(delta: float) -> void:
 	gait_amount = lerpf(gait_amount, target, clampf(delta * 6.0, 0.0, 1.0))
 	if is_on_floor():
 		gait_phase += delta * (4.5 + hspeed * 1.35)
+	## [steps] FOOTFALL. The bob already dips the camera at every
+	## |sin(gait_phase)| peak -- twice a stride, once per foot. The sound
+	## lands on that same beat, so what you hear is exactly what you see at
+	## any speed, with no second clock to drift. (If it ever reads too fast,
+	## the one-line halving is PI -> TAU on the line below.)
+	var _si := int(floor((gait_phase - PI * 0.5) / PI))
+	if _si != _step_idx:
+		var _first := _step_idx == -9999
+		_step_idx = _si
+		if not _first and is_on_floor() and gait_amount > 0.12 \
+				and not swimming and kd_phase == "" and mount == null \
+				and not climbing:
+			StepAudio.footfall(self, global_position, gait_amount,
+				crouching, prone)
 	## Landing: remember how hard we fell, dip the view, spring softly back.
 	if not is_on_floor():
 		_fall_speed = maxf(0.0, -velocity.y)
 	elif not _was_on_floor:
 		land_dip = maxf(land_dip, clampf(_fall_speed * 0.014, 0.0, 0.16))
+		StepAudio.landing(self, global_position, _fall_speed)  ## [steps]
 		_apply_fall_damage(_fall_speed)
 	_was_on_floor = is_on_floor()
+	## F2 DROP-IN GRACE. It lasts until your feet are properly under you again.
+	## The short hold covers the frame you dropped on, when is_on_floor() is
+	## still reporting the ground the parked body was standing on.
+	if _fall_grace:
+		if _fall_grace_hold > 0.0:
+			_fall_grace_hold -= delta
+		elif is_on_floor():
+			_fall_grace = false
 	land_dip = lerpf(land_dip, 0.0, clampf(delta * 8.0, 0.0, 1.0))
 	## Head-bob target: a gentle side sway, plus a dip at each footfall.
 	var bt := Vector2(
@@ -2303,6 +3571,22 @@ func _update_gait(delta: float) -> void:
 func _apply_fall_damage(spd: float) -> void:
 	## Called once at touchdown with the impact speed. Bypasses blocking and
 	## i-frames — the ground doesn't care how good your guard is.
+	##
+	## ...unless it is switched off, which it is by default (Settings -> Fall
+	## Damage). This ONE early return kills the health hit, the death, and the
+	## hard-landing knockdown together: leaving the knockdown behind would read
+	## as "fall damage is still on" even with the number at zero. The camera
+	## dip and the landing sound are not damage and stay.
+	## F2 DROP-IN: the fall you are in the middle of is the editor's, not yours
+	## -- you were 300 m up because you were building, not because you jumped.
+	## One free touchdown (no damage, no death, no knockdown), then it is spent
+	## and the very next landing is judged normally.
+	if _fall_grace:
+		_fall_grace = false
+		_fall_grace_hold = 0.0
+		return
+	if not set_fall_dmg or god:
+		return
 	if spd <= FALL_SAFE_SPEED or kd_phase != "" or mount != null or climbing:
 		return
 	var dmg := (spd - FALL_SAFE_SPEED) * FALL_DMG_PER_MS
@@ -2347,6 +3631,87 @@ func _apply_step_smooth(delta: float) -> void:
 			sin(gait_phase) * 0.4 * gait_amount, clampf(delta * 8.0, 0.0, 1.0))
 
 
+func _boxed_in() -> bool:
+	## Blocked AHEAD is a wall, and a wall is not a bug. Blocked in EVERY
+	## direction is a pocket, and only geometry that should not exist does that
+	## to you. Eight probes, run only while something already looks wrong.
+	for i in range(8):
+		var a := TAU * float(i) / 8.0
+		if move_and_collide(Vector3(cos(a), 0.0, sin(a)) * UNSTICK_PROBE, true) == null:
+			return false
+	return true
+
+
+func _wedged_in_wood() -> Node3D:
+	## The fallen trunk you are inside of, measured to its AXIS rather than its
+	## origin -- a twenty-metre log has both ends ten metres from its centre.
+	var best: Node3D = null
+	var best_d := 2.2
+	for t in get_tree().get_nodes_in_group("fallen_trunks"):
+		var n3 := t as Node3D
+		if n3 == null or not is_instance_valid(n3):
+			continue
+		var half := 4.0
+		if "trunk_len" in n3:
+			half = maxf(float(n3.get("trunk_len")) * 0.5, 0.5)
+		var ax: Vector3 = n3.global_transform.basis.y.normalized()
+		var rel: Vector3 = global_position - n3.global_position
+		var along := clampf(rel.dot(ax), -half, half)
+		var d := (rel - ax * along).length()
+		if d < best_d:
+			best_d = d
+			best = n3
+	return best
+
+
+func _unwedge(delta: float, wants_to_move: bool) -> void:
+	## WEDGED IN THE TIMBER. A settled trunk is a long cylinder with a crowd of
+	## limb spheres bolted along it, resting propped at an angle; walk a capsule
+	## into one of the pockets between those shapes and every slide plane points
+	## into another one. move_and_slide then resolves to nothing in every
+	## direction and you are stuck there for good -- there is no pin state to
+	## time out and no rise timer, so from your side it is the game locking up.
+	## FallenTrunk now drops those colliders when it freezes, which should mean
+	## this never fires; this is the belt to that pair of braces, and it is
+	## cheap because it only measures until you stop moving.
+	if not wants_to_move or kd_phase != "" or climbing or mount != null \
+			or input_locked or pinned_by != null or grabbed_by != null:
+		_unstick_t = 0.0
+		_unstick_from = global_position
+		return
+	if _unstick_t <= 0.0:
+		_unstick_from = global_position
+	_unstick_t += delta
+	if _unstick_t < UNSTICK_WINDOW:
+		return
+	var moved := global_position.distance_to(_unstick_from)
+	_unstick_t = 0.0
+	_unstick_from = global_position
+	if moved > UNSTICK_MOVED:
+		return
+	if not _boxed_in():
+		return
+	var wood := _wedged_in_wood()
+	if wood == null:
+		return
+	## Out PERPENDICULAR to the log: that is the short way off it. Along the
+	## trunk is twenty more metres of the same problem.
+	var axis: Vector3 = wood.global_transform.basis.y.normalized()
+	var out: Vector3 = global_position - wood.global_position
+	out -= axis * out.dot(axis)
+	out.y = 0.0
+	if out.length_squared() < 0.01:
+		out = -_flat_forward()
+	var push := out.normalized()
+	velocity = push * UNSTICK_PUSH + Vector3.UP * UNSTICK_HOP
+	## Plus an immediate nudge, but only into space that is actually clear --
+	## the cure for being inside the world is never a teleport further into it.
+	var probe := push * 0.22 + Vector3.UP * 0.14
+	if move_and_collide(probe, true) == null:
+		global_position += probe
+	_add_log_msg("You shove clear of the timber.", Color(0.78, 0.72, 0.58))
+
+
 func _step_up(delta: float) -> void:
 	## Let the player walk up small ledges (anything up to STEP_HEIGHT). If the
 	## path ahead is blocked at foot level but clear once lifted by a small amount,
@@ -2361,7 +3726,16 @@ func _step_up(delta: float) -> void:
 	## pressing into even at low speed — a gentle autojump over them.
 	var motion := horiz.normalized() * maxf(horiz.length() * delta, 0.10)
 	## Only bother if something is actually blocking us at foot level.
-	if move_and_collide(motion, true) == null:
+	var hit := move_and_collide(motion, true)
+	if hit == null:
+		return
+	## A WALKABLE SLOPE IS NOT A STEP (2026-09-03). move_and_slide already walks
+	## you up anything shallower than floor_max_angle. While this fired on those
+	## too, every physics frame on a hillside — or on the gentle roll of the
+	## meadow — handed the body a free 0.12 m lift, so you rode up the grass in
+	## little hops and paid four body_test_motion queries a frame for the whole
+	## walk. Only a face too steep to walk up is a step.
+	if hit.get_normal().y > cos(floor_max_angle) - 0.02:
 		return
 	var params := PhysicsTestMotionParameters3D.new()
 	var result := PhysicsTestMotionResult3D.new()
@@ -2371,6 +3745,16 @@ func _step_up(delta: float) -> void:
 		params.from = lifted
 		params.motion = motion
 		if not PhysicsServer3D.body_test_motion(get_rid(), params, result):
+			## ...and there has to be a LEDGE up there to land on. Clear air
+			## ahead of a lifted capsule is a gap or an overhang, not a stair.
+			var landed := lifted
+			landed.origin += motion
+			params.from = landed
+			params.motion = Vector3.DOWN * (h + 0.06)
+			var has_top := PhysicsServer3D.body_test_motion(get_rid(), params, result)
+			params.motion = motion
+			if not has_top:
+				return
 			## Clear at this height — it's a step, not a wall. Snap the body up, but
 			## record the rise as a camera offset so the VIEW eases up smoothly
 			## instead of popping. Capped LOW: repeated auto-steps (backing up a
@@ -2437,6 +3821,18 @@ func _update_body_arms(delta: float) -> void:
 			## high and proud, with just a ghost of the stride left in it.
 			l_pose = Vector3(0.55 + s * 0.25, 0.0, 0.0)
 
+	## THE REACH overrides the stride, the carry and the gear both ways round:
+	## out and DOWN to the thing on the ground, then back and UP over the
+	## shoulder to the rucksack flap. Applied absolute (r_now) so no lerp drags
+	## behind the hand -- the fist has to actually be where the item is.
+	if reach_phase != "" or reach_out > 0.001 or reach_stow > 0.001:
+		var ge := reach_out * reach_out * (3.0 - 2.0 * reach_out)
+		var gs := reach_stow * reach_stow * (3.0 - 2.0 * reach_stow)
+		r_pose = Vector3(GRAB_ARM_OUT * ge + GRAB_ARM_STOW * gs, 0.0,
+			GRAB_ARM_FLARE * ge - 0.35 * gs)
+		r_now = true
+		l_pose = Vector3(0.30 * ge, 0.0, -0.18 * ge)   ## off hand braced on the knee
+
 	if mount != null:
 		## In the saddle: thighs forward, feet in the stirrups, arms quiet —
 		## except mid-sweep, where TP shows the saddle cut on the body's arm.
@@ -2486,27 +3882,35 @@ func _tp_swing_arm_pose(p: float) -> Vector3:
 		var sx := Enemy._cut_arc(p, -0.45, -1.45, 0.30)
 		var sz := Enemy._cut_arc(p, 0.0, 0.85, -0.85) * (1.0 if mounted_side == 0 else -1.0)
 		return Vector3(sx, 0.0, sz)
-	var x := Enemy._cut_arc(p, -0.45, -2.05, 0.75)
-	var z := 0.0
-	match combo_index:
-		1:
-			z = Enemy._cut_arc(p, 0.0, 0.45, -0.55)   ## high diagonal, ripped down-left
-		2:
-			z = Enemy._cut_arc(p, 0.0, -0.50, 0.50)   ## rising backhand out of 1's finish
-		_:
-			z = 0.0                                    ## finisher: dead-overhead chop
+	## SIDE-TO-SIDE slashes (Lemon's call — no stab-with-a-windup). The arm
+	## coils OUT to one side at chest height and whips FLAT across the front;
+	## the old arc hauled the fist to -2.05 (behind the head) and drove it
+	## forward, which read as a thrust from behind the camera. lat picks the
+	## coil side — forehand (+1) starts right and sweeps left, the backhand
+	## (combo 2) mirrors it, and the finisher is the forehand thrown wider.
+	## Damage still lands at p≈0.62, where the fist crosses the front.
+	var lat := -1.0 if combo_index == 2 else 1.0
+	var wide := 1.15 if combo_index == 3 else 1.0
+	var x := Enemy._cut_arc(p, -0.35, 0.55 * wide, 1.00 * wide)
+	var z := Enemy._cut_arc(p, 0.0, 1.15 * wide, -1.25 * wide) * lat
 	return Vector3(x, 0.0, z)
 
 
 func _tp_chop_arm_pose(p: float, windup: float, cleave: bool, mirror := 1.0) -> Vector3:
-	## The body's tool swing (pickaxe bite / axe chop): hoist over the
-	## shoulder, drive down and FORWARD into the impact, ease back to the
-	## carry. The axe swings the flat CLEAVE on both sides — `mirror` flips it
-	## for the backhand, so the body alternates exactly like the viewmodel.
+	## The body's tool swing. The PICKAXE still hoists overhead and drives down
+	## — that is what a pick is. The AXE cleave is a SIDE swing: the arm coils
+	## out to one flank at about chest height and whips FLAT across the front,
+	## `mirror` picking the flank so the body matches the viewmodel exactly.
 	##
 	## Note the drive end is POSITIVE on x: negative there points the fist
 	## behind the body, which is what made the third-person chop read as a
-	## backward swing too. Down and away from the camera, always.
+	## backward swing too. Across and away from the camera, always.
+	##
+	## HORIZONTAL (Lemon 2026-09-01). The cleave used to run x -1.35 -> +0.35,
+	## which is a fist hoisted above the shoulder and dropped — a felling chop.
+	## It now stays near the height it started at (-0.15 -> +0.65, the same band
+	## the sword's flat cut lives in) and the travel has moved into z, which is
+	## the lateral one: 1.25 out to the flank, 1.10 across to the other side.
 	var x: float
 	var z := 0.0
 	if p < windup:
@@ -2514,8 +3918,8 @@ func _tp_chop_arm_pose(p: float, windup: float, cleave: bool, mirror := 1.0) -> 
 		w = w * w  ## heavy iron is slow to start moving
 		x = lerpf(-0.35, -2.15, w)
 		if cleave:
-			x = lerpf(-0.35, -1.35, w)          ## hoisted up and BACK...
-			z = lerpf(0.0, 0.95 * mirror, w)    ## ...over that shoulder
+			x = lerpf(-0.35, -0.15, w)          ## up to chest height, no higher...
+			z = lerpf(0.0, 1.25 * mirror, w)    ## ...and coiled right out to that flank
 	else:
 		var w := (p - windup) / maxf(1.0 - windup, 0.001)
 		var drive := 1.0 - pow(1.0 - clampf(w / 0.34, 0.0, 1.0), 3.0)
@@ -2523,8 +3927,8 @@ func _tp_chop_arm_pose(p: float, windup: float, cleave: bool, mirror := 1.0) -> 
 		back = back * back * (3.0 - 2.0 * back)
 		x = lerpf(lerpf(-2.15, 0.80, drive), -0.35, back)
 		if cleave:
-			x = lerpf(lerpf(-1.35, 0.35, drive), -0.35, back)              ## down and forward
-			z = lerpf(lerpf(0.95 * mirror, -0.75 * mirror, drive), 0.0, back)  ## across the body
+			x = lerpf(lerpf(-0.15, 0.65, drive), -0.35, back)              ## stays level
+			z = lerpf(lerpf(1.25 * mirror, -1.10 * mirror, drive), 0.0, back)  ## flat across the body
 	return Vector3(x, 0.0, z)
 
 
@@ -2538,11 +3942,11 @@ func _update_tp_gear(_delta: float) -> void:
 	if tp_sword:
 		tp_sword.visible = tp and current_weapon == "sword" and sheath_t < 0.5
 	if tp_pick:
-		tp_pick.visible = tp and current_weapon == "pickaxe"
+		tp_pick.visible = tp and current_weapon == "pickaxe" and reach_phase == ""
 	if tp_axe:
-		tp_axe.visible = tp and current_weapon == "axe"
+		tp_axe.visible = tp and current_weapon == "axe" and reach_phase == ""
 	if tp_bow:
-		tp_bow.visible = tp and current_weapon == "bow"
+		tp_bow.visible = tp and current_weapon == "bow" and reach_phase == ""
 		if tp_bow.visible and left_arm:
 			tp_bow.rotation.x = -left_arm.rotation.x  ## stays upright as the arm points
 	if tp_shield:
@@ -2706,20 +4110,25 @@ func _try_attack() -> void:
 ## A real cut has three beats — coil back, whip THROUGH the target, then the
 ## blade's weight carries past and settles. Damage lands at the impact pose.
 const SWING_KEYS := [
-	[  ## 1: high diagonal cut — chambered over the right shoulder, ripped down-left
-		[Vector3(-28.0, 62.0, 18.0), Vector3(0.10, 0.06, 0.06)],
-		[Vector3(6.0, -12.0, -4.0), Vector3(-0.02, -0.02, -0.16)],
-		[Vector3(26.0, -58.0, -14.0), Vector3(-0.10, -0.08, -0.06)],
+	[  ## 1: flat forehand SLASH — coiled out to the RIGHT, whipped straight
+	   ## across the frame to the LEFT. Lemon's rule: swings are side-to-side
+	   ## slashes, never a stab — the forward pos punch stays small and the
+	   ## yaw+roll travel is where the cut lives.
+		[Vector3(-8.0, 74.0, 34.0), Vector3(0.16, 0.05, 0.08)],
+		[Vector3(5.0, -10.0, -8.0), Vector3(-0.03, -0.02, -0.13)],
+		[Vector3(16.0, -80.0, -34.0), Vector3(-0.18, -0.05, 0.0)],
 	],
-	[  ## 2: rising back-cut out of 1's finish — low-left whipped up to high-right
-		[Vector3(24.0, -60.0, -16.0), Vector3(-0.08, -0.06, 0.04)],
-		[Vector3(-2.0, 8.0, 2.0), Vector3(0.0, 0.0, -0.15)],
-		[Vector3(-20.0, 54.0, 12.0), Vector3(0.08, 0.04, -0.04)],
+	[  ## 2: flat backhand out of 1's finish — carried LEFT, ripped back RIGHT
+		[Vector3(-6.0, -76.0, -32.0), Vector3(-0.16, 0.04, 0.06)],
+		[Vector3(5.0, 10.0, 8.0), Vector3(0.03, -0.02, -0.13)],
+		[Vector3(14.0, 78.0, 32.0), Vector3(0.18, -0.05, 0.0)],
 	],
-	[  ## 3: overhead chop — chambered high, driven down-forward with the lunge
-		[Vector3(-72.0, 6.0, 2.0), Vector3(0.02, 0.10, 0.10)],
-		[Vector3(40.0, -4.0, 0.0), Vector3(0.0, -0.04, -0.20)],
-		[Vector3(66.0, -8.0, -4.0), Vector3(-0.02, -0.10, -0.10)],
+	[  ## 3: the heavy finisher — a high forehand ripped DIAGONALLY down
+	   ## across the body. Still a slash (side to side), just thrown wider
+	   ## and with the shoulders behind it.
+		[Vector3(-30.0, 82.0, 38.0), Vector3(0.18, 0.12, 0.10)],
+		[Vector3(12.0, -14.0, -10.0), Vector3(-0.04, -0.05, -0.16)],
+		[Vector3(30.0, -86.0, -36.0), Vector3(-0.20, -0.14, -0.02)],
 	],
 ]
 
@@ -3235,7 +4644,7 @@ func _try_pick_swing() -> void:
 func _update_pickaxe(delta: float) -> void:
 	if pick_vm == null:
 		return
-	pick_vm.visible = current_weapon == "pickaxe"
+	pick_vm.visible = current_weapon == "pickaxe" and reach_phase == ""
 	if vein_hint_cd > 0.0:
 		vein_hint_cd -= delta
 	if axe_hint_cd > 0.0:
@@ -3288,6 +4697,53 @@ func _update_pickaxe(delta: float) -> void:
 ## ======================== War Axe (weapon 4) ==============================
 
 
+func _axe_entry_side() -> int:
+	## WHICH SHOULDER THE CHOP COMES OFF — decided by the wood, not by a coin
+	## flip. A feller doesn't alternate for the sake of it: the edge travels
+	## IN from the flank of the trunk he's facing, so every bite arrives from
+	## OUTSIDE the tree and opens the notch on the way through. Swinging the
+	## other way makes the haft cross the trunk before the head does, which is
+	## what reads as chopping backwards.
+	##
+	## Reads the same crosshair ray the strike point and the notch already
+	## use, so first and third person agree by construction. Returns 0
+	## (forehand — in from the RIGHT), 1 (backhand — in from the LEFT), or -1
+	## for "no wood in the arc, or dead square on the middle": keep
+	## alternating, which is what a fight wants.
+	if camera == null:
+		return -1
+	var forward := -camera.global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.000001:
+		return -1
+	forward = forward.normalized()
+	var wood := _nearest_wood(forward, AXE_RANGE + 0.5)
+	if wood == null:
+		return -1
+	var right := camera.global_transform.basis.x
+	right.y = 0.0
+	if right.length_squared() < 0.000001:
+		return -1
+	right = right.normalized()
+	## Where the edge would go in, measured ACROSS the trunk's own centreline:
+	## positive = you are looking at its right flank.
+	var pn := _wood_strike_point(wood, AXE_RANGE + 0.6)
+	var across: Vector3 = (pn[0] as Vector3) - wood.global_position
+	across.y = 0.0
+	var lateral := right.dot(across)
+	if absf(lateral) < AXE_SIDE_DEADZONE:
+		## Square on the middle of the trunk — or the ray missed a collider
+		## narrower than the bark you can see. Fall back to where the TREE
+		## sits in your view: one off to your left is one you are seeing the
+		## right side of.
+		var off: Vector3 = wood.global_position - _aim_origin()
+		off.y = 0.0
+		lateral = -right.dot(off)
+		if absf(lateral) < 0.001:
+			return -1
+	return 0 if lateral > 0.0 else 1
+
+
 func _try_axe_swing() -> void:
 	if axe_swinging or hitstun_timer > 0.0 or blocking or climbing or kd_phase != "":
 		return
@@ -3301,7 +4757,13 @@ func _try_axe_swing() -> void:
 	axe_swinging = true
 	axe_t = 0.0
 	axe_hit_done = false
-	axe_side = 1 - axe_side  ## forehand, backhand, forehand, backhand...
+	## THE WOOD PICKS THE SHOULDER. The edge comes in from the flank of the
+	## trunk you are looking at, and keeps coming in from there swing after
+	## swing, so the axe always travels from outside the tree INTO it. With
+	## nothing to chop in the arc — a fight — it alternates as it always did:
+	## forehand, backhand, forehand, backhand...
+	var entry := _axe_entry_side()
+	axe_side = entry if entry >= 0 else 1 - axe_side
 	if axe_vm:
 		axe_start_rot = axe_vm.rotation_degrees  ## melt out of the upright carry
 		axe_start_pos = axe_vm.position
@@ -3310,7 +4772,7 @@ func _try_axe_swing() -> void:
 func _update_axe(delta: float) -> void:
 	if axe_vm == null:
 		return
-	axe_vm.visible = current_weapon == "axe"
+	axe_vm.visible = current_weapon == "axe" and reach_phase == ""
 	if not axe_vm.visible:
 		axe_swinging = false
 		axe_t = 0.0
@@ -3594,7 +5056,7 @@ func _bow_loose() -> void:
 func _update_bow(delta: float) -> void:
 	if bow_vm == null:
 		return
-	bow_vm.visible = current_weapon == "bow"
+	bow_vm.visible = current_weapon == "bow" and reach_phase == ""
 	if not bow_vm.visible:
 		drawing = false
 		bow_draw = 0.0
@@ -3651,6 +5113,14 @@ func _consume_arrow() -> void:
 
 func _give_item(item_name: String, n: int, weight := 0.06) -> bool:
 	return _give_item_dict({"name": item_name, "weight": weight, "count": n, "slot": ""})
+
+
+func _cam_side_name() -> String:
+	if cam_shoulder > 0.5:
+		return "third person, right shoulder"
+	if cam_shoulder < -0.5:
+		return "third person, left shoulder"
+	return "third person, centred"
 
 
 func _aim_origin() -> Vector3:
@@ -3838,6 +5308,13 @@ func _commit_swing() -> bool:
 
 
 func take_damage(amount: float, from_pos := Vector3.INF, strong := false, lunge_throw := Vector3.INF, attacker: Node = null) -> void:
+	if god:
+		return  ## GOD MODE: nothing in the world gets to touch you.
+	## THE MODE TAX. Peaceful softens every blow thrown by something ALIVE and
+	## Hardcore leans on it — but damage with no attacker behind it (the ground
+	## at the end of a fall, fire, a trunk landing on your back) is the world,
+	## not a creature, and the world charges full price in all three modes.
+	amount *= GameMode.creature_damage_mult(attacker)
 	if invuln_timer > 0.0:
 		## Untouchable: dashed clean through a special that would have landed.
 		if strong and dash_timer > 0.0 and dodge_cd <= 0.0:
@@ -3943,11 +5420,26 @@ func _knockback_from(from_pos: Vector3, force: float) -> void:
 
 
 func _die() -> void:
+	## HARDCORE: you got one. The slot is sealed on the way past — Load will
+	## refuse it in this session and every session after it, and Save has
+	## nothing left to write. Settings -> New Run is the only door out, and it
+	## starts you with what you woke up with. The body still respawns, because
+	## a frozen corpse staring at a menu is not a death screen, it is a bug.
+	if GameMode.is_hardcore() and not GameMode.run_lost:
+		GameMode.run_lost = true
+		SaveGame.seal("died at level %d" % level)
+		_add_log_msg("HARDCORE — the run is over. That save is sealed.", Color(1.0, 0.28, 0.22))
 	print("You died. Respawning...")
 	if mount != null:
 		_dismount()
 	health = max_health
 	stamina = max_stamina
+	breath = 100.0                      ## [water] you come up
+	thirst = maxf(thirst, 60.0)         ## [water] never respawn already dying of it
+	cold.reset()                        ## [coldscreen] a new body is not still shaking
+	exposure.on_respawn()               ## [exposure] nor already dying of cold
+	swimming = false
+	_set_water_tint(0.0)
 	global_position = Vector3(0, 2, 0)
 	climbing = false
 	_fall_speed = 0.0
@@ -3956,12 +5448,12 @@ func _die() -> void:
 	hitstun_timer = 0.0
 	block_broken_timer = 0.0
 	cam_shake = 0.0
-	## Death also stands you back up (the hard way).
-	kd_phase = ""
-	kd_t = 0.0
-	_body_up()
-	camera.rotation_degrees.z = 0.0
-	_update_head_offset()
+	## Death also stands you back up (the hard way) — and it must undo the
+	## LYING-DOWN RIG too, not just the phase flag. Dying while knocked flat
+	## skips the "rise" that would have done it, and the leftover -0.95 m
+	## body_rig shift never heals: you respawn with your own body a metre out
+	## in front of the camera.
+	_stand_up_hard()
 	near_death_active = false  ## dying is not "coming back from near death"
 	invuln_timer = 2.0   ## brief grace so incoming damage right after respawn is ignored
 
@@ -3969,20 +5461,36 @@ func _die() -> void:
 func _update_hud(delta: float) -> void:
 	## Dropped-item gaze check + the "[E] Pick up" prompt.
 	_update_drop_target()
+	_update_water_target()
 	if pickup_prompt:
 		pickup_prompt.visible = _drop_target != null or _bed_target != null \
-			or _debris_target != null or _log_target != null
+			or _debris_target != null or _log_target != null or _water_target != Vector3.INF
+		pickup_prompt.visible = pickup_prompt.visible or _fire_target != null   ## [fire]
 		if _drop_target != null:
-			pickup_prompt.text = "[E]  Pick up %s" % _drop_target.display_name()
+			pickup_prompt.text = "[E] / [LMB]  Pick up %s" % _drop_target.display_name()
 		elif _bed_target != null:
 			pickup_prompt.text = "[E]  Pack up the bedroll   ·   [F]  Sleep"
 		elif _debris_target != null:
-			pickup_prompt.text = "[E]  Gather rock"
+			pickup_prompt.text = "[E] / [LMB]  Gather rock"
 		elif _log_target != null:
-			if carried_logs.size() >= MAX_CARRY_LOGS:
-				pickup_prompt.text = "Your shoulder is full (%d/%d)" % [carried_logs.size(), MAX_CARRY_LOGS]
+			pickup_prompt.text = "[E] / [LMB]  Take the log"
+		elif _fire_target != null:
+			if _fire_target.burning():
+				pickup_prompt.text = "[E]  Feed the fire   ·   %s, %d min" \
+					% [_fire_target.state_name(), int(_fire_target.minutes_left())]
+			elif not _fire_target.can_light():
+				pickup_prompt.text = "Too wild a wind to strike a light"
 			else:
-				pickup_prompt.text = "[E]  Shoulder the log   (%d/%d)" % [carried_logs.size(), MAX_CARRY_LOGS]
+				pickup_prompt.text = "[E]  Light the fire"
+		elif _water_target != Vector3.INF:
+			if _water_is_sea:
+				pickup_prompt.text = "Sea water -- brine"
+			else:
+				var skin := _has_waterskin()
+				if skin >= 0 and _skin_fills(skin) < SKIN_FILLS:
+					pickup_prompt.text = "[E]  Drink   ·   [F]  Fill waterskin"
+				else:
+					pickup_prompt.text = "[E]  Drink"
 
 	## Fade logic: bars go bright when in use, dim (but never gone) when idle.
 	if absf(health - _last_health) > 0.01:
@@ -4014,12 +5522,9 @@ func _update_hud(delta: float) -> void:
 			overload_label.text = "~ overburdened %.0f/%.0f — no sprint ~" % [_total_weight(), stats.carry_limit()]
 			overload_label.position = Vector2((vp.x - overload_label.size.x) * 0.5, vp.y - 92.0)
 	if log_label:
-		log_label.visible = not carried_logs.is_empty() and menu_open == ""
-		if log_label.visible:
-			log_label.text = "▮".repeat(carried_logs.size()) \
-				+ "▯".repeat(MAX_CARRY_LOGS - carried_logs.size()) \
-				+ "  %d/%d logs" % [carried_logs.size(), MAX_CARRY_LOGS]
-			log_label.position = Vector2((vp.x - log_label.size.x) * 0.5, vp.y * 0.72)
+		## The shoulder counter is retired with the shoulder itself; logs show
+		## up in the pack and their weight shows up in the overburdened line.
+		log_label.visible = false
 	if hidden_label:
 		hidden_label.visible = grass_hidden and not sprinting and menu_open == ""
 		if hidden_label.visible:
@@ -4038,6 +5543,35 @@ func _update_hud(delta: float) -> void:
 			mount_hearts.modulate = Color(1.0, 0.36 + 0.34 * fl, 0.42 + 0.30 * fl,
 				(1.0 if mh < 3 else 0.55) + 0.45 * fl)
 			mount_hearts.position = Vector2((vp.x - mount_hearts.size.x) * 0.5, vp.y - 96.0)
+
+	## [water] Thirst sits above stamina (Survival only; Light hides it) and
+	## breath above that, only while it is not full. Same fade rules.
+	thirst_show = maxf(0.0, thirst_show - delta)
+	breath_show = maxf(0.0, breath_show - delta)
+	if thirst_bar:
+		thirst_bar.visible = thirst_survival()
+		thirst_bar.position = Vector2(cx, vp.y - 80.0)
+		(thirst_bar.get_child(0) as ColorRect).size.x = bw
+		thirst_fill.size.x = bw * clampf(thirst / THIRST_MAX, 0.0, 1.0)
+		thirst_fill.color = Color(0.40, 0.66, 0.92) if thirst >= THIRST_LOW else Color(0.90, 0.62, 0.30)
+		var t_target := 1.0 if (thirst < THIRST_LOW or thirst_show > 0.0) else 0.10
+		thirst_bar.modulate.a = lerpf(thirst_bar.modulate.a, t_target, delta * 6.0)
+	if warmth_bar:
+		warmth_bar.visible = warmth_survival()
+		warmth_bar.position = Vector2(cx, vp.y - 104.0)
+		(warmth_bar.get_child(0) as ColorRect).size.x = bw
+		warmth_fill.size.x = bw * clampf(exposure.warmth / Exposure.WARMTH_MAX, 0.0, 1.0)
+		## amber while you are warm, and the colour of the weather when you are not
+		warmth_fill.color = Color(0.92, 0.62, 0.34) if exposure.warmth >= Exposure.WARMTH_LOW else Color(0.55, 0.76, 1.0)
+		var w_target := 1.0 if (exposure.warmth < Exposure.WARMTH_LOW or warmth_show > 0.0) else 0.10
+		warmth_bar.modulate.a = lerpf(warmth_bar.modulate.a, w_target, delta * 6.0)
+	if breath_bar:
+		breath_bar.visible = breath < 99.9 or breath_show > 0.0
+		breath_bar.position = Vector2(cx, vp.y - (92.0 if thirst_survival() else 80.0))
+		(breath_bar.get_child(0) as ColorRect).size.x = bw
+		breath_fill.size.x = bw * clampf(breath / 100.0, 0.0, 1.0)
+		breath_fill.color = Color(0.75, 0.92, 1.0) if breath > 25.0 else Color(1.0, 0.45, 0.35)
+		breath_bar.modulate.a = lerpf(breath_bar.modulate.a, 1.0 if breath < 99.9 else 0.0, delta * 6.0)
 
 	## Stack, bottom-centered: stamina (top), health (middle, red), level (bottom).
 	if stamina_bar:
@@ -4070,6 +5604,8 @@ func _update_hud(delta: float) -> void:
 			panel = creative_panel
 		elif menu_open == "sky":
 			panel = sky_panel
+		elif menu_open == "map":
+			panel = map_panel
 		if panel:
 			## Menus render MENU_SCALE (67%) bigger — clamped so the largest
 			## pages never spill off a small window. floor() keeps text crisp.
@@ -4165,6 +5701,20 @@ func _toggle_menu(which: String) -> void:
 	if menu_open == which:
 		_close_menu()
 		return
+	## MAP OVER GOD MODE (tools/patch_ground.py). While the editor is up the
+	## map is an overlay, not a menu change: the editor stays visible and
+	## spectating underneath, and closing the map hands the cursor back to it.
+	if which == "map" and godmode != null and godmode.visible and map_panel:
+		if menu_open == "map":
+			_map_over_god(false)
+		else:
+			_map_over_god(true)
+		return
+	## F1 with the map over the editor: just drop the map. Re-running
+	## godmode.opened() here would snap the spectator camera back to the body.
+	if which == "god" and menu_open == "map" and godmode != null and godmode.visible:
+		_map_over_god(false)
+		return
 	menu_open = which
 	drawing = false  ## opening a menu eases the bowstring back down
 	bow_draw = 0.0
@@ -4174,8 +5724,17 @@ func _toggle_menu(which: String) -> void:
 	creative_panel.visible = which == "creative"
 	if sky_panel:
 		sky_panel.visible = which == "sky"
+	if map_panel:
+		map_panel.visible = which == "map"
 	if which == "sky" and sky_panel:
 		sky_panel.refresh()
+	if which == "map" and map_panel:
+		map_panel.opened()
+	if godmode != null:
+		if which == "god":
+			godmode.opened()
+		elif godmode.visible:
+			godmode.closed()
 	if which == "tab":
 		_set_tab_page(tab_page)
 	elif which == "settings":
@@ -4197,14 +5756,51 @@ func _open_tab_menu(page: String) -> void:
 
 
 func _close_menu() -> void:
+	if menu_open == "map" and godmode != null and godmode.visible:
+		_map_over_god(false)     ## map-over-god: close the map, keep the editor
+		return
 	menu_open = ""
+	if godmode != null and godmode.visible:
+		godmode.closed()
 	spawn_panel.visible = false
 	tab_panel.visible = false
 	settings_panel.visible = false
 	creative_panel.visible = false
 	if sky_panel:
 		sky_panel.visible = false
+	if map_panel:
+		map_panel.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _map_over_god(on: bool) -> void:
+	## Show / hide the map on top of the god editor without touching the editor.
+	## (tools/patch_ground.py -- map_over_god helper)
+	if on:
+		menu_open = "map"
+		drawing = false
+		bow_draw = 0.0
+		map_panel.visible = true
+		map_panel.opened()
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		if godmode.has_method("map_opened"):
+			godmode.map_opened()
+	else:
+		menu_open = "god"
+		map_panel.visible = false
+		if godmode.has_method("map_closed"):
+			godmode.map_closed()
+		else:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func map_eye() -> Node3D:
+	## The node the M map's arrow marks: the spectator camera while god mode
+	## has you out of your body, the body otherwise. (tools/patch_ground.py)
+	if godmode != null and godmode.has_method("spectating") and godmode.spectating() \
+			and godmode.cam != null:
+		return godmode.cam
+	return self
 
 
 ## ========================= Creative menu (G, dev) ==========================
@@ -4213,7 +5809,7 @@ func _close_menu() -> void:
 func _build_creative_menu() -> void:
 	## CREATIVE (dev): EVERY item in the game, one click away — the full metal
 	## catalogue (sword / 5-piece armor set / raw ore per metal, endgame
-	## included) plus every mundane item. M spawns mobs; G fills pockets.
+	## included) plus every mundane item. K spawns mobs; G fills pockets.
 	creative_panel = PanelContainer.new()
 	creative_panel.visible = false
 	hud_layer.add_child(creative_panel)
@@ -4287,7 +5883,7 @@ func _build_creative_menu() -> void:
 		icol.add_child(b)
 
 	var hint := Label.new()
-	hint.text = "G / Esc to close  —  M spawns mobs  —  full sets get a one-click Equip in the Inventory"
+	hint.text = "G / Esc to close  —  K spawns mobs  —  full sets get a one-click Equip in the Inventory"
 	hint.modulate = Color(1, 1, 1, 0.55)
 	vb.add_child(hint)
 
@@ -4386,7 +5982,7 @@ func _build_spawn_menu() -> void:
 		_menu_btn(vb, String(entry[0]), 2).pressed.connect(_spawn_test_cave.bind(int(entry[1])))
 
 	var hint := Label.new()
-	hint.text = "M / Esc to close  •  scroll for wildlife"
+	hint.text = "K / Esc to close  •  scroll for wildlife"
 	hint.modulate = Color(1, 1, 1, 0.55)
 	outer.add_child(hint)
 
@@ -4625,14 +6221,25 @@ func _build_wheel_ui() -> void:
 
 
 func _wheel_layout() -> void:
-	## Ring the labels around the middle of the screen, slot 1 at the top,
-	## clockwise — the same geometry the drag angle is read against.
-	var c := get_viewport().get_visible_rect().size * 0.5
-	wheel_center.position = c - Vector2(120, 15)
+	## Ring the labels around _wheel_origin, slot 1 at the top, clockwise —
+	## the same geometry the drag angle is read against. The world radial sits
+	## at the middle of the screen; the inventory slot-picker is a SMALL ring
+	## dropped wherever the cursor was when Q went down.
+	var c := _wheel_origin
+	wheel_center.add_theme_font_size_override("font_size", _wheel_center_font)
+	wheel_center.custom_minimum_size = _wheel_center_box
+	wheel_center.size = _wheel_center_box
+	wheel_center.position = c - _wheel_center_box * 0.5
 	for i in range(WHEEL_SLOTS):
 		var ang := deg_to_rad(float(i) * 45.0 - 90.0)
-		var at := c + Vector2(cos(ang), sin(ang)) * 165.0
-		wheel_slot_labels[i].position = at - Vector2(75, 13)
+		var at := c + Vector2(cos(ang), sin(ang)) * _wheel_radius
+		var l := wheel_slot_labels[i]
+		l.add_theme_font_size_override("font_size", _wheel_slot_font)
+		l.custom_minimum_size = _wheel_slot_box
+		l.size = _wheel_slot_box
+		l.pivot_offset = _wheel_slot_box * 0.5  ## the 1.25x pick-pop grows from the middle
+		l.scale = Vector2.ONE
+		l.position = at - _wheel_slot_box * 0.5
 
 
 func _wheel_refresh_labels() -> void:
@@ -4654,6 +6261,30 @@ func _wheel_show(world: bool) -> void:
 	wheel_place_open = not world
 	_wheel_vec = Vector2.ZERO
 	_wheel_sel = -1
+	var vp := get_viewport().get_visible_rect().size
+	if world:
+		## Eyes are locked and the cursor is captured — the ring belongs dead
+		## centre, big enough to read at a glance.
+		_wheel_radius = WHEEL_R_WORLD
+		_wheel_slot_box = Vector2(150, 26)
+		_wheel_center_box = Vector2(240, 30)
+		_wheel_slot_font = 16
+		_wheel_center_font = 19
+		_wheel_origin = vp * 0.5
+	else:
+		## The pack is open and you can SEE the cursor: a compact ring drops
+		## right where the item is, so the wrist barely moves. Nudged back
+		## inside the screen if Q went down near an edge.
+		_wheel_radius = WHEEL_R_PLACE
+		_wheel_slot_box = Vector2(104, 20)
+		_wheel_center_box = Vector2(152, 22)
+		_wheel_slot_font = 12
+		_wheel_center_font = 13
+		var m := Vector2(_wheel_radius + _wheel_slot_box.x * 0.5 + 6.0,
+			_wheel_radius + _wheel_slot_box.y * 0.5 + 20.0)
+		_wheel_origin = Vector2(
+			clampf(_q_down_mouse.x, minf(m.x, vp.x * 0.5), maxf(vp.x - m.x, vp.x * 0.5)),
+			clampf(_q_down_mouse.y, minf(m.y, vp.y * 0.5), maxf(vp.y - m.y, vp.y * 0.5)))
 	_wheel_layout()
 	_wheel_refresh_labels()
 	wheel_center.text = "Item Wheel" if world else "Choose its slot"
@@ -4721,6 +6352,9 @@ func _wheel_use(slot: int) -> void:
 	if nm == "Health Potion":
 		_drink_potion(idx)
 		return
+	if nm == "Waterskin":
+		_drink_skin(idx)   ## [water]
+		return
 	_item_clicked(idx)  ## exactly a pack click: wield / arm / unroll
 
 
@@ -4768,8 +6402,11 @@ func _update_wheel_hold(_delta: float) -> void:
 			and Time.get_ticks_msec() - _q_down_ms >= 350:
 		_wheel_show(false)
 	if wheel_place_open:
-		var v := get_viewport().get_mouse_position() - get_viewport().get_visible_rect().size * 0.5
-		_wheel_highlight_from(v, 42.0)
+		## Measured from the ring's OWN centre (the point Q went down on), with
+		## a dead zone that shrinks with the ring so a small wheel still has a
+		## generous "chose nothing" middle.
+		var v := get_viewport().get_mouse_position() - _wheel_origin
+		_wheel_highlight_from(v, maxf(16.0, _wheel_radius * 0.26))
 
 
 func _drink_potion(idx: int) -> void:
@@ -4821,6 +6458,16 @@ func _build_settings_menu() -> void:
 	vb.add_child(title)
 	vb.add_child(HSeparator.new())
 
+	## THE WORLD'S TEMPERAMENT — first row, because it changes what the game IS.
+	_settings_option_row(vb, "World", "gamemode",
+		[["Peaceful", 0], ["Normal", 1], ["Hardcore", 2]])
+	gamemode_note = Label.new()
+	gamemode_note.text = MODE_NOTES[clampi(set_gamemode, 0, 2)]
+	gamemode_note.add_theme_font_size_override("font_size", 13)
+	gamemode_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(gamemode_note)
+	vb.add_child(HSeparator.new())
+
 	_settings_option_row(vb, "Ray-Traced Lighting", "rt",
 		[["Off", false], ["On", true]])
 	var rt_note := Label.new()
@@ -4831,6 +6478,34 @@ func _build_settings_menu() -> void:
 
 	_settings_option_row(vb, "Shadows", "shadows",
 		[["Low", 0], ["Medium", 1], ["High", 2]])
+	_settings_option_row(vb, "Water Refraction", "refract",
+		[["Off", false], ["On", true]])
+	var wr_note := Label.new()
+	wr_note.text = "The lake bed seen through the ripples. One screen read per frame of water;\nOff keeps the depth, foam and sky and blends the water the plain way."
+	wr_note.add_theme_font_size_override("font_size", 13)
+	wr_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(wr_note)
+	_settings_option_row(vb, "Thirst", "thirst",
+		[["Survival", 0], ["Light", 1]])
+	var th_note := Label.new()
+	th_note.text = "Survival: a thirst meter, a day and a half to empty; low and your wind goes,\nempty and your body fails. Light: no meter -- a drink is a stamina top-up.\nSwitches live, any time."
+	th_note.add_theme_font_size_override("font_size", 13)
+	th_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(th_note)
+	_settings_option_row(vb, "Warmth", "warmth",
+		[["Survival", 0], ["Light", 1]])
+	var wa_note := Label.new()
+	wa_note.text = "Survival: the cold is real -- an autumn night is a slow problem and a\\nwinter one is not, being soaked doubles it, and a roof, a torch and a lit fire\\nare the three answers. Light: no meter, and no cold. Switches live, any time."
+	wa_note.add_theme_font_size_override("font_size", 13)
+	wa_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(wa_note)
+	_settings_option_row(vb, "Draw Distance", "draw",
+		[["Low", 45.0], ["Medium", 90.0], ["High", 130.0], ["Ultra", 180.0]])
+	var draw_note := Label.new()
+	draw_note.text = "How far the meadow reaches. Grass streams across the whole map now, so\nthis is the single biggest thing you own: the ring's area goes as the SQUARE of\nit, and Low draws roughly a quarter of what Medium does. Past the fade line the\nmeadow thins on its own, which is what makes the far settings affordable."
+	draw_note.add_theme_font_size_override("font_size", 13)
+	draw_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(draw_note)
 	_settings_option_row(vb, "Display", "fullscreen",
 		[["Windowed", false], ["Fullscreen", true]])
 	_settings_option_row(vb, "VSync", "vsync",
@@ -4860,6 +6535,14 @@ func _build_settings_menu() -> void:
 	hand_note.add_theme_font_size_override("font_size", 13)
 	hand_note.modulate = Color(1, 1, 1, 0.55)
 	vb.add_child(hand_note)
+
+	_settings_option_row(vb, "Fall Damage", "falldmg",
+		[["Off", false], ["On", true]])
+	var fall_note := Label.new()
+	fall_note.text = "Off: the ground cannot hurt you and a hard landing never knocks you down.\nOn: over 11 m/s at touchdown costs health, and over 17.5 m/s puts you flat.\nSwitches live, any time."
+	fall_note.add_theme_font_size_override("font_size", 13)
+	fall_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(fall_note)
 
 	_settings_option_row(vb, "Blood", "blood",
 		[["Off", false], ["On", true]])
@@ -4891,6 +6574,14 @@ func _build_settings_menu() -> void:
 	load_btn.custom_minimum_size = Vector2(96, 0)
 	load_btn.pressed.connect(_on_load_pressed)
 	srow.add_child(load_btn)
+	## The only door out of a sealed Hardcore run — and a fresh start in any
+	## other mode, for anyone who wants one.
+	var new_btn := Button.new()
+	new_btn.text = "New Run"
+	new_btn.focus_mode = Control.FOCUS_NONE
+	new_btn.custom_minimum_size = Vector2(96, 0)
+	new_btn.pressed.connect(_on_new_run_pressed)
+	srow.add_child(new_btn)
 	save_status = Label.new()
 	save_status.add_theme_font_size_override("font_size", 13)
 	save_status.modulate = Color(1, 1, 1, 0.55)
@@ -4909,6 +6600,12 @@ func _build_settings_menu() -> void:
 
 
 func _on_save_pressed() -> void:
+	if GameMode.run_lost:
+		## Hardcore. Writing a fresh save over the grave would unpick the
+		## death, so the slot stays shut until you deliberately start over.
+		_add_log_msg("The run is over — there is nothing left to write.", Color(0.95, 0.7, 0.5))
+		_refresh_save_status()
+		return
 	var err := SaveGame.save_game(self)
 	if err == "":
 		_add_log_msg("Saved", Color(0.75, 0.95, 0.75))
@@ -4927,11 +6624,36 @@ func _on_load_pressed() -> void:
 	_refresh_save_status(err, false)
 
 
+func _on_new_run_pressed() -> void:
+	## Begin again. The seal is broken, the session's death is forgotten, and
+	## you are handed back the snapshot taken at the end of _ready — the body,
+	## the sheet, the pack and the blade you woke up with the very first time.
+	## The WORLD is not reset: the forest you felled is still felled. This is
+	## a new life in an old land, which is the honest version of starting over
+	## in a world that has one save slot.
+	SaveGame.unseal()
+	GameMode.run_lost = false
+	if not _newborn.is_empty():
+		apply_state(_newborn)
+	global_position = Vector3(0, 2, 0)
+	velocity = Vector3.ZERO
+	_refresh_derived(true)
+	health = max_health
+	stamina = max_stamina
+	invuln_timer = 2.0
+	_add_log_msg("A new run begins.", Color(0.75, 0.95, 0.75))
+	_refresh_save_status()
+	_close_menu()
+
+
 func _refresh_save_status(err := "", was_save := false) -> void:
 	if save_status == null:
 		return
 	if err != "":
 		save_status.text = err
+		return
+	if SaveGame.is_sealed():
+		save_status.text = "That run ended in Hardcore — the slot is sealed. New Run starts over."
 		return
 	var when := SaveGame.stamp()
 	if when == "":
@@ -4999,8 +6721,19 @@ func _settings_pick(id: String, value: Variant) -> void:
 		"vsync": set_vsync = bool(value)
 		"hunch": set_hunch = bool(value)
 		"hand": set_lefty = bool(value)
+		"falldmg": set_fall_dmg = bool(value)
 		"blood": set_blood = bool(value)
 		"clouds": set_clouds = int(value)
+		"draw": set_draw = float(value)
+		"gamemode": set_gamemode = int(value)
+		"refract": set_refract = bool(value)
+		"thirst": set_thirst_mode = int(value)
+		"warmth":
+			set_warmth_mode = int(value)
+			## Switching to Light TOPS the meter, so switching back can never
+			## start you freezing. The thirst pass established that rule.
+			if set_warmth_mode == 1:
+				exposure.to_light()
 	_apply_settings()
 	_save_settings()
 	_refresh_settings_ui()
@@ -5027,8 +6760,14 @@ func _refresh_settings_ui() -> void:
 				"vsync": cur = set_vsync
 				"hunch": cur = set_hunch
 				"hand": cur = set_lefty
+				"falldmg": cur = set_fall_dmg
 				"blood": cur = set_blood
 				"clouds": cur = set_clouds
+				"refract": cur = set_refract
+				"thirst": cur = set_thirst_mode
+				"warmth": cur = set_warmth_mode
+				"draw": cur = set_draw
+				"gamemode": cur = set_gamemode
 			for pair: Array in (w["btns"] as Array):
 				(pair[1] as Button).button_pressed = pair[0] == cur
 		elif w.has("label"):
@@ -5037,6 +6776,8 @@ func _refresh_settings_ui() -> void:
 				lbl.text = "%.1f x" % set_sens
 			elif id == "fov":
 				lbl.text = "%d deg" % int(set_fov)
+	if gamemode_note != null:
+		gamemode_note.text = MODE_NOTES[clampi(set_gamemode, 0, 2)]
 	_refresh_save_status()
 
 
@@ -5050,6 +6791,13 @@ func _apply_settings() -> void:
 			w.set_shadow_quality(set_shadows)
 		if w.has_method("set_cloud_mode"):
 			w.set_cloud_mode(set_clouds)
+	## Draw Distance goes straight to the grass system through its group, the
+	## same way the sword finds it to mow with. Untyped `set()` would be wrong
+	## here — set_draw_distance rescales the fade, the detail ring and every
+	## live chunk's visibility range, so it has to be the METHOD, not the field.
+	var gsys := get_tree().get_first_node_in_group("grass_system")
+	if gsys != null and gsys.has_method("set_draw_distance"):
+		gsys.call("set_draw_distance", set_draw)
 	DisplayServer.window_set_mode(
 		DisplayServer.WINDOW_MODE_FULLSCREEN if set_fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_vsync_mode(
@@ -5066,6 +6814,17 @@ func _apply_settings() -> void:
 	## Impact effects read this straight off the static — the very next hit
 	## after you touch the switch already obeys it.
 	HitFX.blood_enabled = set_blood
+	## The world's temperament. set_mode also SETTLES the fight you are already
+	## in — a bear mid-charge when you pick Peaceful stands down where it
+	## stands, instead of the switch being a lie for the next ten seconds.
+	GameMode.set_mode(set_gamemode, get_tree())
+	## [water] the one screen read the lakes make
+	if Overworld.inst != null and Overworld.inst.has_method("set_refraction"):
+		Overworld.inst.set_refraction(set_refract)
+	## [water] Light mode forgives: switching into it tops the meter so the
+	## next switch back does not start you parched from a bar you never saw
+	if set_thirst_mode == 1:
+		thirst = THIRST_MAX
 
 
 func _save_settings() -> void:
@@ -5076,12 +6835,20 @@ func _save_settings() -> void:
 	cf.set_value("gfx", "vsync", set_vsync)
 	cf.set_value("gfx", "fov", set_fov)
 	cf.set_value("gfx", "clouds", set_clouds)
+	cf.set_value("gfx", "draw", set_draw)
 	cf.set_value("input", "sens", set_sens)
 	cf.set_value("game", "hunch", set_hunch)
 	cf.set_value("game", "lefty", set_lefty)
 	cf.set_value("game", "blood", set_blood)
+	cf.set_value("game", "fall_dmg", set_fall_dmg)
+	## Stored as the KEY, not the int, so the file stays readable and a future
+	## reshuffle of the enum cannot silently move somebody into Hardcore.
+	cf.set_value("game", "mode", GameMode.KEYS[clampi(set_gamemode, 0, 2)])
 	cf.set_value("game", "cam_mode", cam_mode)
 	cf.set_value("game", "cam_shoulder", cam_shoulder)
+	cf.set_value("gfx", "refract", set_refract)
+	cf.set_value("game", "thirst", "survival" if set_thirst_mode == 0 else "light")
+	cf.set_value("game", "warmth", "survival" if set_warmth_mode == 0 else "light")
 	cf.save(SETTINGS_PATH)
 
 
@@ -5095,15 +6862,27 @@ func _load_settings() -> void:
 	set_vsync = bool(cf.get_value("gfx", "vsync", true))
 	set_fov = clampf(float(cf.get_value("gfx", "fov", 75.0)), 60.0, 110.0)
 	set_clouds = clampi(int(cf.get_value("gfx", "clouds", 1)), 0, 2)
+	## Clamped to GrassSystem's own DRAW_MIN/DRAW_MAX rather than to the four
+	## preset buttons: a hand-edited settings.cfg is allowed to ask for 72 m,
+	## and the four buttons simply none of them light up when it does.
+	set_draw = clampf(float(cf.get_value("gfx", "draw", 90.0)), 30.0, 180.0)
 	set_sens = clampf(float(cf.get_value("input", "sens", 1.0)), 0.3, 2.5)
 	set_hunch = bool(cf.get_value("game", "hunch", true))
 	set_lefty = bool(cf.get_value("game", "lefty", false))
 	set_blood = bool(cf.get_value("game", "blood", true))
+	set_fall_dmg = bool(cf.get_value("game", "fall_dmg", false))
+	set_gamemode = GameMode.from_key(String(cf.get_value("game", "mode", "normal")))
 	## First run starts first person; afterwards, your last camera wins.
 	cam_mode = String(cf.get_value("game", "cam_mode", "fp"))
-	cam_shoulder = signf(float(cf.get_value("game", "cam_shoulder", 1.0)))
-	if cam_shoulder == 0.0:
-		cam_shoulder = 1.0
+	if cam_mode == "tp":
+		cam_snap = 1.0   ## booting straight into TP snaps the perch out too
+	## 0.0 is a REAL setting now (the centred view), so it must not be snapped
+	## back onto a shoulder the way it was when only +-1 existed.
+	cam_shoulder = clampf(float(cf.get_value("game", "cam_shoulder", 1.0)), -1.0, 1.0)
+	cam_shoulder = 0.0 if absf(cam_shoulder) < 0.5 else signf(cam_shoulder)
+	set_refract = bool(cf.get_value("gfx", "refract", true))
+	set_thirst_mode = 1 if String(cf.get_value("game", "thirst", "survival")) == "light" else 0
+	set_warmth_mode = 1 if String(cf.get_value("game", "warmth", "survival")) == "light" else 0
 
 
 ## ========================= Inventory (I / Tab) ============================
@@ -5120,6 +6899,7 @@ func _init_inventory() -> void:
 		{"name": "Iron Pickaxe", "weight": 3.5, "count": 1, "slot": ""},
 		{"name": "Arrow", "weight": 0.06, "count": 20, "slot": ""},
 		{"name": "Health Potion", "weight": 0.5, "count": 2, "slot": ""},
+		{"name": "Waterskin", "weight": 2.1, "count": 1, "slot": "", "fills": 3, "keep": true},
 		{"name": "Boar Tusk", "weight": 0.5, "count": 3, "slot": ""},
 		{"name": "Old Bone", "weight": 1.0, "count": 2, "slot": ""},
 	]
@@ -5328,6 +7108,7 @@ func _equip_set(mat_id: String) -> void:
 			_equip_from_pack(idx, slot)
 	_apply_armor_visuals()
 	_add_log_msg("%s set equipped — head to toe" % Materials.display_name(mat_id), Color(0.85, 0.9, 1.0))
+	_garment_note()
 	_refresh_inventory_ui()
 
 
@@ -5337,6 +7118,34 @@ func _give_armor_set(mat_id: String) -> void:
 		_give_item_dict({"name": Materials.armor_piece_name(mat_id, slot),
 			"weight": Materials.armor_piece_weight(mat_id, slot), "count": 1,
 			"slot": slot, "material": mat_id})
+
+
+func worn_metals() -> Dictionary:
+	## The five armour slots as `Garments` wants them: slot -> material id.
+	## Empty slots are left OUT rather than carried as "", so `cover()` and
+	## `pieces()` agree with what is actually on the body.
+	var w: Dictionary = {}
+	for slot: String in Materials.ARMOR_SLOTS:
+		var it: Dictionary = equipment.get(slot, {})
+		var m := String(it.get("material", ""))
+		if m != "":
+			w[slot] = m
+	return w
+
+
+func _garment_note() -> void:
+	## What the set you have just put on is worth TONIGHT, said at the one
+	## moment the choice is in front of you. Every number is `Garments`';
+	## this reads and prints.
+	var worn := worn_metals()
+	if worn.is_empty():
+		return
+	var e := _exposure_env()
+	var g := Exposure.garment_c(e, exposure.wet)
+	var v := Garments.verdict(worn, Exposure.still_air_c(e), exposure.wet,
+		clampf(float(e.get("wind", 0.0)), 0.0, 1.0))
+	_add_log_msg("%s out here: %+.1f C - %s" % [Garments.describe(worn), g, v],
+		Color(0.72, 0.84, 1.0) if g >= 0.0 else Color(1.0, 0.76, 0.55))
 
 
 func _armor_mult() -> float:
@@ -5527,6 +7336,231 @@ func _unset_hovered_item(idx: int) -> void:
 		hovered_item_idx = -1
 
 
+## ==================== The reach (crouch, hand, shoulder) ==================
+## One arm, five beats, and the thing itself rides in the fist for the last
+## three of them -- there is no second copy of it and no particle stand-in, so
+## what you watch go into the pack is the very node that was lying there.
+
+
+func _grab_target() -> Node3D:
+	## The one thing a reach could take right now. Loot first, then a landed
+	## rock, then a felled log -- the same order the gaze already ranks them
+	## in. Bedrolls are not grabbed; they are packed (E) or slept in (F).
+	if _drop_target != null and is_instance_valid(_drop_target):
+		return _drop_target
+	if _debris_target != null and is_instance_valid(_debris_target):
+		return _debris_target
+	if _log_target != null and is_instance_valid(_log_target):
+		return _log_target
+	return null
+
+
+func _try_grab(from_click: bool) -> bool:
+	## Start the reach. Returns FALSE when there is nothing to take, and the
+	## caller then does whatever it would have done anyway -- so left click
+	## near your loot pile still swings, and E still falls through to the bed,
+	## the water and the old out-of-reach snap.
+	if reach_phase != "" or menu_open != "" or kd_phase != "" or climbing \
+			or mount != null or grabbed_by != null or swimming or input_locked \
+			or editing or attacking or axe_swinging or pick_swinging or drawing:
+		return false
+	var n := _grab_target()
+	if n == null:
+		return false
+	if n.global_position.distance_to(get_waist_point()) > GRAB_REACH:
+		return false  ## seen, but not within an arm and a lean of you
+	if from_click and _any_enemy_mad_at_me():
+		return false  ## a fight is on -- left click stays a swing. E still reaches.
+	reach_node = n
+	reach_kind = "item"
+	if n is RockDebris:
+		reach_kind = "debris"
+	elif n is CarryLog:
+		reach_kind = "log"
+	reach_spot = n.global_position
+	reach_held = false
+	reach_phase = "down"
+	reach_t = 0.0
+	reach_out = 0.0
+	reach_stow = 0.0
+	## What to put back on the way up: the stance you were in, and whether the
+	## sword was actually drawn (a tool in the fist just goes away and comes
+	## back -- only steel gets pulled again).
+	reach_was_crouch = crouching
+	reach_was_prone = prone
+	reach_redraw = current_weapon == "sword" and not sheathed
+	blocking = false
+	sheathed = true          ## the blade rides home while the hand is busy
+	prone = false
+	crouching = true         ## down onto one knee for it
+	_stance_settle_pulse()
+	return true
+
+
+func _update_grab(delta: float) -> void:
+	## Called from _frame_fx_and_regen, which every stance routes through, so
+	## the reach keeps ticking whatever else the body is doing. Anything that
+	## takes the body AWAY from you -- a hoof, a jaw, a menu, a bed -- abandons
+	## it, and whatever was in the fist goes back on the ground where it lay.
+	if reach_phase == "":
+		return
+	if kd_phase != "" or grabbed_by != null or input_locked or menu_open != "" \
+			or climbing or mount != null or editing or swimming:
+		_grab_abort()
+		return
+	if reach_node == null or not is_instance_valid(reach_node):
+		_grab_abort()   ## something ate it mid-reach (a fade-out, a save load)
+		return
+	reach_t += delta
+	match reach_phase:
+		"down":
+			## Knees bend, the scabbard takes the blade. Nothing moves yet.
+			if reach_t >= GRAB_T_DOWN:
+				reach_phase = "out"
+				reach_t = 0.0
+		"out":
+			reach_out = clampf(reach_t / GRAB_T_OUT, 0.0, 1.0)
+			## Ownership is taken the moment the hand starts moving, so the
+			## thing stops rolling and settling while you are reaching for it.
+			if not reach_held:
+				_grab_take()
+			if reach_t >= GRAB_T_OUT:
+				reach_out = 1.0
+				reach_phase = "hold"
+				reach_t = 0.0
+		"hold":
+			reach_out = 1.0
+			if reach_t >= GRAB_T_HOLD:
+				reach_phase = "back"
+				reach_t = 0.0
+		"back":
+			var p := clampf(reach_t / GRAB_T_BACK, 0.0, 1.0)
+			reach_out = 1.0 - p
+			reach_stow = p
+			if reach_t >= GRAB_T_BACK:
+				reach_out = 0.0
+				reach_stow = 1.0
+				reach_phase = "up"
+				reach_t = 0.0
+				_grab_deliver()
+		"up":
+			reach_out = 0.0
+			reach_stow = 1.0 - clampf(reach_t / GRAB_T_UP, 0.0, 1.0)
+			if reach_t >= GRAB_T_UP:
+				_grab_finish()
+				return
+	## Once the fist is closed the thing rides IN it -- tracked off tp_hand_r,
+	## the same grip node the sword hangs from, so it follows the arm's real
+	## pose instead of a guess at where the hand probably is.
+	## The last half of the reach draws it up to meet the closing fist, gently;
+	## from the moment the fingers shut it is welded there.
+	if reach_held and reach_node != null and is_instance_valid(reach_node) \
+			and (reach_phase != "out" or reach_out > 0.45):
+		var hand := to_global(Vector3(0.30, 0.95, -0.40))
+		if tp_hand_r != null and is_instance_valid(tp_hand_r):
+			hand = tp_hand_r.global_position
+		var w := 9.0 if reach_phase == "out" else 24.0
+		reach_node.global_position = reach_node.global_position.lerp(
+			hand, clampf(delta * w, 0.0, 1.0))
+		if reach_phase == "back" or reach_phase == "up":
+			## Shrinking away into the pack rather than popping out of the world.
+			reach_node.scale = Vector3.ONE * maxf(0.06, 1.0 - reach_stow * 0.94)
+
+
+func _grab_take() -> void:
+	## The fist closes. The thing stops being the world's and becomes yours:
+	## its own falling/rolling/settling process is switched off so nothing
+	## fights the hand for it on the way to your back.
+	if reach_node == null or not is_instance_valid(reach_node):
+		return
+	reach_held = true
+	reach_node.set_physics_process(false)
+	var di := reach_node as DroppedItem
+	if di != null:
+		di.velocity = Vector3.ZERO
+	var cl := reach_node as CarryLog
+	if cl != null:
+		cl.velocity = Vector3.ZERO
+	var rd := reach_node as RockDebris
+	if rd != null:
+		rd.vel = Vector3.ZERO
+
+
+func _grab_deliver() -> void:
+	## Over the shoulder and IN. Everything the old instant E did happens here
+	## instead, at the end of the arm's travel -- so a full pack refuses at the
+	## last moment and the hand sets the thing back down where it was found.
+	reach_held = false
+	if reach_node == null or not is_instance_valid(reach_node):
+		reach_node = null
+		return
+	var n := reach_node
+	if reach_kind == "debris":
+		if _give_item("Rock", 1, 0.8):
+			_push_gain("Rock", 1)
+			n.queue_free()
+			_debris_target = null
+		else:
+			_add_log_msg("Backpack full", Color(0.9, 0.75, 0.4))
+	elif reach_kind == "log":
+		_hoist_log(n as CarryLog)
+	else:
+		_pickup_dropped(n as DroppedItem)
+	if is_instance_valid(n) and not n.is_queued_for_deletion():
+		_grab_put_back(n)
+	reach_node = null
+
+
+func _grab_put_back(n: Node3D) -> void:
+	## Refused, or interrupted: the thing goes back to the exact spot it was
+	## lying in, full size, falling and settling for itself again.
+	n.scale = Vector3.ONE
+	n.global_position = reach_spot
+	n.set_physics_process(true)
+
+
+func _grab_clear() -> void:
+	reach_phase = ""
+	reach_t = 0.0
+	reach_out = 0.0
+	reach_stow = 0.0
+	reach_held = false
+	reach_node = null
+	reach_kind = ""
+
+
+func _grab_finish() -> void:
+	## Standing back up. The stance you were in comes back, and the sword comes
+	## back out only if it was out when you reached -- otherwise the arm simply
+	## falls to your side and nothing is drawn that you did not draw yourself.
+	_grab_clear()
+	crouching = reach_was_crouch
+	prone = reach_was_prone
+	if reach_redraw:
+		sheathed = false
+	reach_redraw = false
+	_stance_settle_pulse()
+
+
+func _grab_abort() -> void:
+	## Something took the body away mid-reach. Put whatever was in the fist
+	## back on the ground and forget the whole thing -- but still give the
+	## stance and the steel back, or you would stand up from a bear's jaws
+	## permanently crouched with your sword mysteriously put away.
+	if reach_held and reach_node != null and is_instance_valid(reach_node):
+		_grab_put_back(reach_node)
+	var redraw := reach_redraw
+	var was_crouch := reach_was_crouch
+	var was_prone := reach_was_prone
+	_grab_clear()
+	reach_redraw = false
+	if kd_phase == "" and grabbed_by == null:
+		crouching = was_crouch
+		prone = was_prone
+	if redraw and current_weapon == "sword":
+		sheathed = false
+
+
 func _pickup_dropped(di: DroppedItem) -> void:
 	var d: Dictionary = di.item
 	var nm := String(d.get("name", ""))
@@ -5552,66 +7586,44 @@ func _pickup_dropped(di: DroppedItem) -> void:
 
 
 func _hoist_log(cl: CarryLog) -> void:
-	if carried_logs.size() >= MAX_CARRY_LOGS:
-		_add_log_msg("That's all your back will take", Color(0.9, 0.75, 0.4))
-		return
-	carried_logs.append(cl.carry_dict())
+	## SHOULDER-CARRYING IS GONE (Lemon 2026-08-30). A log is an ordinary
+	## inventory item now — bucking a trunk drops one on the ground and you
+	## take it like anything else. This is kept only so that logs already lying
+	## in an old save can still be picked up: it converts one into the item.
+	##
+	## The old four-log cap is not gone, it just is not a number any more. A log
+	## weighs FallenTrunk.LOG_WEIGHT against a base carry limit of 90, so four
+	## or five is still all a back will take — and the game says so by making
+	## you overburdened rather than by refusing the pickup.
+	if not _give_item_dict({"name": "Log", "weight": FallenTrunk.LOG_WEIGHT,
+			"count": 1, "slot": "", "material": ""}):
+		return                          ## pack is full — it stays on the ground
 	cl.queue_free()
 	_log_target = null
-	_refresh_log_rig()
-	_add_log_msg("Log on your shoulder (%d/%d)" % [carried_logs.size(), MAX_CARRY_LOGS],
-		Color(0.85, 0.78, 0.58))
+	_push_gain("Log", 1)
 
 
-func _drop_carried_logs(why: String) -> void:
-	## The load goes. Not neatly — logs roll off behind and to the side of you
-	## and come to rest wherever they stop.
-	if carried_logs.is_empty():
-		return
-	var n := carried_logs.size()
-	var back := global_transform.basis.z  ## +Z is behind you
-	back.y = 0.0
-	if back.length_squared() < 0.001:
-		back = Vector3.BACK
-	back = back.normalized()
-	var side := back.cross(Vector3.UP).normalized()
-	for i in range(n):
-		var d: Dictionary = carried_logs[i]
-		var cl := CarryLog.make(float(d.get("length", 1.0)), float(d.get("radius", 0.22)),
-			Color(d.get("bark", Color(0.24, 0.16, 0.11))))
-		get_parent().add_child(cl)
-		cl.global_position = global_position + Vector3.UP * 1.25 \
-			+ back * randf_range(0.35, 0.8) + side * randf_range(-0.45, 0.45)
-		cl.toss(back * randf_range(0.8, 1.8) + side * randf_range(-1.0, 1.0)
-			+ Vector3.UP * randf_range(0.1, 0.7))
-	carried_logs.clear()
-	_refresh_log_rig()
-	_add_log_msg("The logs roll off — %s" % why, Color(0.9, 0.78, 0.5))
+func _drop_carried_logs(_why: String) -> void:
+	## DELIBERATELY EMPTY. Logs live in the pack now (Lemon 2026-08-30), so
+	## there is no load to shed: nothing about jumping, crouching, going prone,
+	## drawing a weapon, climbing, mounting, being hit or reaching into the
+	## rucksack should tip timber out of it any more. Roughly fifteen call
+	## sites across this file still ask, and every one of them is still right
+	## to ask — this is the single place that answers, and the answer now is
+	## that there is nothing on your shoulder to drop.
+	pass
 
 
 func _refresh_log_rig() -> void:
+	## The shoulder rig is retired with the carrying — see _drop_carried_logs.
+	## It still EMPTIES itself, so a save written before 2026-08-30 that comes
+	## back with logs on its shoulder does not leave billets floating beside
+	## the player's head forever.
 	if log_rig == null:
 		return
 	for c in log_rig.get_children():
-		## Detach NOW, not at the end of the frame — hoisting three logs in one
-		## frame must not leave three stale stacks on the shoulder.
 		log_rig.remove_child(c)
 		c.queue_free()
-	for i in range(carried_logs.size()):
-		var d: Dictionary = carried_logs[i]
-		var m := MeshInstance3D.new()
-		var ln := float(d.get("length", 1.0))
-		m.mesh = CarryLog.build_mesh(ln, float(d.get("radius", 0.22)),
-			Color(d.get("bark", Color(0.24, 0.16, 0.11))))
-		var mat := StandardMaterial3D.new()
-		mat.vertex_color_use_as_albedo = true
-		mat.roughness = 1.0
-		m.material_override = mat
-		## Shifted back along its own length so the load trails behind the
-		## shoulder instead of growing out of the middle of the lens.
-		m.position = LOG_STACK[i] + Vector3(0, 0, ln * 0.30)
-		m.rotation_degrees = Vector3(0, randf_range(-5.0, 5.0), 0)
-		log_rig.add_child(m)
 
 
 func _update_drop_target() -> void:
@@ -5620,9 +7632,10 @@ func _update_drop_target() -> void:
 	_drop_target = null
 	_bed_target = null
 	_debris_target = null
+	_fire_target = null
 	_log_target = null
-	if menu_open != "" or kd_phase != "":
-		return
+	if menu_open != "" or kd_phase != "" or reach_phase != "":
+		return  ## mid-reach the gaze picks nothing new up
 	var best := 0.92
 	var fwd := -camera.global_transform.basis.z
 	for n in get_tree().get_nodes_in_group("dropped_items"):
@@ -5683,6 +7696,25 @@ func _update_drop_target() -> void:
 		if d > lbest:
 			lbest = d
 			_log_target = cl
+
+	if _log_target != null:
+		return
+	## And a fire pit. E lights it, feeds it, or tells you what it wants. The
+	## cone is a touch wider than the others because a firepit is a two-metre
+	## ring of stones and you are usually standing right in it.
+	var fbest := 0.84
+	for n in get_tree().get_nodes_in_group("fires"):
+		var fp := n as Firepit
+		if fp == null:
+			continue
+		var to := fp.here() + Vector3.UP * 0.3 - _aim_origin()
+		var dist := to.length()
+		if dist > 3.4 or dist < 0.05:
+			continue
+		var d := fwd.dot(to.normalized())
+		if d > fbest:
+			fbest = d
+			_fire_target = fp
 
 
 ## ==================== Bestiary ledger (learn by doing) ====================
@@ -6416,6 +8448,9 @@ func _item_clicked(idx: int) -> void:
 	if String(it.name) == "Health Potion":
 		_drink_potion(idx)
 		return
+	if String(it.name) == "Waterskin":
+		_drink_skin(idx)   ## [water]
+		return
 	if it.slot == "":
 		return  ## plain loot — nothing to equip. TODO(design): use/drop actions later
 	## Anything you actually pull out of the pack needs the hand that's
@@ -6642,6 +8677,10 @@ func save_state() -> Dictionary:
 		"pitch": pitch,
 		"health": health,
 		"stamina": stamina,
+		"thirst": thirst,
+		"warmth": exposure.warmth,
+		"wet": exposure.wet,
+		"breath": breath,
 		"xp": xp,
 		"level": level,
 		"gold": gold,
@@ -6672,7 +8711,10 @@ func apply_state(d: Dictionary) -> void:
 	rotation.y = float(d.get("yaw", rotation.y))
 	pitch = clampf(float(d.get("pitch", pitch)), -1.4, 1.4)
 	head.rotation.x = pitch
-	_update_head_offset()
+	## A load can land mid-knockdown — [F] from under a fallen trunk is exactly
+	## that — and nothing else would ever end it: kd_phase would stay "pinned"
+	## forever, with the body laid out a metre in front of the lens.
+	_stand_up_hard()
 
 	## The sheet.
 	var vals: Dictionary = d.get("stat_vals", {})
@@ -6739,10 +8781,18 @@ func apply_state(d: Dictionary) -> void:
 	for i in range(mini(wsaved.size(), WHEEL_SLOTS)):
 		wheel[i] = String(wsaved[i])
 
-	## The load on your shoulder came back with you.
+	## A SAVE FROM BEFORE 2026-08-30 can still have logs on its shoulder.
+	## Shoulder-carrying is gone, so rather than dropping them on the floor of
+	## whatever room you saved in, they come back as what they are now: items
+	## in the pack. Nobody loses timber to a patch note.
 	carried_logs.clear()
-	for l in d.get("carried_logs", []):
-		carried_logs.append((l as Dictionary).duplicate(true))
+	var hauled: Array = d.get("carried_logs", [])
+	for _l in hauled:
+		_give_item_dict({"name": "Log", "weight": FallenTrunk.LOG_WEIGHT,
+			"count": 1, "slot": "", "material": ""}, true)
+	if not hauled.is_empty():
+		_add_log_msg("The logs off your shoulder are in your pack now (%d)"
+			% hauled.size(), Color(0.85, 0.78, 0.58))
 	_refresh_log_rig()
 
 	## Stance, steel, and the pools — derived caps first so the fill clamps right.
@@ -6752,6 +8802,10 @@ func apply_state(d: Dictionary) -> void:
 	_refresh_derived(false)
 	health = clampf(float(d.get("health", max_health)), 1.0, max_health)
 	stamina = clampf(float(d.get("stamina", max_stamina)), 0.0, max_stamina)
+	thirst = clampf(float(d.get("thirst", THIRST_MAX)), 0.0, THIRST_MAX)
+	exposure.apply_dict(d)
+	breath = clampf(float(d.get("breath", 100.0)), 0.0, 100.0)
+	_ensure_waterskin()   ## [water] saves from before the skin existed
 	sheathed = bool(d.get("sheathed", true))
 	sheath_t = 1.0 if sheathed else 0.0
 	attacking = false
@@ -6782,6 +8836,10 @@ const PIN_STUCK_PROMPT := 10.0     ## seconds pinned before F offers a reload
 ## TODO(anim): read this in the axe swing to rotate the arc onto the limb axis.
 var axe_swing_axis := Vector3.ZERO
 
+## Wedged-in-timber watchdog — see _unwedge.
+var _unstick_t := 0.0
+var _unstick_from := Vector3.ZERO
+
 var pinned_by: Node3D = null
 var pin_t := 0.0
 var _pin_watch: Node
@@ -6797,7 +8855,7 @@ func armor_tier() -> int:
 
 
 func pin_under(what: Node3D, _seconds := 7.0) -> void:
-	if pinned_by != null:
+	if pinned_by != null or god:
 		return
 	pinned_by = what
 	pin_t = 0.0
@@ -6888,3 +8946,126 @@ func _flat_forward() -> Vector3:
 	f.y = 0.0
 	return f.normalized() if f.length_squared() > 0.0001 else -transform.basis.z
 
+
+## ========================== GOD FLIGHT (F1 mode) ===========================
+
+func _god_fly(delta: float) -> void:
+	## Minecraft rules. You hang where you let go. WASD flies along the LOOK
+	## (nose down and W dives), Space climbs, Ctrl drops, Shift is the boost,
+	## and the scroll wheel's god_speed multiplies the lot. Collision is parked
+	## for the duration and restored the instant flight ends.
+	if _god_mask_saved < 0:
+		_god_mask_saved = collision_mask
+		collision_mask = 0
+	var typing := godmode != null and godmode.typing
+	var iv := Vector3.ZERO
+	if not typing:
+		if Input.is_key_pressed(KEY_W): iv.z -= 1.0
+		if Input.is_key_pressed(KEY_S): iv.z += 1.0
+		if Input.is_key_pressed(KEY_A): iv.x -= 1.0
+		if Input.is_key_pressed(KEY_D): iv.x += 1.0
+		iv += _pad_move()   ## CONTROLLER: the left stick flies too
+	var dir := head.global_transform.basis * iv
+	if not typing:
+		if Input.is_key_pressed(KEY_SPACE):
+			dir.y += 1.0
+		if Input.is_key_pressed(KEY_CTRL):
+			dir.y -= 1.0
+	if dir.length_squared() > 0.000001:
+		dir = dir.normalized()
+	else:
+		dir = Vector3.ZERO
+	var spd := GOD_FLY_SPEED * god_speed
+	if not typing and Input.is_key_pressed(KEY_SHIFT):
+		spd *= GOD_FLY_BOOST
+	## Snappy but not instant -- a 60 m/s stop on one key-up reads as a bug.
+	velocity = velocity.move_toward(dir * spd, maxf(60.0, spd * 6.0) * delta)
+	move_and_slide()
+	## Keep the streamer looking at us so there is ground under the landing.
+	crouching = false
+	prone = false
+	sprinting = false
+	_frame_fx_and_regen(delta)
+	_update_body_arms(delta)
+	_update_hud(delta)
+	_update_log(delta)
+
+
+func god_teleport(to: Vector3) -> void:
+	## Used by the editor's teleport buttons: build the near ring FIRST so the
+	## body does not fall through a tile that has not arrived yet.
+	if Overworld.inst != null:
+		Overworld.inst.warm(to)
+	global_position = to
+	velocity = Vector3.ZERO
+
+
+func fall_grace() -> void:
+	## "Whatever happens on the way down is free." Armed by the F2 drop-in: the
+	## next touchdown costs no health, cannot kill you and cannot fold your legs
+	## -- and that is the whole of it. The landing after that is a normal one.
+	_fall_grace = true
+	_fall_grace_hold = 0.35
+	_fall_speed = 0.0
+
+
+func set_editing(on: bool) -> void:
+	## STEP OUT OF THE BODY, and step back in. The one place `editing`,
+	## EditorMode.active and the parked collision layer are allowed to change,
+	## so the flag and the body can never disagree.
+	if editing == on:
+		return
+	editing = on
+	god = editing or god_sticky
+	EditorMode.active = editing
+	if on:
+		flying = false
+		jump_queued = false
+		drawing = false
+		attacking = false
+		blocking = false
+		## Third person while you are out, so you can SEE the body you left --
+		## and so the first-person hands are not hanging in the air where your
+		## head used to be. cam_mode is set directly, not through
+		## _set_cam_mode, because this is temporary and must not be saved as
+		## your camera preference.
+		_editor_cam_mode = cam_mode
+		cam_mode = "tp"
+		cam_snap = 1.0
+		sheathed = true
+		if _god_layer_saved < 0:
+			_god_layer_saved = collision_layer
+		## THE UNTOUCHABLE HALF: with no layer, nothing's sensor, ray, hitbox
+		## or falling trunk can find the body at all. EditorMode covers the
+		## half that finds you by group instead.
+		collision_layer = 0
+	else:
+		if _editor_cam_mode != "":
+			cam_mode = _editor_cam_mode
+			_editor_cam_mode = ""
+		cam_snap = 1.0
+		if _god_layer_saved >= 0:
+			collision_layer = _god_layer_saved
+			_god_layer_saved = -1
+		velocity = Vector3.ZERO
+		if camera != null:
+			camera.current = true
+		_update_head_offset()
+
+
+func _editor_freeze(delta: float) -> void:
+	## The parked body. It keeps its weight -- step out mid-jump and it lands
+	## and stands there -- but it has no will: no input, no gait, no attack,
+	## no interaction. Everything that only DRAWS still runs, so the character
+	## you are looking at from the camera breathes and holds its gear properly.
+	if not is_on_floor():
+		velocity.y -= gravity * delta
+	velocity.x = move_toward(velocity.x, 0.0, 18.0 * delta)
+	velocity.z = move_toward(velocity.z, 0.0, 18.0 * delta)
+	move_and_slide()
+	_frame_fx_and_regen(delta)
+	_update_camera_arm(delta)
+	_update_body_arms(delta)
+	_update_tp_gear(delta)
+	_update_hud(delta)
+	_update_log(delta)

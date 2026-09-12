@@ -1,4 +1,5 @@
 extends Node
+## (probe)
 
 ## Ticks the pinned-under-a-trunk timer for the Player without adding anything
 ## to Player's own _process / _physics_process. docs/TREES_v2_SPEC.md §8b.

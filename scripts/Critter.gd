@@ -91,6 +91,13 @@ var _threat_pos := Vector3.ZERO
 var _flee_dir := Vector3.ZERO
 var _home := Vector3.ZERO        ## territory anchor — nothing wanders forever
 var home_radius := 30.0
+## [weather] 0..1, handed over by WildlifeDirector.set_clock out of
+## Weatherwise.cover_urge(): how badly this animal wants to be under
+## something right now. Zero on a clear day, always, for every species.
+var weather_cover := 0.0
+## Past this much urge an animal stops working its patch and stands. Below it
+## the weather is something it notices; above it, something it shelters from.
+const COVER_HOLD := 0.55
 var _bluff_count := 0            ## how many warnings it has already given you
 var bold := 2                    ## warnings a BLUFFER gives before it commits
 var relentless := false          ## never routs, never disengages — see the bear
@@ -113,7 +120,37 @@ var _night := false
 var _spray_cool := 0.0
 var _latched: Node3D = null
 var _latch_t := 0.0
+## [water] the silt ambush (snapping turtle): "" | "hold" | "flee"
+var _ambush := ""
+var _ambush_t := 0.0
+var _ambush_cd := 0.0
+var _ambush_anchor := Vector3.ZERO
+var _ambush_dir := Vector3.ZERO
+var _ambush_bite_t := 0.0
+var _ambush_struggle := 0
+const AMBUSH_REACH := 2.4          ## a swimmer this close over it
+const AMBUSH_HOLD := 7.0           ## seconds it holds before the jaw tires
+const AMBUSH_NEED := 6             ## struggles that break the hold
+const AMBUSH_PULL := 0.7           ## m/s toward deeper water
+const AMBUSH_COOLDOWN := 28.0
 var _playing_dead := false
+
+## ------------------------------------------------- contact specials ------
+## The bear's manhandling moves (dex flags "grab" / "press"), run as a small
+## state machine OUTSIDE the archetype: while one plays, the archetype is
+## skipped the way a rooted signature skips it, but the move drives its own
+## steering, its damage ticks, and the player's body. Any species with the
+## flags (and a jaw pivot for the clips to work with) gets them for free.
+var _move := ""                  ## "" | "grab" | "press"
+var _move_sig := ""              ## the signature clip the move is riding
+var _move_grabbed := false       ## the clamp / the lean actually landed
+var _move_whiffed := false       ## the attempt missed — play out and give up
+var _move_thrown := false        ## the payoff (toss / shove) has been dealt
+var _move_hits := 0              ## damage ticks already dealt this move
+var _grab_cd := 0.0
+var _press_cd := 0.0
+var _move_recover := 0.0         ## after a landed move: walk OFF to the side
+var _move_recover_dir := Vector3.ZERO
 
 ## ------------------------------------------------------------ bookkeeping ---
 var _zone := "deep_woods"        ## set by the director; used for calls + save
@@ -287,6 +324,9 @@ func _physics_process(delta: float) -> void:
 	_sig_cool = maxf(0.0, _sig_cool - delta)
 	_buzz_cool = maxf(0.0, _buzz_cool - delta)
 	_call_cool = maxf(0.0, _call_cool - delta)
+	_grab_cd = maxf(0.0, _grab_cd - delta)
+	_press_cd = maxf(0.0, _press_cd - delta)
+	_move_recover = maxf(0.0, _move_recover - delta)
 
 	if hit_flash > 0.0:
 		hit_flash -= delta
@@ -310,6 +350,20 @@ func _physics_process(delta: float) -> void:
 	elif _flies():
 		velocity.y = move_toward(velocity.y, 0.0, 2.0 * delta)
 
+	## [water] SILT AMBUSH. A water animal with the ambush + latch flags lies
+	## on the bed of the shallows and takes a swimmer that passes over it:
+	## the hold is the Player's own grab (creature_grab / grab_anchor /
+	## grab_release), the pull is toward deeper water, and it lets go when
+	## the swimmer has kicked enough or its jaw tires. Between ambushes it
+	## does not wander -- a snapper in a pond is a stone until it is not.
+	if _is_ambusher():
+		_ambush_cd = maxf(0.0, _ambush_cd - delta)
+		if _ambush_tick(delta, pl, dist):
+			_update_locomotion(delta)
+			_animate(delta)
+			move_and_slide()
+			return
+
 	if flinch_timer > 0.0:
 		flinch_timer -= delta
 		velocity.x = move_toward(velocity.x, 0.0, 8.0 * delta)
@@ -322,6 +376,16 @@ func _physics_process(delta: float) -> void:
 	_season_tick(delta)
 	_latch_tick(delta)
 	_buff_tick(delta)
+
+	## A contact special owns the whole frame: the steering, the damage, and
+	## the player's body. It is not an archetype decision any more — it is
+	## HAPPENING, and it ends by finishing, whiffing, or being hit off.
+	if _move != "":
+		_move_tick(delta, pl)
+		_update_locomotion(delta)
+		_animate(delta)
+		move_and_slide()
+		return
 
 	## ROOTED. A committed move plants the animal: it does not steer, chase or
 	## swing while it runs. The archetype is skipped entirely rather than asked
@@ -476,8 +540,35 @@ func _do_bluffer(delta: float, pl: Node3D, dist: float) -> void:
 			elif mood_t <= 0.0:
 				_set_mood(Mood.WARN, WARN_HOLD)
 				return
+			## Coming off a landed manhandle: it does not stand over you — it
+			## WALKS OFF to the side, unhurried, glancing back, and only then
+			## turns the argument back on.
+			if _move_recover > 0.0:
+				attack_cd = maxf(attack_cd, 0.5)
+				_face(to, delta, 3.0)
+				_steer(_move_recover_dir * wander_speed * 2.2, delta, 6.0)
+				return
+			## MERCY RULE: it does not maul what is already on the ground. It
+			## paces a tight half-circle just out of reach, huffing, and the
+			## fight resumes when you find your feet (Lemon, 2026-08-29).
+			if _target_down(pl):
+				attack_cd = maxf(attack_cd, 0.6)
+				var dirn := to.normalized() if dist_p > 0.05 else -global_transform.basis.z
+				var strafe := Vector3(-dirn.z, 0.0, dirn.x)
+				var radial := clampf((dist_p - 3.8) * 0.5, -1.0, 1.0)
+				_steer((strafe + dirn * radial * 0.6).normalized() * wander_speed * 2.4, delta, 8.0)
+				_face(to, delta, 6.0)
+				if _sig == "" and _sig_cool <= 0.0:
+					_play_sig(_warn_sig())
+				return
 			_face(to, delta, 6.0)
 			_steer(to.normalized() * chase_speed, delta, 16.0)
+			## Contact: sometimes the swipe is not what it reaches for.
+			if dist_p <= attack_range + 0.9 and attack_cd <= 0.0 and _move == "":
+				var mv := _pick_move(pl, dist_p)
+				if mv != "":
+					_start_move(mv)
+					return
 			if dist_p <= attack_range and attack_cd <= 0.0:
 				attack_cd = attack_cooldown
 				if pl.has_method("take_damage"):
@@ -516,9 +607,15 @@ func _do_bluffer(delta: float, pl: Node3D, dist: float) -> void:
 			if CritterDex.flag(species, "spray", false) and _bluff_count >= bold \
 					and dist < SPRAY_RANGE and _spray_cool <= 0.0:
 				_do_spray(pl)
-			elif dist < charge_at and _bluff_count >= bold and attack_damage > 0.0:
+			elif dist < charge_at and _bluff_count >= bold and attack_damage > 0.0 \
+					and GameMode.may_engage(self, pl):
+				## PEACEFUL removes the top rung of the ladder and nothing
+				## else: the animal still notices, still warns, still rears up
+				## and huffs and holds its ground — it just never means it,
+				## until the day you hit it (GameMode.may_engage).
 				_set_mood(Mood.CHARGE, 3.0)
-			elif relentless and _bluff_count >= bold and attack_damage > 0.0 and dist < leash_radius:
+			elif relentless and _bluff_count >= bold and attack_damage > 0.0 \
+					and dist < leash_radius and GameMode.may_engage(self, pl):
 				## It gave you the warning. It is not going to stand here
 				## repeating itself while you walk around it.
 				_set_mood(Mood.CHARGE, 3.0)
@@ -531,7 +628,8 @@ func _do_bluffer(delta: float, pl: Node3D, dist: float) -> void:
 		Mood.FLEE:
 			## Nothing puts a relentless one to flight — if something managed
 			## to set this mood, it turns straight back around.
-			if relentless and pl != null and dist < leash_radius:
+			if relentless and pl != null and dist < leash_radius \
+					and GameMode.may_engage(self, pl):
 				_set_mood(Mood.CHARGE, 4.0)
 				return
 			_run_from(_threat_pos, delta)
@@ -749,6 +847,17 @@ func _do_ambient(delta: float, _pl: Node3D, _dist: float) -> void:
 
 func _graze(delta: float) -> void:
 	## Not a straight line, and not far from home — an animal has a patch.
+	## [weather] ...and in a downpour it has a TREE instead of a patch. This
+	## is the behaviour half of Weatherwise: at weather_cover 0 it is exactly
+	## the grazing this game has always had, and past COVER_HOLD the animal
+	## stands where it is and stops calling — which is the whole of "rain
+	## should quiet the birds and put the deer up". The idle loop keeps
+	## running underneath, so what you see is a deer standing under a bough
+	## breathing, not a deer switched off.
+	if weather_cover >= COVER_HOLD:
+		_steer(Vector3.ZERO, delta, 6.0)
+		_call_cool = maxf(_call_cool, CALL_COOLDOWN.x * weather_cover)
+		return
 	var pull := _home - global_position
 	pull.y = 0.0
 	if pull.length() > home_radius:
@@ -760,6 +869,13 @@ func _graze(delta: float) -> void:
 
 func _patrol(delta: float) -> void:
 	## Predators and fliers range much wider than a grazer.
+	## [weather] The same hold, and it bites at a different sky: a fox's urge
+	## barely reaches COVER_HOLD even in a storm, so foul weather keeps the
+	## hunters ranging long after it has put everything else under a bough.
+	if weather_cover >= COVER_HOLD:
+		_steer(Vector3.ZERO, delta, 6.0)
+		_call_cool = maxf(_call_cool, CALL_COOLDOWN.x * weather_cover)
+		return
 	var pull := _home - global_position
 	pull.y = 0.0
 	if pull.length() > home_radius * 2.4:
@@ -805,7 +921,11 @@ func _spook(from: Vector3, threat: int) -> void:
 	## whatever caused it instead.
 	if relentless:
 		_threat_pos = from
-		if attack_damage > 0.0:
+		## PEACEFUL shuts this door too. It is the least obvious of the four
+		## routes to a charge and the worst one to miss: an alarm call from
+		## three fields away would otherwise put a bear on a player who never
+		## touched it, which is the exact thing Peaceful promises cannot happen.
+		if attack_damage > 0.0 and GameMode.may_engage(self, _get_player()):
 			_bluff_count = maxi(_bluff_count, bold)
 			_set_mood(Mood.CHARGE, 4.0)
 		return
@@ -1067,6 +1187,119 @@ func try_latch(who: Node3D) -> void:
 		who.call("take_damage", attack_power(), global_position, true, Vector3.INF, self)
 
 
+## [water] ------------------------------------------------------------------
+func _is_ambusher() -> bool:
+	return bool(CritterDex.flag(species, "ambush", false)) and bool(CritterDex.flag(species, "water", false)) \
+		and bool(CritterDex.flag(species, "latch", false))
+
+
+func _ambush_tick(delta: float, pl: Node3D, dist: float) -> bool:
+	## Returns true when it owned the frame.
+	_ambush_t += delta
+	match _ambush:
+		"hold":
+			if pl == null or not is_instance_valid(pl) or not ("grabbed_by" in pl) or pl.get("grabbed_by") != self:
+				_ambush_end(false, pl)
+				return true
+			## drag toward the deep, a hand's breadth under
+			if fmod(_ambush_t, 1.0) < delta:
+				var d := Overworld.deeper_dir(_ambush_anchor, 6.0)
+				if d != Vector3.ZERO:
+					_ambush_dir = d
+			_ambush_anchor += _ambush_dir * AMBUSH_PULL * delta
+			var wy := Overworld.water_y(_ambush_anchor)
+			if wy != Overworld.NO_WATER:
+				_ambush_anchor.y = wy - (_eye_of(pl) + 0.25)   ## eyes a hand under
+			## ...but never through the bed: in a metre of water the body lies on it
+			_ambush_anchor.y = maxf(_ambush_anchor.y, Overworld.ground_y(_ambush_anchor) + 0.3)
+			global_position = _ambush_anchor + Vector3(0.0, -0.9, 0.0)
+			velocity = Vector3.ZERO
+			_ambush_bite_t -= delta
+			if _ambush_bite_t <= 0.0:
+				_ambush_bite_t = 1.3
+				_bite(pl, attack_power() * 0.14, false)
+			if _ambush_struggle >= AMBUSH_NEED:
+				_ambush_end(true, pl)
+			elif _ambush_t > AMBUSH_HOLD:
+				_ambush_end(false, pl)
+			return true
+		"flee":
+			if pl != null:
+				_run_from(pl.global_position, delta)
+			if _ambush_t > 4.0:
+				_ambush = ""
+				_ambush_t = 0.0
+			return true
+		_:
+			## waiting on the bed. Out of the water it is an ordinary bluffer.
+			if Overworld.water_depth_at(global_position) < 0.35:
+				return false
+			velocity.x = 0.0
+			velocity.z = 0.0
+			if pl == null or _ambush_cd > 0.0 or dist > AMBUSH_REACH * 2.0:
+				return true
+			var swimming: bool = ("swimming" in pl) and bool(pl.get("swimming"))
+			var flat := pl.global_position - global_position
+			flat.y = 0.0
+			if not swimming or flat.length() > AMBUSH_REACH or not pl.has_method("creature_grab"):
+				return true
+			if "grabbed_by" in pl and pl.get("grabbed_by") != null:
+				return true
+			var res := String(pl.call("creature_grab", self, attack_power() * 0.9))
+			if res != "grabbed":
+				_ambush_cd = 8.0
+				return true
+			_ambush = "hold"
+			_ambush_t = 0.0
+			_ambush_struggle = 0
+			_ambush_bite_t = 1.3
+			_ambush_anchor = pl.global_position
+			var wy0 := Overworld.water_y(_ambush_anchor)
+			if wy0 != Overworld.NO_WATER:
+				_ambush_anchor.y = wy0 - (_eye_of(pl) + 0.25)
+			_ambush_anchor.y = maxf(_ambush_anchor.y, Overworld.ground_y(_ambush_anchor) + 0.3)
+			_ambush_dir = Overworld.deeper_dir(_ambush_anchor, 6.0)
+			_play_sig("lunge_latch")
+			WaterAudio.play(self, "snapper_hiss", global_position + Vector3.UP * 0.5, -2.0)
+			WaterAudio.play(self, "splash_in", global_position, -4.0)
+			if pl.has_method("_add_log_msg"):
+				pl.call("_add_log_msg", "Jaws lock on your leg and PULL", Color(1.0, 0.55, 0.35))
+			return true
+
+
+## The held body sits at the anchor; its eyes are _eye_h above it. Read off
+## the player so a crouch or a taller build cannot leave the eyes dry.
+static func _eye_of(pl: Node3D) -> float:
+	if pl != null and "_eye_h" in pl:
+		return float(pl.get("_eye_h"))
+	return 1.6
+
+
+func _ambush_end(broken: bool, pl: Node3D) -> void:
+	if pl != null and is_instance_valid(pl) and "grabbed_by" in pl and pl.get("grabbed_by") == self \
+			and pl.has_method("grab_release"):
+		pl.call("grab_release", Vector3.ZERO)
+		if pl.has_method("_add_log_msg"):
+			pl.call("_add_log_msg", "You kick free of the snapper" if broken else "The snapper lets go",
+				Color(0.70, 0.90, 1.0))
+	_ambush = "flee"
+	_ambush_t = 0.0
+	_ambush_cd = AMBUSH_COOLDOWN
+	_flee_dir = Vector3.ZERO
+
+
+## Player._update_grabbed: how long this holder may keep you.
+func hold_seconds() -> float:
+	return AMBUSH_HOLD + 0.5 if _ambush == "hold" else 4.5
+
+
+## Player._update_grabbed: Space / attack pressed while held.
+func struggled() -> void:
+	if _ambush == "hold":
+		_ambush_struggle += 1
+		_ambush_anchor.y += 0.18
+
+
 func _gnaw_through() -> void:
 	## The beaver actually takes the tree down, through the real tree system —
 	## the whole reason it is worth having an ENGINEER archetype rather than
@@ -1088,6 +1321,238 @@ func _gnaw_through() -> void:
 			best.call("chop_hit", global_position, global_position)
 	HitFX.wood(global_position + Vector3.UP * 0.4, Vector3.FORWARD, "birch", 1.0)
 	Telegraph.ring(self, global_position, 26.0, Telegraph.Threat.WARY, display_name)
+
+
+## ==================== Contact specials (the bear's hands) ==================
+## Two moves that MANHANDLE the player instead of swiping at them, picked at
+## contact range inside a BLUFFER charge. Both are interruptible (any hit or
+## parry makes the animal drop everything), both can be dodged out of, and
+## both end with the animal walking OFF — the whole point is that it never
+## stands over a downed player grinding damage (Lemon, 2026-08-29).
+
+
+func _pick_move(pl: Node3D, _dist_p: float) -> String:
+	## Roll one of the manhandling moves, dex flags and cooldowns permitting.
+	## Anything without the flags — or facing a target that cannot be
+	## manhandled — rolls nothing and takes the plain swipe.
+	if pl == null or not pl.is_in_group("player") or _target_down(pl):
+		return ""
+	if "mount" in pl and pl.get("mount") != null:
+		return ""   ## not off a horse's back
+	var can_grab: bool = CritterDex.flag(species, "grab", false) and _grab_cd <= 0.0 \
+		and pl.has_method("creature_grab") and pl.has_method("grab_release")
+	var can_press: bool = CritterDex.flag(species, "press", false) and _press_cd <= 0.0 \
+		and pl.has_method("creature_press") and pl.has_method("creature_press_end")
+	var r := randf()
+	if can_press and (r < 0.34 or (not can_grab and r < 0.55)):
+		return "press"
+	if can_grab and r < 0.68:
+		return "grab"
+	return ""
+
+
+func _start_move(mv: String) -> void:
+	_move = mv
+	_move_sig = "bear_grab" if mv == "grab" else "bear_press"
+	_move_grabbed = false
+	_move_whiffed = false
+	_move_thrown = false
+	_move_hits = 0
+	attack_cd = maxf(attack_cd, 1.0)
+	_end_sig()
+	_play_sig(_move_sig)
+	if _sig != _move_sig:
+		_move = ""   ## could not start the clip — fall back to plain swings
+
+
+func _move_tick(delta: float, pl: Node3D) -> void:
+	if _sig != _move_sig or pl == null:
+		## The clip died under us (a hit, a parry, a mood change) or there is
+		## nobody left to manhandle. Let go of everything, cleanly.
+		_move_abort()
+		return
+	mood_t = maxf(mood_t, 0.35)
+	velocity.x = 0.0
+	velocity.z = 0.0
+	var t := _sig_t   ## the clip is the clock — brain and body cannot drift
+	match _move:
+		"grab":
+			_grab_tick(delta, pl, t)
+		"press":
+			_press_tick(delta, pl, t)
+	if _move != "" and t >= 0.985:
+		_finish_move()
+
+
+func _grab_tick(delta: float, pl: Node3D, t: float) -> void:
+	## Clamp the player in the mouth, wrench twice, throw them out to the
+	## LEFT — the side _bear_grab whips the head to. The player's body rides
+	## grab_anchor() from their side, so the carry can never desync.
+	var to := pl.global_position - global_position
+	to.y = 0.0
+	if t < 0.14:
+		## The lunge: close the last step with the nose dropping.
+		_face(to, delta, 14.0)
+		if to.length() > 0.7:
+			var d := to.normalized()
+			velocity.x = d.x * chase_speed * 1.1
+			velocity.z = d.z * chase_speed * 1.1
+		return
+	if not _move_grabbed and not _move_whiffed:
+		## t just crossed the clamp. One honest check: in reach, or air.
+		var res := ""
+		if to.length() <= 2.6 and pl.has_method("creature_grab"):
+			res = String(pl.call("creature_grab", self, attack_power() * 0.9))
+		if res == "grabbed":
+			_move_grabbed = true
+		else:
+			_move_whiffed = true
+			_grab_cd = maxf(_grab_cd, 6.0)
+		return
+	if _move_whiffed:
+		if t >= 0.5:
+			_finish_move()   ## jaws clopped on air — do not stand there miming
+		return
+	## Carried. The wrenches hurt; the throw is the payoff.
+	_face(to, delta, 2.5)
+	if t >= 0.34 and _move_hits < 1:
+		_move_hits = 1
+		_bite(pl, attack_power() * 0.16, false)
+	if t >= 0.52 and _move_hits < 2:
+		_move_hits = 2
+		_bite(pl, attack_power() * 0.16, false)
+	if t >= 0.70 and not _move_thrown:
+		_move_thrown = true
+		## Out to the bear's LEFT (-basis.x), the way the head just whipped.
+		var side := -global_transform.basis.x
+		var fwd := -global_transform.basis.z
+		if pl.has_method("grab_release"):
+			pl.call("grab_release", side * 7.5 + Vector3.UP * 2.6 + fwd * 1.2)
+		_grab_cd = 16.0
+		_move_recover = 1.6
+		_move_recover_dir = global_transform.basis.x   ## it drifts off RIGHT
+
+
+func _press_tick(delta: float, pl: Node3D, t: float) -> void:
+	## Rear onto the hind legs, bend over the player, lean the whole animal
+	## on them while biting, then push them flat and walk off to the side
+	## like the argument is settled.
+	var to := pl.global_position - global_position
+	to.y = 0.0
+	_face(to, delta, 4.0)
+	if t < 0.26:
+		return   ## rearing — planted. This is the window to get out from under.
+	if not _move_grabbed and not _move_whiffed:
+		if to.length() <= 2.9 and pl.has_method("creature_press") \
+				and bool(pl.call("creature_press", self)):
+			_move_grabbed = true   ## the lean LANDED
+		else:
+			_move_whiffed = true
+			_press_cd = maxf(_press_cd, 8.0)
+		return
+	if _move_whiffed:
+		return   ## it still comes all the way down — it just lands on nothing
+	if to.length() > 3.4:
+		## They tore themselves out from under it (a dash, mostly).
+		if pl.has_method("creature_press_end"):
+			pl.call("creature_press_end", Vector3.ZERO)
+		_move_whiffed = true
+		_press_cd = maxf(_press_cd, 8.0)
+		return
+	## Leaning on them: keep them tucked under the chest, and bite.
+	var front := global_position - global_transform.basis.z * 1.7
+	var pull := Vector3(front.x, pl.global_position.y, front.z)
+	pl.global_position = pl.global_position.lerp(pull, clampf(delta * 4.0, 0.0, 1.0))
+	if t >= 0.48 and _move_hits < 1:
+		_move_hits = 1
+		_bite(pl, attack_power() * 0.55, true)   ## the first bite breaks a guard
+	if t >= 0.64 and _move_hits < 2:
+		_move_hits = 2
+		_bite(pl, attack_power() * 0.45, false)
+	if t >= 0.78 and not _move_thrown:
+		_move_thrown = true
+		var away := -global_transform.basis.z * 4.6
+		if pl.has_method("creature_press_end"):
+			pl.call("creature_press_end", away)
+		_press_cd = 22.0
+		_move_recover = 2.2
+		_move_recover_dir = global_transform.basis.x * (1.0 if randf() < 0.5 else -1.0)
+
+
+func _bite(pl: Node3D, dmg: float, strong: bool) -> void:
+	if pl.has_method("take_damage"):
+		pl.call("take_damage", dmg, global_position, strong, Vector3.INF, self)
+	var jaw: Node3D = null
+	if not rig.is_empty() and rig.get("jaw") is Node3D:
+		jaw = rig["jaw"] as Node3D
+	var at := jaw.global_position if jaw != null else global_position + Vector3.UP * 0.9
+	var dir := pl.global_position - global_position
+	dir.y = 0.0
+	HitFX.flesh(at, dir.normalized() if dir.length() > 0.05 else Vector3.FORWARD, 1.1)
+
+
+func _finish_move() -> void:
+	_release_manhandle(Vector3.ZERO)
+	_move = ""
+	_move_sig = ""
+	if _sig == "bear_grab" or _sig == "bear_press":
+		_end_sig()
+	attack_cd = maxf(attack_cd, 0.9)
+
+
+func _move_abort() -> void:
+	## Interrupted — a blow, a parry, a knockdown, peace itself. Whatever it
+	## was holding is let go of GENTLY (a drop, not a throw), on the spot.
+	_release_manhandle(Vector3.ZERO)
+	if _move == "grab":
+		_grab_cd = maxf(_grab_cd, 8.0)
+	elif _move == "press":
+		_press_cd = maxf(_press_cd, 10.0)
+	_move = ""
+	_move_sig = ""
+	_move_recover = 0.0
+	if _sig == "bear_grab" or _sig == "bear_press":
+		_end_sig()
+
+
+func _release_manhandle(vel: Vector3) -> void:
+	var pl := _get_player()
+	if pl == null:
+		return
+	if "grabbed_by" in pl and pl.get("grabbed_by") == self and pl.has_method("grab_release"):
+		pl.call("grab_release", vel)
+	if "pressed_by" in pl and pl.get("pressed_by") == self and pl.has_method("creature_press_end"):
+		pl.call("creature_press_end", Vector3.ZERO)
+
+
+func grab_anchor() -> Dictionary:
+	## Where a grabbed body hangs: just under the mouth, wherever the clip
+	## has put the mouth THIS frame. The player pulls itself here every
+	## frame, so the carry can never drift out of sync with the animation.
+	if _ambush == "hold":
+		return {"pos": _ambush_anchor}   ## [water] the snapper's hold point
+	if rig.is_empty() or not (rig.get("jaw") is Node3D):
+		return {"pos": global_position + Vector3.UP * 0.6 - global_transform.basis.z * 1.2}
+	var jaw := rig["jaw"] as Node3D
+	var hs := float(profile.get("len", 1.7)) * 0.24
+	var muz := float((profile.get("feat", {}) as Dictionary).get("muzzle", 1.2))
+	var mouth: Vector3 = jaw.global_transform * Vector3(0, 0.02, -hs * 0.72 * muz)
+	return {"pos": mouth + Vector3.DOWN * 1.02}
+
+
+func on_parried() -> void:
+	## A perfect guard mid-manhandle staggers the animal AND frees you.
+	if _move != "":
+		_move_abort()
+	super()
+
+
+func knockdown(fling: Vector3 = Vector3.ZERO, seconds := 2.4) -> void:
+	## Bowled over (a moose, a falling trunk) while holding someone: let go
+	## FIRST, then ragdoll — a jaw that no longer exists must not keep a grip.
+	if _move != "":
+		_move_abort()
+	super(fling, seconds)
 
 
 ## ============================== Perception ================================
@@ -1281,6 +1746,12 @@ func _animate(delta: float) -> void:
 func take_damage(amount: float, from_pos = null, strong = false, throw = null, attacker: Node = null) -> void:
 	if dying:
 		return
+	## A hit lands while it is manhandling you: it flinches like anything
+	## else (Enemy.take_damage), so the move is over — drop them, cleanly,
+	## BEFORE the flinch machinery runs. This is the escape: stab the thing
+	## that is carrying you and it lets go.
+	if _move != "":
+		_move_abort()
 	var was_easy := mood == Mood.EASY
 	## Quills. Reach into a porcupine and you take it home with you — and the
 	## coyotes learn this too, because they route through the same call.
@@ -1320,6 +1791,23 @@ func take_damage(amount: float, from_pos = null, strong = false, throw = null, a
 	elif mood != Mood.FLEE:
 		## Everything else that gets hit runs, however it was feeling before.
 		_spook(src, Telegraph.Threat.PANIC)
+
+
+func peace_settle() -> void:
+	## An animal's version of standing down. The mood machine is not the
+	## Enemy state machine, so calming the eyes is not enough — a bear left in
+	## WARN would keep huffing at you forever, and one left in CHARGE would
+	## finish the charge. Both go back to grazing; HUNT is left alone, because
+	## a lynx stalking a hare was never about you.
+	super()
+	if dying:
+		return
+	if _move != "":
+		_move_abort()   ## peace lands mid-grab too: it puts you DOWN, gently
+	_move_recover = 0.0
+	if mood == Mood.CHARGE or mood == Mood.WARN:
+		_bluff_count = 0
+		_set_mood(Mood.EASY, 0.0)
 
 
 func _xp_orb_value() -> int:

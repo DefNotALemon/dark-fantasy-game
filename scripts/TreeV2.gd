@@ -20,7 +20,20 @@ extends StaticBody3D
 ## Everything below -- notch carving, felling physics, bucking, snags,
 ## save/load -- runs identically either way. The pack changed the models, not
 ## the game.
-const USE_PSX := true
+const USE_PSX := false
+
+## ART SOURCE, second axis. true = trees v4: the model is assembled at runtime
+## from TreeKit's authored part library by natural botanical ratios, with the
+## bark relief carved into the mesh. false = the tools/treegen2.py GLBs.
+## USE_PSX still wins over both. Nothing else changes either way -- the kit
+## builds the same node structure the GLBs did, on purpose.
+##
+## NOTE for the two perf passes below: the kit carries FEWER seed cards than the
+## GLBs it replaces (measured: mature maple 1400 -> ~1250, mature fir 2006 ->
+## ~1500, ancient oak 1639 -> ~1400) and a fraction of the wood (mature fir
+## 15,380 tris -> 4,400) and roughly a THIRD the mesh nodes. So the PAD_* dials
+## and the shadow cull are, on the kit, a smaller bill than they were tuned for.
+const USE_KIT := true
 
 const GLB_PATH := "res://assets/trees/glb/%s_%d_%s.glb"
 const STAGE_NAMES: Array[String] = ["sapling", "young", "mature", "ancient", "withered"]
@@ -35,13 +48,83 @@ const TRUNK_R: Array[float] = [0.03, 0.10, 0.30, 0.46, 0.30]
 const TRUNK_H: Array[float] = [1.1, 3.6, 8.2, 11.0, 8.0]
 
 ## --- the notch -------------------------------------------------------------
-const NOTCH_Y := 1.02        ## the height a chopper naturally swings at
-const NOTCH_H := 0.40        ## half-height of the wedge (the V opening)
-const NOTCH_ANG := 1.20      ## half-angle the wedge wraps around the trunk
+const NOTCH_Y := 1.02        ## FALLBACK line, world metres -- the height a
+                             ## chopper naturally swings at, used only when a
+                             ## bite arrives with no aim (a save, a blast fell)
+const NOTCH_H := 0.40        ## half-height of the wedge at FULL depth
+const NOTCH_ANG := 1.20      ## half-angle the wedge wraps at FULL depth
+## The wedge does not arrive full size. A first nick gets this share of the
+## opening above and grows toward it as the cut deepens, so what you watch is a
+## keen little mark turning into a mouth you can see daylight through.
+const NOTCH_OPEN_MIN := 0.34
+const NOTCH_ANG_MIN := 0.45
+## THE CUT DOES NOT MOVE. The first bite decides the line and every swing after
+## it only makes the same wedge bigger -- which is also why there is no dial
+## here any more. It is the break height too, so a wandering cut would be a
+## wandering break.
 const BREAK_AT := 1.02       ## wedge depth / trunk radius that drops the tree
 const HEART := Color(0.52, 0.39, 0.21)   ## fresh-cut heartwood
 
 const LIMB_AIM := 1.6        ## aim this close to a limb and the axe takes it
+
+## --- the dense canopy (Lemon 2026-08-29) ------------------------------------
+## The GLB's baked leaf cards are treated as SEEDS: each one grows a cluster of
+## flat HORIZONTAL leaf pads, tops up at the sun, laid adjacent so the crown
+## reads as layered shelves of foliage. The outer shell is small pads on the
+## fully wind-animated material; the inside is fewer, BIGGER, darker pads on
+## the STATIC material (they just ride the branch) — that skip is what makes
+## the density affordable. Non-fir gets the huge factor; fir was already the
+## budget's heaviest species and stays modest.
+##
+## GPU PASS 2026-08-30 (Lemon: "turn the blown leaves hella down, they're
+## deeply affecting the run speed"). The v1 dials grew SEVEN pads per seed card
+## on every one of 420 trees — and every pad is an alpha-DISCARD quad, which
+## kills early-Z, so each one costs a full fragment evaluation in the colour
+## pass AND again in every directional shadow split. Fill rate, not triangles,
+## was the wall. Cut to THREE pads per seed (~53% less leaf coverage) with the
+## survivors grown slightly so the crown does not go gappy:
+##   outer 5 -> 2 @ 0.72 -> 0.86   |   inner 2 -> 1 @ 1.55 -> 1.40
+## To put the old look back, restore the numbers in the table below — nothing
+## else in the densifier changed.
+## CANOPY FIX 2026-09-01 (Lemon: "the one with leaves just has a green blob on
+## top", "I don't want green blobs"). Two things made a crown read as one flat
+## green mass, and they compounded:
+##
+##   1. The densifier THREW THE AUTHORED CARDS AWAY. TreeKit orients every leaf
+##      card along its own twig with the species' gravity droop — that is the
+##      whole reason `_cards()` exists — and `_densify_canopy` collected them
+##      as seed points and then rebuilt the surface out of pads ONLY. So the
+##      shipped canopy was pads and nothing else.
+##   2. Every pad's normal was UP (tilt maxed at 0.34 rad = 19°). foliage's
+##      light() is FOUR flat bands, so identical normals means every pad lands
+##      in the SAME band — one colour across the whole crown — and from the
+##      player's eye, at ground level, a horizontal quad is edge-on. A crown of
+##      them is a green silhouette with no leaves in it. A blob.
+##
+## So: the authored cards go back in as the outer shell (they are what a player
+## actually sees, and they get the wind), the pads drop to filler behind them,
+## and the pads now tilt across a real range so their normals spread over the
+## light bands. Fill rate is held roughly flat by taking one pad off every
+## species — the card that replaces it was already being built and thrown away.
+const CANOPY_DENSIFY := true
+const KEEP_AUTHORED_CARDS := true   ## false = the old pads-only crown
+const PAD_OUTER_N := {"maple": 1, "birch": 1, "oak": 1, "pine": 1, "fir": 0}
+const PAD_INNER_N := {"maple": 1, "birch": 1, "oak": 1, "pine": 1, "fir": 1}
+const PAD_OUTER_SIZE := 0.86     ## × the seed card's half-size
+const PAD_INNER_SIZE := 1.40
+const PAD_INNER_SHADE := 0.80    ## the inside of a crown shades itself
+## How far off horizontal a pad may tilt, radians. This is a LOOK dial, not a
+## cost one: it is what spreads the pads' normals across light()'s bands. At
+## the old 0.34/0.16 every pad shaded identically.
+const PAD_OUTER_TILT := 1.15     ## was 0.34 — outer pads stand up and lean over
+const PAD_INNER_TILT := 0.55     ## was 0.16 — inner filler stays flatter
+## NEXT LEVER, not taken yet: leaves cast real shadows, so the whole canopy is
+## re-rasterised once per directional cascade — probably more fragment work
+## than the colour pass. It cannot be switched off per-surface (wood and leaves
+## share one MeshInstance), so the honest fix is a `shadows_disabled` variant of
+## foliage.gdshader for the INNER pads only: they sit inside the crown and cast
+## nothing anyone can see, and they are the biggest pads on the tree.
+static var _canopy_cache := {}   ## "species#stage#mesh" -> {mesh, roles}
 
 ## --- materials -------------------------------------------------------------
 ## The GLBs ship with NO textures on purpose (one shared atlas beats 25 embedded
@@ -84,16 +167,35 @@ var region := "temperate"
 ## height in MODEL space and the trunk radius measured there.
 var _psx: Dictionary = {}
 var _psx_leaf: ShaderMaterial = null    ## this tree's own copy, once it sheds
+## Which authored TreeKit recipe this tree was built from. Derived from the
+## tree's OWN seed, so a tree restored from a save is the same tree it was --
+## get this wrong and every load reshuffles the forest.
+var kit_variant := 0
 var _dense := false                     ## the carve-ready trunk is in
 var dead := false             ## a snag: deadwood bark, bare branches
 var felled := false
 var chops_left := 0
 var notch_depth := 0.0        ## metres of wood taken out of the struck side
 var notch_ang := 0.0          ## which way the wedge faces, tree-local radians
+var notch_y := 0.0            ## THE LINE THE BLADE HIT, model metres. 0 = no
+							  ## bite has landed yet, so NOTCH_Y stands in.
 var scale_class := 1.0        ## NORMAL 1.0 / ELDER 1.7 / GREAT 3.5-4.5 (spec §4)
 
 ## What the last swing did, for the HUD: "limb", "limb_off", "trunk", "felled".
 var last_result := ""
+
+## --- what grows on it (2026-09-03) -------------------------------------------
+## GrowthPatch children: moss, fungi, vines or lichen creeping up the low,
+## shaded side of the trunk. Rolled from the tree's own seed the frame after
+## _ready (deferred, so a restore() that arrives in the same frame -- World and
+## GodEditor both add_child then restore -- wins and the roll is skipped).
+## Saved inside save_dict, so a hand-placed tree's moss survives a new run
+## through build_placements.json exactly as the tree does.
+const GROWTH_CHANCE: Array[float] = [0.0, 0.45, 0.80, 0.95, 0.90]   ## per stage
+## An old tree is already mossy when you meet it: starting coverage per stage,
+## jittered. A sapling starts bare and earns it.
+const GROWTH_START: Array[float] = [0.0, 0.08, 0.30, 0.55, 0.45]
+var _growth_restored := false
 
 var _model: Node3D
 var _trunk: MeshInstance3D
@@ -139,11 +241,45 @@ func _ready() -> void:
 	if dead:
 		chops_left = maxi(chops_left - BRITTLE, 1)   ## dead wood is brittle
 	_build()
+	_shed_shadows()
+	call_deferred("_seed_growth")
+
+
+## --- shadows -----------------------------------------------------------------
+## THE SINGLE BIGGEST FRAME COST IN THE GAME, measured in the live build on
+## 2026-08-30: of 14,505 visible MeshInstances on screen, **14,418 were casting
+## shadows** — 8,670 draw calls, 12 fps. A mature TreeV2 is ~113 separate mesh
+## nodes (the trunk, every limb, and the densified canopy pads on each), and
+## every one of them was being re-rendered into every cascade of the sun's
+## shadow map. 360 trees is 40,000 shadow casters.
+##
+## The TRUNK keeps its shadow. That is the shadow you actually read — the one
+## that says where the tree is standing and which way the light falls. The limbs
+## and the canopy pads do not, and the distant impostor forest already casts
+## none (Overworld._scatter_impostors), so this makes the near woods agree with
+## the far ones instead of costing forty times what they do.
+##
+## What you give up is dappled shade under a canopy. Set SHADOW_LIMBS true to
+## buy it back, and expect the framerate that came with it.
+const SHADOW_LIMBS := false
+
+
+func _shed_shadows() -> void:
+	if SHADOW_LIMBS:
+		return
+	for n in _flatten(self):
+		var mi := n as MeshInstance3D
+		if mi == null or mi.name.begins_with("Trunk"):
+			continue
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _build() -> void:
 	if USE_PSX:
 		_build_psx()
+		return
+	if USE_KIT:
+		_build_kit()
 		return
 	var path := GLB_PATH % [species, stage, STAGE_NAMES[stage]]
 	var packed := load(path)
@@ -163,7 +299,9 @@ func _build() -> void:
 		var mi := child as MeshInstance3D
 		if mi == null:
 			continue
+		_densify_canopy(mi)
 		_apply_materials(mi, mats)
+		_seed_bark_look(mi)
 		if mi.name.begins_with("Trunk"):
 			_trunk = mi
 		elif mi.name.begins_with("Branch"):
@@ -179,6 +317,50 @@ func _build() -> void:
 	_col.shape = cyl
 	_col.position.y = cyl.height * 0.5
 	add_child(_col)
+
+
+## ------------------------------------------------------------------- KIT ---
+
+func _build_kit() -> void:
+	## Trees v4. TreeKit hands back exactly what the GLB used to: a `Trunk`
+	## mesh and one `Branch_NN_rXXX` per limb, wood on surface 0 and leaf cards
+	## on surface 1. So everything below this function is the code that was
+	## already here.
+	var sd: int = tree_seed if tree_seed != 0 else hash(str(position))
+	kit_variant = posmod(sd / 7, TreeKit.variants(species))
+	_model = TreeKit.build(species, stage, kit_variant, dead)
+	if _model == null:
+		push_warning("TreeV2: TreeKit built nothing for %s/%d" % [species, stage])
+		return
+	_model.scale = Vector3.ONE * scale_class
+	add_child(_model)
+
+	var mats := materials_for(species, dead)
+	for child in _model.get_children():
+		var mi := child as MeshInstance3D
+		if mi == null:
+			continue
+		_densify_canopy(mi)
+		_apply_materials(mi, mats)
+		_seed_bark_look(mi)
+		if mi.name.begins_with("Trunk"):
+			_trunk = mi
+		elif mi.name.begins_with("Branch"):
+			var b := TreeBranch.new()
+			b.setup(mi, self)
+			add_child(b)
+			_branches.append(b)
+
+	_col = CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = maxf(trunk_radius(), 0.06)
+	cyl.height = trunk_height()
+	_col.shape = cyl
+	_col.position.y = cyl.height * 0.5
+	add_child(_col)
+	## the kit path has to shed shadows too, or the whole 12-fps fix is bypassed
+	## the moment USE_KIT is on
+	_shed_shadows()
 
 
 ## ------------------------------------------------------------------- PSX ---
@@ -314,7 +496,13 @@ static func materials_for(species_id: String, is_dead := false) -> Array:
 	leaf.set_shader_parameter("marcescence", float(MARCESCENCE.get(species_id, 0.0)))
 	leaf.set_shader_parameter("dead", is_dead)
 
-	_mat_cache[key] = [bark, leaf]
+	## The inner-canopy variant: same species and season, NO vertex wind, a
+	## shade darker — the static filler that pays for the dense crown.
+	var leaf_in: ShaderMaterial = leaf.duplicate()
+	leaf_in.set_shader_parameter("animated", 0.0)
+	leaf_in.set_shader_parameter("shade", PAD_INNER_SHADE)
+
+	_mat_cache[key] = [bark, leaf, leaf_in]
 	return _mat_cache[key]
 
 
@@ -323,11 +511,51 @@ func _apply_materials(mi: MeshInstance3D, mats: Array) -> void:
 	## leaves on it has only one surface, so indices don't line up.
 	if mi.mesh == null:
 		return
+	if mi.has_meta("leaf_roles"):
+		## densified canopy: the rebuilt mesh knows its own surface roles
+		var roles: Array = mi.get_meta("leaf_roles")
+		for i in range(mi.mesh.get_surface_count()):
+			var role := String(roles[i]) if i < roles.size() else "wood"
+			var m: Material = mats[0]
+			if role == "outer":
+				m = mats[1]
+			elif role == "inner":
+				m = mats[2] if mats.size() > 2 else mats[1]
+			mi.set_surface_override_material(i, m)
+		return
 	for i in range(mi.mesh.get_surface_count()):
 		var src: Material = mi.mesh.surface_get_material(i)
 		var nm := str(src.resource_name) if src != null else ""
 		var is_leaf := nm.findn("leaf") >= 0 or nm.findn("foliage") >= 0
 		mi.set_surface_override_material(i, mats[1] if is_leaf else mats[0])
+
+
+## Lemon 2026-08-30: "I just want each tree to have its own unique bark/pattern."
+##
+## The forest shares meshes and materials on purpose -- that sharing is most of
+## why 420 trees are affordable -- so the variation cannot live in either. It
+## lives in INSTANCE UNIFORMS, which Godot patches per draw call: no material
+## duplication, no extra draw calls, nothing added to the ~1,530-material
+## problem the optimization audit already flagged.
+##
+## Four things move per tree, all off the tree's OWN seed so a save restores the
+## same tree: where on the tiling bark sheet this trunk is cut from, whether that
+## sheet is mirrored, how warm the bark is, and how light it is. The RELIEF
+## varies too, but a step coarser -- it is baked into the shared mesh, so it is
+## seeded per authored recipe rather than per tree (TreeKit._bark_offset).
+##
+## Needs Forward+ or Mobile; this project is Forward Plus.
+func _seed_bark_look(mi: MeshInstance3D) -> void:
+	var sd: int = tree_seed if tree_seed != 0 else hash(str(position))
+	var a := float(posmod(sd, 977)) / 977.0
+	var b := float(posmod(sd / 977, 811)) / 811.0
+	var c := float(posmod(sd / 13, 599)) / 599.0
+	var d := float(posmod(sd / 7, 421)) / 421.0
+	mi.set_instance_shader_parameter("bark_var",
+		Vector4(a * 4.0, b * 6.0, 1.0 if c > 0.5 else 0.0, d))
+	mi.set_instance_shader_parameter("bark_value", 0.88 + a * 0.24)
+	## the canopy varies with it -- one stem's leaves are not the next one's
+	mi.set_instance_shader_parameter("leaf_var", Vector2(0.90 + b * 0.20, c))
 
 
 func leaf_material() -> Material:
@@ -392,6 +620,8 @@ func trunk_radius() -> float:
 	## World metres -- what the fallen trunk and the stump are built from.
 	if USE_PSX and not _psx.is_empty():
 		return maxf(float(_psx["radius"]), 0.05)
+	if USE_KIT:
+		return TreeKit.base_radius(species, stage) * scale_class
 	return TRUNK_R[stage] * scale_class
 
 
@@ -401,13 +631,83 @@ func model_radius() -> float:
 	## wider than the tree.
 	if USE_PSX and not _psx.is_empty():
 		return maxf(float(_psx["radius"]) / maxf(float(_psx["scale"]), 0.001), 0.02)
+	if USE_KIT:
+		## The wood ACTUALLY THERE at the height the axe swings at, straight off
+		## the taper curve the mesh was built from -- not the butt radius. A
+		## table lookup here cuts a wedge that is the wrong share of the tree.
+		## And "the height the axe swings at" means THE LINE THE BLADE ACTUALLY
+		## HIT once one has: cut high on a taper and there is less wood to eat,
+		## so the same number of bites still fells it.
+		return TreeKit.radius_at(species, stage, notch_line())
 	return TRUNK_R[stage]
 
 
 func trunk_height() -> float:
 	if USE_PSX and not _psx.is_empty():
 		return maxf(float(_psx["height"]), 0.2)
+	if USE_KIT:
+		return TreeKit.height_of(species, stage) * scale_class
 	return TRUNK_H[stage] * scale_class
+
+
+func notch_line() -> float:
+	## The height of the cut in MODEL metres -- where the blade went in, or the
+	## height a chopper naturally swings at before anything has.
+	##
+	## NOTE the DIVIDE. The trunk mesh is built at unit size and the whole model
+	## is then scaled by scale_class, so a world height converts to model space
+	## by dividing. This used to MULTIPLY, which put an elder tree's wedge at
+	## head height and a GREAT tree's twenty metres up the trunk.
+	if notch_y > 0.0:
+		return notch_y
+	if USE_PSX and not _psx.is_empty():
+		return float(_psx["chop_y"])
+	return NOTCH_Y / maxf(scale_class, 0.001)
+
+
+func notch_shape() -> Array:
+	## [half-height, half-angle] of the wedge AS IT STANDS, model metres and
+	## radians. One place owns the opening curve, because two things read it
+	## now: the carve, and the stump's break face — and a stump wearing a
+	## different wedge from the one the axe cut is worse than no wedge at all.
+	var grow := clampf(notch_depth / maxf(model_radius() * BREAK_AT, 0.0001), 0.0, 1.0)
+	var open := sqrt(grow)
+	var full_h := NOTCH_H / maxf(scale_class, 0.001)
+	if USE_PSX and not _psx.is_empty():
+		full_h = NOTCH_H / maxf(float(_psx["scale"]), 0.001)
+	return [maxf(full_h * lerpf(NOTCH_OPEN_MIN, 1.0, open), 0.01),
+		NOTCH_ANG * lerpf(NOTCH_ANG_MIN, 1.0, open)]
+
+
+func _aim_to_notch(aim: Vector3) -> bool:
+	## PUT THE CUT WHERE THE EDGE WENT IN. `aim` is the world-space point the
+	## chopper's crosshair ray actually found on this tree, so the line is his
+	## line: chop low and the notch is at the roots, chop high and it is at your
+	## shoulder, work the left flank and the wedge faces left.
+	##
+	## The first bite anchors both the height and the facing, and then THE SPOT
+	## STAYS PUT: every swing after it lands in that same notch and only makes
+	## it bigger. Returns false when a bite arrives blind and the caller should
+	## fall back to the side the chopper is standing on.
+	if aim == Vector3.INF or _trunk == null:
+		return false
+	var lp: Vector3 = _trunk.to_local(aim)
+	var c := _ring_centre(lp.y)
+	var rel := Vector3(lp.x - c.x, 0.0, lp.z - c.z)
+	if rel.length_squared() < 0.000001:
+		return false
+	var ang := atan2(rel.z, rel.x)
+	## Keep it on the trunk: never under the soil, never off the top of the wood.
+	var top := maxf(trunk_height() / maxf(scale_class, 0.001) - 0.25, 0.15)
+	var y := clampf(lp.y, 0.12, top)
+	if notch_y <= 0.0:
+		notch_y = y
+		notch_ang = ang
+	## ...and that is the last time it moves. Later bites land in the SAME cut
+	## and only make it bigger — see _carve_notch, where the wedge opens up as
+	## it deepens. Returning true either way keeps the caller off its
+	## side-you're-standing-on fallback.
+	return true
 
 
 func _carve_notch() -> void:
@@ -420,11 +720,14 @@ func _carve_notch() -> void:
 	var verts := PackedVector3Array(src)
 	## The wedge is authored in world metres but carved in the trunk mesh's own
 	## space, so both the height and the half-height divide by the model scale.
-	var ny := NOTCH_Y * scale_class
-	var nh := NOTCH_H * scale_class
-	if USE_PSX and not _psx.is_empty():
-		ny = float(_psx["chop_y"])
-		nh = NOTCH_H / maxf(float(_psx["scale"]), 0.001)
+	## WHERE, and HOW BIG. The line is wherever the blade went in; the wedge
+	## around it OPENS UP as the cut deepens, so the triangle you are watching
+	## gets taller and wraps further round the trunk with every bite instead of
+	## just getting a little deeper in a fixed-size slot.
+	var ny := notch_line()
+	var shape := notch_shape()
+	var nh: float = shape[0]
+	var nang: float = shape[1]
 	var y_lo := ny - nh
 	var y_hi := ny + nh
 
@@ -448,15 +751,20 @@ func _carve_notch() -> void:
 			continue
 		var a := atan2(rel.z, rel.x)
 		var da: float = absf(wrapf(a - notch_ang, -PI, PI))
-		if da > NOTCH_ANG:
+		if da > nang:
 			continue
-		## V in both axes: deepest at the middle of the cut, tapering to nothing
-		## at the top, bottom and sides of the wedge.
-		## Hold full depth through the middle of the cut and taper only near the
-		## edges: a linear falloff in both axes gives a shallow cone that reads
-		## as a dent, not as something an axe did.
-		var fy: float = clampf((1.0 - absf(v.y - ny) / nh) / 0.55, 0.0, 1.0)
-		var fa: float = clampf((1.0 - da / NOTCH_ANG) / 0.55, 0.0, 1.0)
+		## A SHARP TRIANGLE, not a gouge. Down the trunk the depth falls off
+		## LINEARLY from the strike line to nothing at the top and bottom of the
+		## wedge -- a clean V with its point buried in the wood. The old curve
+		## held full depth across the middle 45% of the opening, which is a
+		## flat-bottomed slot and reads as a dent pressed into the bark.
+		var fy: float = 1.0 - absf(v.y - ny) / nh
+		if fy <= 0.0:
+			continue
+		## ACROSS the trunk it stays a FACE: full depth over the middle of the
+		## arc, tapering only out at the corners where the wedge runs out of
+		## wood. A V in both axes at once would be a cone, not an axe cut.
+		var fa: float = clampf((1.0 - da / nang) / 0.35, 0.0, 1.0)
 		var cut: float = notch_depth * fy * fa
 		var nr: float = maxf(r - cut, 0.012)
 		verts[i] = Vector3(c.x + rel.x / r * nr, v.y, c.z + rel.z / r * nr)
@@ -475,11 +783,15 @@ func _carve_notch() -> void:
 	for s in range(1, _trunk.mesh.get_surface_count()):
 		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _trunk.mesh.surface_get_arrays(s))
 	_trunk.mesh = am
+	_seed_bark_look(_trunk)   ## a carve rebuilds the mesh; keep this tree's bark
 	var mats: Array = PSXNature.materials(String(_psx["atlas"]), region, dead) \
 		if (USE_PSX and not _psx.is_empty()) else materials_for(species, dead)
 	_trunk.set_surface_override_material(0, mats[0])
+	var lroles: Array = _trunk.get_meta("leaf_roles") if _trunk.has_meta("leaf_roles") else []
 	for s in range(1, am.get_surface_count()):
-		_trunk.set_surface_override_material(s, mats[1])
+		var role := String(lroles[s]) if s < lroles.size() else "outer"
+		_trunk.set_surface_override_material(s,
+			mats[2] if role == "inner" and mats.size() > 2 else mats[1])
 
 
 ## --------------------------------------------------------------- gameplay ---
@@ -528,14 +840,23 @@ func chop_hit(toward_chopper: Vector3, aim := Vector3.INF) -> bool:
 		last_result = "limb_off" if limb.take_hit(1) else "limb"
 		return false
 
-	## Otherwise the wedge goes into the trunk on the side you're standing.
-	var local := (global_transform.basis.inverse() * toward_chopper).normalized()
-	notch_ang = atan2(local.z, local.x)
+	## Otherwise the wedge goes into the trunk ON THE LINE THE BLADE HIT.
+	## _aim_to_notch owns that; the side you're standing on is only the
+	## fallback for a bite that arrived without an aim point.
+	_cache_trunk()
+	if not _aim_to_notch(aim):
+		var local := (global_transform.basis.inverse() * toward_chopper).normalized()
+		notch_ang = atan2(local.z, local.x)
+		if notch_y <= 0.0:
+			notch_y = notch_line()
 	chops_left -= 1
-	## notch_depth lives in MODEL metres because that is where the vertices are.
-	var r := model_radius()
-	notch_depth = minf(notch_depth + r * (BREAK_AT / float(maxi(TRUNK_CHOPS[stage], 1))),
-		r * BREAK_AT)
+	## notch_depth lives in MODEL metres because that is where the vertices are,
+	## and it ACCELERATES: bite one leaves a mark, and every bite after takes
+	## more wood than the one before, so the wedge tears open toward the swing
+	## that drops the tree instead of creeping in equal slices.
+	var total := float(maxi(TRUNK_CHOPS[stage], 1))
+	var t := clampf((total - float(chops_left)) / total, 0.0, 1.0)
+	notch_depth = model_radius() * BREAK_AT * (0.55 * t + 0.45 * t * t)
 	_carve_notch()
 	_shiver(toward_chopper)
 
@@ -576,6 +897,13 @@ func _shiver(world_toward: Vector3) -> void:
 func _fell(dir: Vector3, leave_stump := true) -> void:
 	## Physics, not animation: the trunk goes over the way the wedge points and
 	## crashes onto its side.
+	##
+	## AND IT BREAKS ON THE NOTCH. The tree splits at the line the axe has been
+	## working: everything below it stays rooted as a stump exactly as tall as
+	## the cut was high, everything above it is what goes over, and the break
+	## face is the wedge. Before this the WHOLE tree lifted off — stump wood and
+	## all — and a knee-high stump was spawned underneath it, which is why
+	## felling read as the trunk teleporting off its own base.
 	felled = true
 	remove_from_group("trees")
 	remove_from_group("choppable")
@@ -584,13 +912,29 @@ func _fell(dir: Vector3, leave_stump := true) -> void:
 	## Throw the canopy before the model changes hands, or the burst spawns
 	## parented to a body that is already rolling.
 	_shed_leaves()
+
+	var h := trunk_height()
+	## The break line, WORLD metres above the foot. Clamped so a bite at the
+	## roots still leaves something to stand on and one up in the crown still
+	## leaves something worth felling.
+	var cut := clampf(notch_line() * scale_class, 0.22, maxf(h - 0.6, 0.3))
+	## The falling piece is as thick as the tree was AT THE BREAK, not at the
+	## butt — a 20 m pine snapped at the shoulder is not a 0.58 m log.
+	var cut_r := trunk_radius()
+	if USE_KIT:
+		cut_r = maxf(TreeKit.radius_at(species, stage,
+			cut / maxf(scale_class, 0.001)) * scale_class, 0.05)
+
 	var trunk := FallenTrunk.make(
-		global_position,
+		global_position + Vector3.UP * cut,
 		dir.normalized(),
-		trunk_height(),
-		trunk_radius(),
+		h - cut,
+		cut_r,
 		species,
 		LOG_YIELD[stage])
+	## What stays behind. FallenTrunk drops this much wood out of the geometry
+	## it adopts, so the two halves do not both own the same metre of trunk.
+	trunk.clip_below = cut
 	trunk.sticks = 1 + int(stage >= 2) + int(stage >= 3)
 	if _psx_leaf != null:
 		trunk.leaf_mat = _psx_leaf
@@ -604,7 +948,17 @@ func _fell(dir: Vector3, leave_stump := true) -> void:
 	world.add_child(trunk)
 
 	if leave_stump:
-		var stump := TreeStump.make(global_position, trunk_radius(), species)
+		## As tall as the cut was high, wearing the bottom half of the wedge the
+		## axe cut, and torn off the rest of the way — see TreeStump._build_wood.
+		var stump := TreeStump.make(global_position, trunk_radius(), species, cut)
+		stump.rotation.y = rotation.y      ## notch_ang is TREE-local; share the frame
+		var ns := notch_shape()
+		stump.notch_ang = notch_ang
+		stump.notch_h = float(ns[0]) * scale_class      ## model -> world metres
+		stump.notch_arc = float(ns[1])
+		stump.notch_depth = notch_depth * scale_class
+		## Its own rip, and the same rip every time this tree is loaded.
+		stump.tear_seed = tree_seed if tree_seed != 0 else hash(str(global_position))
 		world.add_child(stump)
 
 	for p in get_tree().get_nodes_in_group("player"):
@@ -630,7 +984,9 @@ func save_dict() -> Dictionary:
 		"chops": chops_left,
 		"notch": notch_depth,
 		"notch_ang": notch_ang,
+		"notch_y": notch_y,
 		"branches": _branch_state(),
+		"growth": growth_state(),
 	}
 
 
@@ -659,9 +1015,289 @@ func restore(d: Dictionary) -> void:
 	chops_left = int(d.get("chops", TRUNK_CHOPS[stage]))
 	notch_depth = float(d.get("notch", 0.0))
 	notch_ang = float(d.get("notch_ang", 0.0))
+	notch_y = float(d.get("notch_y", 0.0))
 	var st: Array = d.get("branches", [])
 	for i in range(mini(st.size(), _branches.size())):
 		if int(st[i]) == 1:
 			(_branches[i] as TreeBranch).remove_silently()
 	if notch_depth > 0.0:
 		_carve_notch()      ## a half-chopped tree comes back half-chopped
+	if d.has("growth"):
+		_growth_restored = true
+		for gd in d["growth"]:
+			if gd is Dictionary:
+				var g := GrowthPatch.from_dict(gd as Dictionary)
+				_add_growth(g)
+				g.catch_up()    ## the days the save slept through
+
+
+## ---------------------------------------------------------------- growth ---
+
+func growth_state() -> Array:
+	var out: Array = []
+	for g in GrowthPatch.patches_under(self):
+		out.append((g as GrowthPatch).to_dict())
+	return out
+
+
+func growth_patches() -> Array:
+	return GrowthPatch.patches_under(self)
+
+
+func _add_growth(g: GrowthPatch) -> void:
+	## The patch probes the trunk's REAL mesh (bark relief and all), not the
+	## cylinder collider -- surface 0 is the wood; leaf cards, if any, are 1.
+	if _trunk != null:
+		g.probe_meshes = [_trunk]
+		g.probe_surface = 0
+	add_child(g)
+
+
+func _seed_growth() -> void:
+	## Deferred from _ready. A restore that landed first has already put the
+	## saved patches on; a felled tree, or one that built nothing, grows nothing.
+	if _growth_restored or felled or _trunk == null or not is_inside_tree():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = (tree_seed if tree_seed != 0 else hash(str(position))) * 17 + 3
+	var st := clampi(stage, 0, GROWTH_CHANCE.size() - 1)
+	if rng.randf() >= GROWTH_CHANCE[st]:
+		return
+	var n := 1
+	if st >= 3 and rng.randf() < 0.5:
+		n += 1
+	if dead and rng.randf() < 0.6:
+		n += 1
+	for i in range(n):
+		add_growth_patch(_roll_growth_type(rng), rng.randi(), i)
+
+
+func _roll_growth_type(rng: RandomNumberGenerator) -> String:
+	## What a tree like this grows. Dead wood rots (fungi); birch bark takes
+	## lichen; an ancient trunk can carry a vine; everything else is mostly moss.
+	var r := rng.randf()
+	if dead:
+		return "fungi" if r < 0.6 else ("moss" if r < 0.85 else "lichen")
+	if species == "birch" and r < 0.35:
+		return "lichen"
+	if stage >= 3 and r < 0.30:
+		return "vine"
+	if r < 0.72:
+		return "moss"
+	return "lichen" if r < 0.88 else "fungi"
+
+
+## Put a patch on this trunk. `slot` spreads a second or third patch round the
+## trunk instead of stacking them. Also the editor's hook (a future Trees-tool
+## chip): add_growth_patch("fungi", randi()).
+func add_growth_patch(type_id: String, seed_v: int, slot := 0) -> GrowthPatch:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	## the shaded side: world north (-Z, as bark.gdshader has it) in tree space
+	var north_local := Vector3(0, 0, -1).rotated(Vector3.UP, -rotation.y)
+	var ang := atan2(north_local.x, north_local.z) + rng.randf_range(-0.7, 0.7) + float(slot) * 1.4
+	var r := maxf(trunk_radius(), 0.05)
+	var h := trunk_height()
+	## low on the trunk: the heart sits between the roots and chest height
+	var y := rng.randf_range(0.12, clampf(h * 0.30, 0.3, 1.25))
+	var span_up := clampf(0.30 + r * 0.9, 0.28, 0.95)
+	var span_round := clampf(0.70 + r * 0.35, 0.6, 1.15)
+	var area := (2.0 * span_up) * (2.0 * span_round * r)
+	var g := GrowthPatch.make(type_id, "", "", seed_v)
+	g.anchor_cylinder(y, ang, span_up, span_round, r * 4.0 + 1.0, area)
+	var world_dir := Vector3(sin(ang), 0.0, cos(ang)).rotated(Vector3.UP, rotation.y)
+	g.shade = GrowthPatch.shade_for(world_dir)
+	var st := clampi(stage, 0, GROWTH_START.size() - 1)
+	g.growth = clampf(GROWTH_START[st] * rng.randf_range(0.6, 1.25), 0.0, 1.0)
+	_add_growth(g)
+	return g
+
+
+## ---------------------------------------------------- canopy densifier ---
+## Lemon 2026-08-29: "make the leaves on trees more dense, especially the
+## non-fir trees by a huge factor, with the outer couple layers actually
+## animated, and the inner layers swaying with the branch, so it runs better.
+## I also want the leaves ... positioned horizontally adjacent, so they look
+## natural with the flat top part pointed at the sun."
+
+class PadBuf:
+	## Mutable mesh-array builder. Deliberately a CLASS and not a Dictionary of
+	## packed arrays — Packed* arrays are value types (the Grass v2 trap), so
+	## appending to one stored in a Dictionary appends to a copy and is lost.
+	var v := PackedVector3Array()
+	var n := PackedVector3Array()
+	var t := PackedFloat32Array()
+	var uv := PackedVector2Array()
+	var i := PackedInt32Array()
+
+
+func _densify_canopy(mi: MeshInstance3D) -> void:
+	## The GLB's baked leaf cards become SEED POINTS: each grows a cluster of
+	## flat horizontal pads — small animated ones ringing the outside, bigger
+	## darker STATIC ones filling the inside. Rebuilt once per (species, stage,
+	## mesh name) and cached, so 420 trees share a handful of meshes and the
+	## work happens on the first tree of each kind only.
+	if not CANOPY_DENSIFY or mi == null or mi.mesh == null:
+		return
+	## The variant belongs in the key: two recipes both have a mesh called
+	## `Trunk`, so without it the second one would be handed the first one's
+	## canopy and every tree of that species would wear the same crown.
+	var key := "%s#%d#%d#%s" % [species, stage, kit_variant, mi.name]
+	if _canopy_cache.has(key):
+		var e: Dictionary = _canopy_cache[key]
+		mi.mesh = e["mesh"]
+		mi.set_meta("leaf_roles", e["roles"])
+		return
+	var src: Mesh = mi.mesh
+	var wood: Array = []
+	var cards: Array = []
+	var authored: Array = []     ## the leaf surfaces exactly as TreeKit made them
+	for i in range(src.get_surface_count()):
+		var m: Material = src.surface_get_material(i)
+		var nm := str(m.resource_name) if m != null else ""
+		if nm.findn("leaf") >= 0 or nm.findn("foliage") >= 0:
+			var la: Array = src.surface_get_arrays(i)
+			_collect_cards(la, cards)
+			authored.append(la)
+		else:
+			wood.append(src.surface_get_arrays(i))
+	if cards.is_empty():
+		return
+
+	## pads radiate outward from the middle of THIS mesh's own canopy — for a
+	## branch mesh that is the branch's leaf mass, so its pads fan out with it
+	var centroid := Vector3.ZERO
+	for cd in cards:
+		centroid += cd["c"] as Vector3
+	centroid /= float(cards.size())
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key)      ## same model -> same canopy, every launch
+	var k_out: int = PAD_OUTER_N.get(species, 4)
+	var k_in: int = PAD_INNER_N.get(species, 1)
+
+	var pads_out := PadBuf.new()
+	var pads_in := PadBuf.new()
+	for cd in cards:
+		var c: Vector3 = cd["c"]
+		var s: float = maxf(float(cd["s"]), 0.05)
+		var out_h: Vector3 = c - centroid
+		out_h.y = 0.0
+		if out_h.length() > 0.05:
+			out_h = out_h.normalized()
+		else:
+			out_h = Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1) + 0.001).normalized()
+		for k in range(k_out):
+			var ang := TAU * (float(k) + rng.randf()) / float(k_out)
+			var rad := s * rng.randf_range(0.15, 1.35)
+			var pos := c + Vector3(cos(ang), 0, sin(ang)) * rad \
+				+ Vector3(0, rng.randf_range(-0.25, 0.35) * s, 0)
+			_emit_pad(pads_out, pos, out_h, s * PAD_OUTER_SIZE * rng.randf_range(0.82, 1.18),
+				PAD_OUTER_TILT, rng, cd)
+		for _k in range(k_in):
+			var pos2 := c - out_h * s * rng.randf_range(0.2, 0.7) \
+				+ Vector3(0, rng.randf_range(-0.5, 0.05) * s, 0)
+			_emit_pad(pads_in, pos2, out_h, s * PAD_INNER_SIZE * rng.randf_range(0.85, 1.15),
+				PAD_INNER_TILT, rng, cd)
+
+	var am := ArrayMesh.new()
+	var roles: Array = []
+	for wa in wood:
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, wa)
+		roles.append("wood")
+	## the inner filler first, then the authored cards and the outer pads on top
+	var fin_in: Array = _pad_finish(pads_in)
+	var fin_out: Array = _pad_finish(pads_out)
+	if not (fin_in[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, fin_in)
+		roles.append("inner")
+	## THE CROWN A PLAYER ACTUALLY SEES: TreeKit's own cards, aimed along their
+	## twigs with the species droop. Without these the canopy is flat plates.
+	if KEEP_AUTHORED_CARDS:
+		for la in authored:
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, la)
+			roles.append("outer")
+	if not (fin_out[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, fin_out)
+		roles.append("outer")
+	mi.mesh = am
+	mi.set_meta("leaf_roles", roles)
+	_canopy_cache[key] = {"mesh": am, "roles": roles}
+
+
+static func _collect_cards(arrays: Array, out: Array) -> void:
+	## Walk the leaf surface's triangles in 6-index windows; each window over 4
+	## unique positions is one card plane. The two crossed planes of a card
+	## share their exact centre, so a coarse spatial bucket collapses them into
+	## ONE seed. Each seed keeps its atlas cell (uv rect) and its half-size.
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	if verts.is_empty() or uvs.is_empty():
+		return
+	var n := idx.size() if idx.size() > 0 else verts.size()
+	var seen := {}
+	var w := 0
+	while w + 5 < n:
+		var uniq := {}
+		for k in range(6):
+			var vi: int = idx[w + k] if idx.size() > 0 else w + k
+			uniq[Vector3i((verts[vi] * 2048.0).round())] = vi
+		if uniq.size() == 4:
+			var c := Vector3.ZERO
+			for vi in uniq.values():
+				c += verts[vi]
+			c /= 4.0
+			var qk := Vector3i((c * 33.0).round())
+			if not seen.has(qk):
+				seen[qk] = true
+				var mx := 0.0
+				var u0 := Vector2(1e9, 1e9)
+				var u1 := Vector2(-1e9, -1e9)
+				for vi in uniq.values():
+					mx = maxf(mx, (verts[vi] - c).length())
+					var tuv := uvs[vi]
+					u0 = Vector2(minf(u0.x, tuv.x), minf(u0.y, tuv.y))
+					u1 = Vector2(maxf(u1.x, tuv.x), maxf(u1.y, tuv.y))
+				out.append({"c": c, "s": mx * 0.707, "uv0": u0, "uv1": u1})
+		w += 6
+
+
+static func _emit_pad(p: PadBuf, c: Vector3, out_h: Vector3, hs: float,
+		tilt: float, rng: RandomNumberGenerator, card: Dictionary) -> void:
+	## One flat quad lying (nearly) horizontal — the flat top points at the
+	## sun. The atlas cell's stem edge faces the trunk and the spray runs
+	## outward; a small random tilt keeps side-on views from going paper-thin.
+	## Stem = uv MAX y (the exporter authored stem-at-bottom in Blender uv
+	## space and the glTF flip put it at the top of the rect).
+	var vax := out_h.rotated(Vector3.UP, rng.randf_range(-0.7, 0.7))
+	var taxis := Vector3(rng.randf_range(-1, 1), 0.001, rng.randf_range(-1, 1)).normalized()
+	var rot := Basis(taxis, rng.randf_range(tilt * 0.25, tilt))
+	var nrm: Vector3 = rot * Vector3.UP
+	vax = (rot * vax).normalized()
+	var uax := vax.cross(nrm).normalized()
+	vax = nrm.cross(uax).normalized()
+	var base := p.v.size()
+	var u0: Vector2 = card["uv0"]
+	var u1: Vector2 = card["uv1"]
+	var corners := [c - uax * hs - vax * hs, c + uax * hs - vax * hs,
+		c + uax * hs + vax * hs, c - uax * hs + vax * hs]
+	var cuv := [Vector2(u0.x, u1.y), Vector2(u1.x, u1.y),
+		Vector2(u1.x, u0.y), Vector2(u0.x, u0.y)]
+	for k in range(4):
+		p.v.append(corners[k])
+		p.n.append(nrm)
+		p.t.append_array(PackedFloat32Array([uax.x, uax.y, uax.z, 1.0]))
+		p.uv.append(cuv[k])
+	p.i.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
+
+
+static func _pad_finish(p: PadBuf) -> Array:
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = p.v
+	arr[Mesh.ARRAY_NORMAL] = p.n
+	arr[Mesh.ARRAY_TANGENT] = p.t
+	arr[Mesh.ARRAY_TEX_UV] = p.uv
+	arr[Mesh.ARRAY_INDEX] = p.i
+	return arr

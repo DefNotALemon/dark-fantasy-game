@@ -18,7 +18,7 @@ var field: CaveField
 var _rng := RandomNumberGenerator.new()
 ## THE FLOOR. true = the PSX pack's understory + textured ground,
 ## false = the procedural blades in Grass.gd, which stay on disk untouched.
-const USE_PSX_UNDERSTORY := true
+const USE_PSX_UNDERSTORY := false
 ## Which of the six painted biomes the surface runs. PSXNature.REGIONS.
 const PSX_REGION := "temperate"
 
@@ -318,11 +318,85 @@ func _dress_mouth(m: int) -> void:
 	spot.spot_angle = 36.0
 	spot.spot_angle_attenuation = 1.6
 	spot.shadow_enabled = false
+	_dress_growth(m, mo, md, gp)
+
+
+## What grows on an entrance (2026-09-03): a cave mouth is the dampest, most
+## shaded stone in the world, so it wears the most. Moss drips over the brow
+## of the cap, lichen crusts its north flank, and fungi shelve the throat walls
+## just inside where the daylight goes. The patches probe the WORLD (mask 1):
+## the cap is voxel chunks whose trimesh colliders arrive deferred, so a patch
+## that finds no stone waits and tries again (GrowthPatch.MAX_TRIES). Mouths
+## are permanent -- they never shift with the deep -- and are rebuilt from the
+## world seed, so each patch carries a ledger key for World's "growth" save.
+func _dress_growth(m: int, mo: Vector3, md: Vector3, gate_floor: Vector3) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = cave_seed * 131 + m * 7 + 1
+	var xf := global_transform.affine_inverse() if is_inside_tree() else Transform3D.IDENTITY
+	var cap := mo + md * CaveField.MOUND_FWD + Vector3(0, CaveField.MOUND_H * 0.35, 0)
+	var reach := CaveField.MOUND_R * 2.4
+	## the brow: facing back over the mouth, and up
+	var brow := GrowthPatch.make("moss", "", "", rng.randi())
+	brow.anchor_point(xf * cap, (-md * 0.75 + Vector3.UP * 0.55).normalized(), 0.9, 1.35, reach, true, 7.0)
+	brow.shade = 0.8
+	brow.damp = 0.45
+	brow.growth = rng.randf_range(0.55, 0.95)
+	brow.host_key = "cave:%d:brow" % m
+	add_child(brow)
+	## the north flank of the cap
+	var flank := GrowthPatch.make(["lichen", "moss", "vine"][rng.randi() % 3], "", "", rng.randi())
+	var fdir := Vector3(0.0, 0.15, -1.0).normalized()
+	flank.anchor_point(xf * cap, fdir, 0.8, 1.1, reach, true, 5.0)
+	flank.shade = GrowthPatch.shade_for(fdir)
+	flank.damp = 0.3
+	flank.growth = rng.randf_range(0.4, 0.9)
+	flank.host_key = "cave:%d:flank" % m
+	add_child(flank)
+	## the throat: from the air just inside the gate, rays out to both walls
+	var throat_c := gate_floor + Vector3.UP * 1.0 if gate_floor != Vector3.INF else mo + md * 3.0 - Vector3.UP * 1.2
+	var perp := md.cross(Vector3.UP).normalized()
+	for side in [1.0, -1.0]:
+		var th := GrowthPatch.make("fungi", "", "", rng.randi())
+		th.anchor_point(xf * throat_c, perp * side, 0.7, 0.9, 7.0, false, 3.5)
+		th.shade = 0.95
+		th.damp = 0.7
+		th.growth = rng.randf_range(0.5, 0.9)
+		th.host_key = "cave:%d:throat%d" % [m, int(side > 0.0)]
+		add_child(th)
 
 
 func is_fully_loaded() -> bool:
 	## True only when the deep is carved, meshed, AND content is placed.
 	return _deep_state == 3
+
+
+func in_footprint(p: Vector3) -> bool:
+	## Inside the block's x/z footprint at ANY height -- the square the
+	## overworld leaves as a hole. World's buried-in-rock net asks this first,
+	## because the field clamps positions and the rest of Maine is not rock.
+	if field == null:
+		return false
+	var lo: Vector3 = field.origin
+	var sx := float(CaveField.SX) * CaveField.VOX
+	var sz := float(CaveField.SZ) * CaveField.VOX
+	return p.x >= lo.x and p.x <= lo.x + sx and p.z >= lo.z and p.z <= lo.z + sz
+
+
+func contains_point(p: Vector3) -> bool:
+	## "Inside the cave", as GameMode asks it (duck-typed through the
+	## "cave_regions" group — GameMode naming this class would go cyclic).
+	## Inside means UNDER the roof: within the field's footprint and below
+	## the surface skin. The meadow on top of the block is the open world,
+	## and the mouth ramp crosses out of "cave" right where daylight starts
+	## reaching down the throat.
+	if field == null:
+		return false
+	var lo: Vector3 = field.origin
+	var sx := float(CaveField.SX) * CaveField.VOX
+	var sz := float(CaveField.SZ) * CaveField.VOX
+	if p.x < lo.x or p.x > lo.x + sx or p.z < lo.z or p.z > lo.z + sz:
+		return false
+	return p.y < -2.0
 
 
 func reset_underground(force_shifts := -1) -> bool:
@@ -443,7 +517,9 @@ func _place_veins(reach: Array[Vector3i]) -> void:
 
 
 func _spawn_pack(center: Vector3, cls: Variant, count: int) -> void:
-	for _i in range(count):
+	## PEACEFUL halves every pack, but never empties a pocket: a chamber that
+	## held four orcs holds two, and the lone dark knight is still down there.
+	for _i in range(GameMode.pack_count(count)):
 		var e: Enemy = cls.new()
 		_content_root.add_child(e)
 		var a := _rng.randf() * TAU
