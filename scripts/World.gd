@@ -71,6 +71,7 @@ var _rng := RandomNumberGenerator.new()
 var _cave_sites: Array[Dictionary] = []  ## {mouth: Vector3, dir: Vector3, rect: Rect2}
 var _env: Environment
 var _daynight: DayNight
+var _cities: Node3D = null    ## [cities] the big six, scripts/Cities.gd
 var _wind: Wind
 var _sky: SkyRig
 var _weather: Weather
@@ -174,9 +175,12 @@ func begin_world() -> void:
 	## Set the body down on the ground that now exists, not on the slab that
 	## no longer does.
 	if _player:
-		_player.global_position = _world_home()
-		_player.velocity = Vector3.ZERO
+	_player.input_locked = true
+	_player.global_position = _world_home()
+	_player.velocity = Vector3.ZERO
 
+
+_cities = Cities.boot(self)    ## [cities] the big six stand up last, after the roster, the net and the crofts
 
 func _build_park_floor() -> void:
 	## Phase one has no ground. A CharacterBody3D with nothing under it falls
@@ -191,6 +195,7 @@ func _build_park_floor() -> void:
 	_park_floor.add_child(shape)
 	_park_floor.position = Vector3(0, -1, 0)
 	add_child(_park_floor)
+
 
 
 func _process(delta: float) -> void:
@@ -1693,6 +1698,9 @@ func wildlife_census() -> Dictionary:
 	return _wildlife.census() if _wildlife != null else {}
 
 
+func cities() -> Node3D:    ## [cities] the built cities, or null before begin_world
+	return _cities
+
 ## [water] ------------------------------------------------------------------
 func _build_water_audio() -> void:
 	if _terrain == null:
@@ -1765,3 +1773,4 @@ func _drowned_tick(delta: float, uw: float) -> void:
 
 func drowned_active() -> bool:
 	return _drowned != null and is_instance_valid(_drowned)
+
