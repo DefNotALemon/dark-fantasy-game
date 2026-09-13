@@ -18,6 +18,34 @@ extends SceneTree
 
 const MIN_ASSERTIONS := 180
 
+## ---------------------------------------------------------------------------
+## TWO MASTER SWITCHES DECIDE WHETHER THE FOREST ASSERTIONS CAN MEAN ANYTHING,
+## and as of 2026-09-13 both are off in the shipped project:
+##
+##   Overworld.SCATTER — the whole procedural forest. Turned OFF on 2026-09-02
+##     at Lemon's request ("remove all trees for now... I want to hand place
+##     them"). With it off `_plan_tile` returns before it rolls a single slot,
+##     so every near tile plans zero trees and the far ring bakes zero. The
+##     census assertions below were written against SCATTER = true and were
+##     reporting 0-of-5000 for eleven days — a red suite nobody could act on,
+##     because nothing was broken. Flip SCATTER back to true and every one of
+##     them arms again on the next run.
+##
+##   The far/tiny tiers are IMPOSTORS now (scripts/TreeImpostor.gd): a
+##     photograph of the real tree shot through a SubViewport. A
+##     `--headless --script` run never renders a frame, so `mesh_for()` hands
+##     back null for the whole run BY DESIGN. Only `mid` is real baked
+##     geometry and only `mid` can be asserted from here.
+##
+## A SKIP IS A RESULT, NOT A PASS. Every skip below names the switch that
+## silenced it, so a green run can never be mistaken for a forested world.
+## ---------------------------------------------------------------------------
+const IMPOSTOR_LODS: Array[String] = ["far", "tiny"]
+
+
+func _forest_on(T: Node3D) -> bool:
+	return bool(T.SCATTER)
+
 var _pass := 0
 var _fail := 0
 var _section := ""
@@ -335,7 +363,9 @@ func _t_forest(T: Node3D) -> void:
 	ok(T._far.size() >= need, "far blocks cover the whole map (%d >= %d)" % [T._far.size(), need])
 	# and the far ring is FORESTED, not just tinted -- the forest used to stop
 	# dead at MID_RANGE and leave the last four kilometres as painted ground.
-	if ResourceLoader.exists("res://assets/trees/glb/maple_2_mature.glb"):
+	if not _forest_on(T):
+		ok(true, "Overworld.SCATTER is off -- the world grows nothing, forest census skipped")
+	elif ResourceLoader.exists("res://assets/trees/glb/maple_2_mature.glb"):
 		var st: Dictionary = T.forest_stats()
 		ok(int(st["trees"]) > 5000, "the whole map is standing trees (%d)" % st["trees"])
 		var per: float = float(st["tris"]) / maxf(float(st["trees"]), 1.0)
@@ -420,6 +450,9 @@ func _t_forest(T: Node3D) -> void:
 	var tris := {}
 	for lod in ["mid", "far", "tiny"]:
 		var m: ArrayMesh = T._bake_species("maple", lod)
+		if m == null and lod in IMPOSTOR_LODS:
+			ok(true, "lod %s is an impostor -- no SubViewport render headless, bake skipped" % lod)
+			continue
 		ok(m != null, "maple bakes at lod %s" % lod)
 		if m == null:
 			continue
@@ -527,6 +560,9 @@ func _t_cells(T: Node3D) -> void:
 	sec("the real trees travel with the player")
 	if not ResourceLoader.exists("res://assets/trees/glb/maple_2_mature.glb"):
 		ok(true, "tree models absent -- forest cell assertions skipped")
+		return
+	if not _forest_on(T):
+		ok(true, "Overworld.SCATTER is off -- no slots are planned, cell assertions skipped")
 		return
 	var a := Vector3(800.0, 0.0, -1600.0)   ## deep wood, forest weight ~0.7
 	T.warm(a)
@@ -665,9 +701,14 @@ func _t_crowns(T: Node3D) -> void:
 								clampi(py + dy, 0, img.get_height() - 1)).a < 0.98:
 							clear += 1
 				ok(clear == 0, "%s's blob texel is opaque 9x9 (%d clear texels)" % [sp, clear])
-		for lod in ["far", "tiny"]:
+		for lod in IMPOSTOR_LODS:
 			var m: ArrayMesh = T._bake_species(sp, lod)
-			if m == null or m.get_surface_count() < 2:
+			if m == null:
+				## The impostor's photograph needs a rendered frame, and a
+				## --headless --script run never has one. Not a defect.
+				ok(true, "%s at %s is an impostor -- no render headless, blob check skipped" % [sp, lod])
+				continue
+			if m.get_surface_count() < 2:
 				ok(false, "%s bakes at %s with a leaf surface" % [sp, lod])
 				continue
 			var arr: Array = m.surface_get_arrays(m.get_surface_count() - 1)

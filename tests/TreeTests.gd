@@ -86,8 +86,19 @@ func _test_models_and_materials() -> void:
 					if (m as ShaderMaterial).shader == null:
 						bad += 1
 						continue
-					var src: Material = mi.mesh.surface_get_material(i)
-					if src != null and str(src.resource_name).findn("leaf") >= 0:
+					## WHAT MAKES A SURFACE A LEAF SURFACE IS THE MATERIAL THE
+					## RENDERER ACTUALLY PUTS ON IT, not the name of the glTF
+					## material it was imported with. The first version asked
+					## `mi.mesh.surface_get_material(i).resource_name` for
+					## "leaf" — a property only an IMPORTED mesh carries. Since
+					## TreeV2.USE_KIT went true the mesh is assembled at runtime
+					## out of TreeKit parts, every source material is null, and
+					## this counted zero leaf surfaces on five species at four
+					## stages each: twenty red assertions about trees that are
+					## in fact fully leafed. Asking the override material's
+					## SHADER is true on both art paths and is the thing that
+					## decides what you see.
+					if (m as ShaderMaterial).shader.resource_path == TreeV2.FOLIAGE_SHADER:
 						leaf_surfaces += 1
 						var atlas = (m as ShaderMaterial).get_shader_parameter("leaf_atlas")
 						if atlas == null:

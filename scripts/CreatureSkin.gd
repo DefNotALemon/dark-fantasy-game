@@ -413,14 +413,16 @@ func _emit_segment(bx: MeshInstance3D, seg: int, bone: int, parent_bone: int, ti
 			var i1 := base + r * ring_n + k1
 			var i2 := base + (r + 1) * ring_n + k
 			var i3 := base + (r + 1) * ring_n + k1
-			_tri(idx, i0, i2, i1, a)
-			_tri(idx, i1, i2, i3, a)
+			_tri(idx, i0, i2, i1)
+			_tri(idx, i1, i2, i3)
 	## end fans
 	var last := base + (stations.size() - 1) * ring_n
 	for k in ring_n:
 		var k1 := (k + 1) % ring_n
-		_tri(idx, cap0, base + k1, base + k, a)
-		_tri(idx, cap1, last + k, last + k1, a)
+		## ...and the caps wind the same way the sides do. Both fans used to be
+		## stated in the opposite order, which is the whole bug.
+		_tri(idx, cap0, base + k, base + k1)
+		_tri(idx, cap1, last + k1, last + k)
 	## ragdoll bookkeeping
 	if _bone_geo.has(bone):
 		_bone_geo[bone] = (_bone_geo[bone] as AABB).merge(aabb)
@@ -429,16 +431,24 @@ func _emit_segment(bx: MeshInstance3D, seg: int, bone: int, parent_bone: int, ti
 	_bone_vol[bone] = float(_bone_vol.get(bone, 0.0)) + size.x * size.y * size.z
 
 
-func _tri(idx: PackedInt32Array, i0: int, i1: int, i2: int, axis: int) -> void:
-	## Winding flips with the axis permutation so every face stays outward.
-	if axis == 1:
-		idx.append(i0)
-		idx.append(i2)
-		idx.append(i1)
-	else:
-		idx.append(i0)
-		idx.append(i1)
-		idx.append(i2)
+func _tri(idx: PackedInt32Array, i0: int, i1: int, i2: int) -> void:
+	## Emit one triangle, CLOCKWISE as seen from outside — Godot's front face.
+	##
+	## THERE IS NO AXIS TERM HERE ANY MORE, AND THERE NEVER SHOULD HAVE BEEN.
+	## The ring frame is (a, b, c) = (a, a+1, a+2) mod 3: a CYCLIC rotation of
+	## (x, y, z), which is an EVEN permutation for all three values of a. So the
+	## local frame is right-handed whichever axis is longest, and a winding that
+	## is correct for one is correct for all of them. The old `if axis == 1:
+	## swap` was not compensating for the frame — it was papering over the fact
+	## that the SIDE quads and the END FANS below called this function with
+	## opposite vertex orders. With the swap on, every Y-long segment's sides
+	## were inside-out; with it off, every X- and Z-long segment's caps were.
+	## Either way roughly half of every creature was invisible under the skin
+	## shader's `cull_back`, which is what tests/SkinTests.gd::t_winding found
+	## once its own comparison was pointing the right way round.
+	idx.append(i0)
+	idx.append(i1)
+	idx.append(i2)
 
 
 func _push_vert(v_local: Vector3, n_local: Vector3, uv: Vector2, seg: int, tile: int,
@@ -479,8 +489,18 @@ func _process(delta: float) -> void:
 	var far := false
 	if _player != null and is_instance_valid(_player) and _player != owner_node:
 		far = owner_node.global_position.distance_squared_to(_player.global_position) > 80.0 * 80.0
-	if far and _last_sync_far and not ragdoll:
+	if far and _last_sync_far and not ragdoll and _blend_t <= 0.0:
 		return   ## asleep and out of sight: the pose it has is the pose it keeps
+	## ⚠ `_blend_t > 0.0` HAS TO BE AN EXEMPTION, exactly like `ragdoll`.
+	## `_tick_clocks` runs the get-up blend down on the fixed step whether or
+	## not this function ever gets to apply it. Without the exemption, a
+	## creature that is knocked over more than 80 m from the player stops
+	## being synced the moment it stops ragdolling, the blend clock expires
+	## against a pose nobody wrote, and it stands up FROZEN PART-WAY THROUGH
+	## THE GET-UP — measured in tests/SkinTests.gd as a pelvis left 0.17 to
+	## 0.32 m off its rest height, at a different height every time, and
+	## staying there for as long as you keep your distance. The blend is a
+	## handful of frames; sleeping through it saves nothing.
 	_last_sync_far = far
 	_sync_segments(false)
 	if _fade_t >= 0.0:

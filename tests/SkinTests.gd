@@ -56,6 +56,7 @@ func _init() -> void:
 
 	t_atlas()
 	await t_bake_all()
+	await t_winding()
 	await t_sync()
 	await t_ragdoll()
 	await t_shove()
@@ -228,6 +229,101 @@ func t_bake_all() -> void:
 	await process_frame
 
 
+## ----------------------------------------------------------- winding -----
+
+func _winding_report(s: CreatureSkin) -> Dictionary:
+	return _winding_of(s.mesh_inst.mesh as ArrayMesh)
+
+
+func _winding_of(am: ArrayMesh) -> Dictionary:
+	## Every triangle in a baked skin must wind OUTWARD — the same way its own
+	## vertex normals point. A segment wound the other way is invisible under
+	## `cull_back`: you look straight through the body and see the inside of
+	## its far wall. That is exactly what quadrupeds did (barrels, chests and
+	## heads are X/Z-long boxes) while Y-long limbs looked fine, so this walks
+	## the whole index buffer rather than spot-checking.
+	##
+	## ⚠ GODOT WINDS ITS FRONT FACES CLOCKWISE, not counter-clockwise. So for a
+	## correctly-wound triangle (v1-v0) x (v2-v0) points AGAINST the vertex
+	## normals, and the test for "outward" is dot < 0. The first draft of this
+	## used the OpenGL convention and called every face of every creature
+	## inside-out — and so, checked the same way, is every face of Godot's own
+	## SphereMesh, BoxMesh and CylinderMesh. t_winding() now asserts a stock
+	## BoxMesh through this very function before it asks about any skin, so the
+	## sign can never be flipped again without the control going red first.
+	var out := {"good": 0, "bad": 0, "skipped": 0}
+	if am == null or am.get_surface_count() == 0:
+		return out
+	var arr := am.surface_get_arrays(0)
+	var v := arr[Mesh.ARRAY_VERTEX] as PackedVector3Array
+	var n := arr[Mesh.ARRAY_NORMAL] as PackedVector3Array
+	var idx := arr[Mesh.ARRAY_INDEX] as PackedInt32Array
+	var t := 0
+	while t + 2 < idx.size():
+		var i0 := idx[t]
+		var i1 := idx[t + 1]
+		var i2 := idx[t + 2]
+		t += 3
+		var face := (v[i1] - v[i0]).cross(v[i2] - v[i0])
+		if face.length() < 1e-9:
+			out["skipped"] = int(out["skipped"]) + 1
+			continue
+		var want := (n[i0] + n[i1] + n[i2])
+		if want.length() < 1e-6:
+			out["skipped"] = int(out["skipped"]) + 1
+			continue
+		if face.normalized().dot(want.normalized()) < 0.0:
+			out["good"] = int(out["good"]) + 1
+		else:
+			out["bad"] = int(out["bad"]) + 1
+	return out
+
+
+func t_winding() -> void:
+	print("-- winding --")
+	## CONTROL FIRST. Godot's own primitives are, by definition, wound the way
+	## Godot wants. If this goes red the checker is wrong, not the art — which
+	## is exactly the mistake this section shipped with.
+	for prim: PrimitiveMesh in [BoxMesh.new(), SphereMesh.new(), CylinderMesh.new()]:
+		var ctrl := ArrayMesh.new()
+		ctrl.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, prim.get_mesh_arrays())
+		var cr := _winding_of(ctrl)
+		var cname := String(prim.get_class())
+		ok(int(cr["good"]) > 0, "control: %s has triangles to check (%d)" % [cname, cr["good"]])
+		eq(cr["bad"], 0, "control: Godot's own %s winds outward (%d inside-out)" % [cname, cr["bad"]])
+	var mobs: Array = [Goblin.new(), Kobold.new(), Orc.new(), Ogre.new(), Skeleton.new(),
+		DarkKnight.new(), Boar.new(), Horse.new(), SaddledHorse.new()]
+	var x := 0.0
+	for m in mobs:
+		_spawn(m, Vector3(x, 0.05, -26))
+		x += 4.0
+	await process_frame
+	for m in mobs:
+		var e := m as Enemy
+		var nm := String(e.get_script().get_global_name())
+		if e.skin == null or e.skin.mesh_inst == null:
+			ok(false, "%s: no skin to check winding on" % nm)
+			continue
+		var r := _winding_report(e.skin)
+		ok(int(r["good"]) > 0, "%s: skin has triangles to check (%d)" % [nm, r["good"]])
+		eq(r["bad"], 0, "%s: every face winds outward (%d inside-out)" % [nm, r["bad"]])
+		e.queue_free()
+	## and the wildlife, where the long-axis mix is widest (barrels, necks,
+	## antlers, tails all pick different axes)
+	for key in ["whitetail", "moose", "black_bear", "hare", "coyote", "porcupine"]:
+		var c := Critter.make(key)
+		_spawn(c, Vector3(0, 0.05, 52))
+		await process_frame
+		if c.skin == null or c.skin.mesh_inst == null:
+			c.queue_free()
+			continue
+		var r2 := _winding_report(c.skin)
+		ok(int(r2["good"]) > 0, "%s: skin has triangles to check (%d)" % [key, r2["good"]])
+		eq(r2["bad"], 0, "%s: every face winds outward (%d inside-out)" % [key, r2["bad"]])
+		c.queue_free()
+	await process_frame
+
+
 ## -------------------------------------------------------------- sync ------
 
 func t_sync() -> void:
@@ -357,7 +453,14 @@ func t_ragdoll() -> void:
 	_spawn(g, Vector3(0, 0.05, 0))
 	g.wander_speed = 0.0
 	await _step(3)
-	var rest_y := g.skin.pelvis_global().origin.y
+	## THE REFERENCE IS MEASURED THE WAY THE ASSERTION MEASURES IT. The first
+	## version banked the pelvis's ABSOLUTE y and later compared it against a
+	## height RELATIVE to the root, minus the spawn height as a fudge — two
+	## different quantities that only agreed because the tolerance was ±0.25.
+	## That is what made it a coin flip: the true miss was 0.17-0.32 m and the
+	## slack hid it half the time. Both ends are the same offset now and the
+	## margin is a tenth of what the bug moved.
+	var rest_off := g.skin.pelvis_global().origin.y - g.global_position.y
 	g.knockdown(Vector3(5.0, 1.2, 0.0), 1.0)
 	ok(g.knocked, "goblin is knocked")
 	ok(g.skin.ragdoll, "skin is ragdolling")
@@ -392,7 +495,7 @@ func t_ragdoll() -> void:
 		waited += 1
 	ok(g.skin._blend_t <= 0.0, "blend finished (%d frames)" % waited)
 	await _step(5)
-	near(g.skin.pelvis_global().origin.y - g.global_position.y, rest_y - 0.05, 0.25, "pelvis back at rest height over the root")
+	near(g.skin.pelvis_global().origin.y - g.global_position.y, rest_off, 0.03, "pelvis back at rest height over the root")
 	## a second knockdown while already down is ignored
 	g.knockdown(Vector3(1, 0, 0), 0.5)
 	await _step(2)
@@ -560,7 +663,14 @@ func t_flow() -> void:
 	var rig := g.get("rig") as Node3D
 	var kinds := {}
 	var maxrot := 0.0
-	for i in 900:
+	## ⚠ WATCH LONG ENOUGH THAT LUCK CANNOT DECIDE IT. A fidget is a cooldown
+	## of randf_range(1.4, 4.5) plus a body of 0.9-2.8 s, so 900 frames is
+	## two or three draws — and the picker's bag is
+	## ["shift","shift","look","look","stomp","arms","roll"], where two draws
+	## land on the same kind about one time in five. That is exactly the rate
+	## this assertion was failing at. 3600 frames is nine to thirteen draws and
+	## the all-one-kind case is under a thousandth.
+	for i in 3600:
 		await physics_frame
 		if g._fid_kind != "":
 			kinds[g._fid_kind] = true
