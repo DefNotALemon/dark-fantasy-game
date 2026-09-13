@@ -88,6 +88,7 @@ var _wayfarers: Wayfarers            ## [wayfarers] and who is out walking them
 var _crofts: Crofts                   ## [crofts] and who lives out between them
 var _carcasses: Carcasses            ## [carcasses] and what the woods do with a kill
 var _warbands: Warbands              ## [warbands] and who holds the ground it happens on
+var _slimes: SlimeDirector           ## [slimes] the jellies on the surface (scripts/SlimeDirector.gd)
 var _water_audio: WaterAudio = null  ## [water] shores, strokes, the muffle under
 var _step_audio: StepAudio = null    ## [steps] the ground under your feet
 var _drowned: Node3D = null          ## [water] the thing that has the swimmer, if any
@@ -1692,6 +1693,17 @@ func _build_wildlife() -> void:
 	_warbands.name = "Warbands"
 	add_child(_warbands)
 	_warbands.bind_world(self)
+	## [slimes] the surface jellies, after the warbands: it reads the same
+	## player and clock, and owns its own budget (SlimeDirector.USE_SLIMES).
+	_slimes = SlimeDirector.new()
+	_slimes.name = "SlimeDirector"
+	add_child(_slimes)
+	_slimes.bind_world(self)
+
+
+func slimes() -> SlimeDirector:
+	## [slimes] the surface jellies' director (tests, the debug menu)
+	return _slimes
 
 
 func wildlife_census() -> Dictionary:

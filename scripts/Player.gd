@@ -257,6 +257,7 @@ var committed := false       ## this swing is a dash-driven strike (see above)
 var dash_timer := 0.0
 var invuln_timer := 0.0
 var hitstun_timer := 0.0     ## thrown out of your action when hit (unblocked)
+var status_speed_mult := 1.0 ## Afflictions.gd: gummed / chilled — a slime left it on you
 var block_impact := 0.0      ## brief recoil when a block absorbs a hit
 var _step_smooth := 0.0      ## camera offset that eases out after an auto-step (smooth stairs)
 var _eye_smooth := 0.0       ## signed bump absorber: small body hops (jittery
@@ -1891,6 +1892,7 @@ func _physics_process(delta: float) -> void:
 		stamina_delay = maxf(stamina_delay, 0.4)  ## regen pauses briefly after you stop
 	if overweight:
 		speed *= 0.5  ## TODO(design): overburdened — flat 50% slowdown + no sprint for now
+	speed *= status_speed_mult   ## tar gum, rime chill (Afflictions.gd)
 	if prone:
 		speed = minf(speed, SPEED * 0.22)  ## a crawl — belly to the ground
 	elif crouching:
@@ -5940,7 +5942,7 @@ func _mob_types() -> Array:
 	return [
 		["Boar", Boar], ["Kobold", Kobold], ["Goblin", Goblin], ["Skeleton", Skeleton],
 		["Orc", Orc], ["Ogre", Ogre], ["Dark Knight", DarkKnight], ["Horse", Horse],
-	]
+	] + _slime_types()
 
 
 func _spawn_types() -> Array:
@@ -5950,6 +5952,16 @@ func _spawn_types() -> Array:
 		["Boar", Boar], ["Kobold", Kobold], ["Goblin", Goblin], ["Skeleton", Skeleton],
 		["Orc", Orc], ["Ogre", Ogre], ["Dark Knight", DarkKnight],
 		["Horse (wild)", Horse], ["Horse (saddled)", SaddledHorse],
+	]
+
+
+func _slime_types() -> Array:
+	## The slimes, in Slime.ORDER (scripts/Slime.gd) — one class per colour
+	## because the menu and the bestiary both spawn by `cls.new()`.
+	return [
+		["Green Slime", SlimeGreen], ["Blue Slime", SlimeBlue], ["Ember Slime", SlimeRed],
+		["Jolt Slime", SlimeYellow], ["Venom Slime", SlimePurple], ["Tar Slime", SlimeBlack],
+		["Rime Slime", SlimeWhite], ["Gilt Slime", SlimeGold], ["Leech Slime", SlimePink],
 	]
 
 
@@ -5987,6 +5999,12 @@ func _build_spawn_menu() -> void:
 	var mob_grid := _menu_grid(vb)
 	for entry: Array in _spawn_types():
 		_menu_btn(mob_grid, String(entry[0])).pressed.connect(_spawn_mob.bind(entry[1]))
+
+	## The jellies (scripts/Slime.gd): nine colours, one row each.
+	_menu_head(vb, "SLIMES")
+	var slime_grid := _menu_grid(vb)
+	for entry: Array in _slime_types():
+		_menu_btn(slime_grid, String(entry[0])).pressed.connect(_spawn_mob.bind(entry[1]))
 
 	## Wildlife, straight out of the dex.
 	for group: Array in _critter_groups():
@@ -8225,7 +8243,7 @@ func _rebuild_bestiary_detail() -> void:
 	for f in fams:
 		fam_names.append(String(FAMILY_NAMES.get(f, String(f).capitalize())))
 	_detail_label(" · ".join(fam_names), 15, Color(0.75, 0.85, 1.0))
-	_detail_label(String(MOB_FLAVOR.get(nm, "")), 14, Color(1, 1, 1, 0.65))
+	_detail_label(String(MOB_FLAVOR.get(nm, Slime.flavor_of(nm))), 14, Color(1, 1, 1, 0.65))
 	_detail_label("Vitality %d    Strike %d    Fury %d    —    slain ×%d" %
 		[int(lore["hp"]), int(lore["dmg"]), int(lore["strong"]), kills], 15, Color(0.9, 0.9, 0.9))
 	best_detail.add_child(HSeparator.new())

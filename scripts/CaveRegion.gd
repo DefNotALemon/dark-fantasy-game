@@ -548,24 +548,38 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 			continue
 		var roll := _rng.randf()
 		if c.y > -12.0:
-			if roll < 0.6:
+			if roll < 0.45:
 				_spawn_pack(c, Kobold, _rng.randi_range(6, 10))
-			else:
+			elif roll < 0.72:
 				_spawn_pack(c, Goblin, _rng.randi_range(3, 6))
+			else:
+				## [slimes] the shallow jellies: a green pocket, sometimes with
+				## a jolt or two skittering among them
+				_spawn_pack(c, SlimeGreen, _rng.randi_range(3, 5))
+				if _rng.randf() < 0.5:
+					_spawn_pack(c, SlimeYellow, _rng.randi_range(1, 2))
 		elif c.y > -21.0:
-			if roll < 0.4:
+			if roll < 0.35:
 				_spawn_pack(c, Goblin, _rng.randi_range(3, 6))
-			elif roll < 0.8:
+			elif roll < 0.70:
 				_spawn_pack(c, Skeleton, _rng.randi_range(4, 7))
-			else:
+			elif roll < 0.85:
 				_spawn_pack(c, Ogre, _rng.randi_range(1, 2))
+			else:
+				## [slimes] the venom creeps in the middle galleries
+				_spawn_pack(c, SlimePurple, _rng.randi_range(2, 3))
 		else:
-			if roll < 0.4:
+			if roll < 0.35:
 				_spawn_pack(c, Skeleton, _rng.randi_range(4, 7))
-			elif roll < 0.75:
+			elif roll < 0.65:
 				_spawn_pack(c, Orc, _rng.randi_range(2, 4))
-			else:
+			elif roll < 0.85:
 				_spawn_pack(c, Ogre, _rng.randi_range(1, 2))
+			else:
+				## [slimes] the deeps burn ember — and one tar sits in the dark
+				_spawn_pack(c, SlimeRed, _rng.randi_range(2, 4))
+				if _rng.randf() < 0.5:
+					_spawn_pack(c, SlimeBlack, 1)
 	## THE DEEP IS FULLER: an extra belt of mean packs below -20 — the wide
 	## deep galleries deserve their garrisons.
 	for c in _pick_spots(reach, 9, -36.0, -20.0, 14.0, CaveField.PERM_R + 2.0):

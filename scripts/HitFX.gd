@@ -181,11 +181,21 @@ static func kind_of(body: Node) -> String:
 		return "armour"
 	if "undead" in fams or "skeleton" in fams:
 		return "bone"
+	if "slime" in fams:
+		## goo, in the jelly's own colour — carried in the kind string so the
+		## one-door for_creature() below can pour the right colour
+		var gc: Color = body.get("goo_color") if "goo_color" in body else Color(0.4, 0.9, 0.3)
+		return "slime:" + gc.to_html(false)
 	return "flesh"
 
 
 static func for_creature(kind: String, at: Vector3, dir: Vector3, power := 1.0) -> HitFX:
 	## One door for the three kinds of body. kind_of() picks it.
+	if kind.begins_with("slime"):
+		var col := Color(0.4, 0.9, 0.3)
+		if kind.length() > 6:
+			col = Color.html(kind.substr(6))
+		return goo(at, dir, col, power)
 	match kind:
 		"armour":
 			return armour(at, dir, power)
@@ -193,6 +203,21 @@ static func for_creature(kind: String, at: Vector3, dir: Vector3, power := 1.0) 
 			return bone(at, dir, power)
 		_:
 			return flesh(at, dir, power)
+
+
+static func goo(at: Vector3, dir: Vector3, col: Color, power := 1.0) -> HitFX:
+	## SLIME: a wet burst of jelly in the creature's own colour — fat slow
+	## gobbets that fall and a fine faintly-lit spray that hangs a moment.
+	## (scripts/Slime.gd uses it for landings and the death splat too.)
+	var fx := _root(at, 1.1)
+	var d := _safe(dir)
+	var dim := Color(col.r * 0.55, col.g * 0.55, col.b * 0.55, 1.0)
+	fx.add_child(_cubes(int(10 * power), 0.075, 0.75, d, 55.0, 2.0, 4.5, 11.0,
+		_ramp(col, dim, Color(dim.r, dim.g, dim.b, 0.0))))
+	fx.add_child(_cubes(int(18 * power), 0.030, 0.55, d, 80.0, 3.0, 6.5, 7.0,
+		_ramp(Color(col.r, col.g, col.b, 0.95), Color(col.r, col.g, col.b, 0.6), Color(col.r, col.g, col.b, 0.0)),
+		true, col))
+	return fx
 
 
 ## ============================== Plumbing ==================================
