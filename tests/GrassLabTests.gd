@@ -472,7 +472,11 @@ func t_no_input() -> void:
 	var at := praw.find("KEY_F3:")
 	ok(at > 0 and praw.substr(at, 240).contains("_toggle_menu(\"grass\")"), "...and it toggles the grass menu")
 	ok(praw.contains("grass_lab.visible = which == \"grass\""), "_toggle_menu shows the lab for \"grass\"")
-	ok(psrc.contains("grass_lab.visible = false"), "_close_menu hides it")
+	## Since 2026-09-12 every panel is hidden through ONE table,
+	## _show_menu_panels, which _close_menu calls with "" -- so the lab
+	## cannot be left showing.
+	ok(praw.contains("grass_lab.visible = which == \"grass\"")
+			and praw.contains("_show_menu_panels(\"\")"), "_close_menu hides it")
 	ok(psrc.contains("grass_lab = GrassLab.new()"), "Player builds the lab")
 	var reg := FileAccess.get_file_as_string("res://tests/DevInputRegistry.gd")
 	ok(reg.contains("\"tok\": \"KEY_F3\"") and reg.contains("\"expect\": \"grass\""), "DevInputRegistry has the F3 row, live kind menu -> grass")

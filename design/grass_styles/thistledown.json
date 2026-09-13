@@ -1,0 +1,27 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Thistledown moor",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Heather-purple moorland thick with seed heads, soft in a low sun.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.7,
+  "tall_shift": -0.1,
+  "w_flower": 2.2,
+  "w_fern": 0.4,
+  "w_moss": 0.6,
+  "w_clover": 0.3,
+  "height": 0.2,
+  "tall_height": 0.9,
+  "col_spring": "#6a5a7a",
+  "col_summer": "#5e4f70",
+  "col_autumn": "#7a5f7a",
+  "col_winter": "#544868",
+  "col_dry": "#8a7290",
+  "col_moss": "#443a54",
+  "col_seedhead": "#a68fc0",
+  "hue_var": 0.15,
+  "val_var": 0.3,
+  "backlight": 0.5
+ }
+}

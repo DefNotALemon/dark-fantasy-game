@@ -1,0 +1,25 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Moonlit silver meadow",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Pale, cool and faintly shimmering -- grass as it looks by moonlight.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.85,
+  "size_var": 1.1,
+  "col_spring": "#8a97a8",
+  "col_summer": "#7c8ba0",
+  "col_autumn": "#96a0ac",
+  "col_winter": "#6f7f96",
+  "col_dry": "#a8b4c0",
+  "col_moss": "#5a6a72",
+  "col_seedhead": "#c8d4e0",
+  "col_snow": "#e6ecf5",
+  "tip_light": 0.65,
+  "backlight": 0.75,
+  "hue_var": 0.06,
+  "val_var": 0.22,
+  "normal_up": 0.5,
+  "snow": 0.4
+ }
+}

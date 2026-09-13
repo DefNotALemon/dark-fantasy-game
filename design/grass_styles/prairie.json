@@ -1,0 +1,31 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Sunbleached prairie",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Tall bluestem and timothy gone pale gold, dry underfoot all summer.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.65,
+  "tall_shift": 0.25,
+  "w_bluestem": 2.8,
+  "w_timothy": 1.6,
+  "w_fescue": 0.6,
+  "w_moss": 0.0,
+  "w_fern": 0.1,
+  "w_clover": 0.2,
+  "height": 0.32,
+  "tall_height": 1.9,
+  "width": 0.028,
+  "lean": 0.4,
+  "col_spring": "#c8b060",
+  "col_summer": "#d0ba66",
+  "col_autumn": "#c49a48",
+  "col_winter": "#b09a6c",
+  "col_dry": "#dcc678",
+  "col_bluestem_summer": "#c8a860",
+  "col_bluestem_cured": "#a06a2e",
+  "col_seedhead": "#e0cf90",
+  "tint_dry": 0.75,
+  "val_var": 0.2
+ }
+}

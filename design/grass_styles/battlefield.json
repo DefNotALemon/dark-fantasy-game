@@ -1,0 +1,33 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Charred battlefield",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Sparse, blackened and low -- nothing has grown back properly since.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.35,
+  "w_flower": 0.0,
+  "w_clover": 0.0,
+  "w_fern": 0.1,
+  "w_moss": 0.1,
+  "w_bluestem": 0.2,
+  "w_sedge": 0.1,
+  "w_timothy": 0.1,
+  "height": 0.12,
+  "width": 0.02,
+  "tall_height": 0.5,
+  "size_var": 1.6,
+  "clump_cut": -0.35,
+  "col_spring": "#332e28",
+  "col_summer": "#3a332a",
+  "col_autumn": "#4a3c2c",
+  "col_winter": "#2a2620",
+  "col_dry": "#584a34",
+  "col_moss": "#26241c",
+  "col_seedhead": "#4a3a28",
+  "root_dark": 0.85,
+  "val_var": 0.4,
+  "tint_dry": 0.9,
+  "snow": 0.4
+ }
+}

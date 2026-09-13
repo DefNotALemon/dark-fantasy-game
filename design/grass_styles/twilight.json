@@ -1,0 +1,27 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Twilight lavender",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Blue-violet dusk grass that catches the last light along every tip.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.9,
+  "size_var": 1.2,
+  "vigour": 1.1,
+  "w_bluestem": 1.4,
+  "w_flower": 1.0,
+  "col_spring": "#5a5a8a",
+  "col_summer": "#4e4e7c",
+  "col_autumn": "#6a5a90",
+  "col_winter": "#454570",
+  "col_dry": "#8272a0",
+  "col_moss": "#3a3a5c",
+  "col_seedhead": "#b8a8d8",
+  "col_bluestem_summer": "#6a5a90",
+  "col_bluestem_cured": "#8a6aae",
+  "tip_light": 0.7,
+  "backlight": 0.8,
+  "normal_up": 0.55,
+  "hue_var": 0.1
+ }
+}

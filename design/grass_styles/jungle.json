@@ -1,0 +1,31 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Jungle overgrowth",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Dense, tall and fern-choked -- the ruin under it is barely visible.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 1.4,
+  "w_fern": 2.8,
+  "w_moss": 1.4,
+  "w_flower": 0.5,
+  "w_clover": 0.6,
+  "w_timothy": 0.2,
+  "w_bluestem": 0.1,
+  "height": 0.3,
+  "tall_height": 1.8,
+  "tall_shift": -0.3,
+  "tall_keep": 0.5,
+  "size_var": 1.6,
+  "vigour": 1.6,
+  "col_spring": "#2e7a3a",
+  "col_summer": "#1f6b30",
+  "col_autumn": "#3a7a2e",
+  "col_winter": "#2a5c34",
+  "col_dry": "#4a8a3a",
+  "col_moss": "#164a24",
+  "val_var": 0.35,
+  "tip_light": 0.3,
+  "normal_up": 0.4
+ }
+}

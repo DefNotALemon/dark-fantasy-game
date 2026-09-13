@@ -1,0 +1,30 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Storm-bent tundra",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Short, grey-green and permanently combed flat by the wind.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.6,
+  "height": 0.14,
+  "tall_height": 0.55,
+  "width": 0.026,
+  "lean": 0.85,
+  "droop": 0.15,
+  "tall_shift": 0.4,
+  "w_flower": 0.15,
+  "w_clover": 0.15,
+  "w_fern": 0.1,
+  "w_bluestem": 0.4,
+  "w_moss": 0.8,
+  "col_spring": "#6a7460",
+  "col_summer": "#71785f",
+  "col_autumn": "#787260",
+  "col_winter": "#5e6660",
+  "col_dry": "#8a8570",
+  "col_moss": "#4a5648",
+  "backlight": 0.6,
+  "root_dark": 0.5,
+  "snow": 0.6
+ }
+}

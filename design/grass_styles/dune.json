@@ -1,0 +1,32 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Golden dune",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Dry beach grass leaning hard in a sea wind, pale gold to the horizon.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.55,
+  "tall_shift": 0.3,
+  "w_bluestem": 2.4,
+  "w_sedge": 1.6,
+  "w_fescue": 0.5,
+  "w_moss": 0.0,
+  "w_fern": 0.0,
+  "w_clover": 0.1,
+  "height": 0.24,
+  "tall_height": 1.6,
+  "width": 0.02,
+  "lean": 0.5,
+  "droop": 0.3,
+  "col_spring": "#c9a850",
+  "col_summer": "#d4b25c",
+  "col_autumn": "#c99a3e",
+  "col_winter": "#b89a6a",
+  "col_dry": "#e0c070",
+  "col_bluestem_summer": "#c8a860",
+  "col_bluestem_cured": "#a97a3a",
+  "tint_dry": 0.8,
+  "val_var": 0.25,
+  "snow": 0.1
+ }
+}

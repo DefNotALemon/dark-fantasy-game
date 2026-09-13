@@ -1,0 +1,30 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Volcanic scrubland",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Sparse, wiry grass over black ash-ground, hardy and low.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.3,
+  "w_flower": 0.1,
+  "w_clover": 0.0,
+  "w_fern": 0.15,
+  "w_moss": 0.3,
+  "w_bluestem": 0.5,
+  "w_sedge": 0.2,
+  "height": 0.15,
+  "width": 0.024,
+  "size_var": 1.4,
+  "clump_cut": -0.3,
+  "col_spring": "#4a2a24",
+  "col_summer": "#54302a",
+  "col_autumn": "#6a3a2a",
+  "col_winter": "#3a2420",
+  "col_dry": "#7a4530",
+  "col_moss": "#3a2e22",
+  "col_seedhead": "#8a5030",
+  "root_dark": 0.7,
+  "tint_dry": 0.85,
+  "snow": 0.1
+ }
+}

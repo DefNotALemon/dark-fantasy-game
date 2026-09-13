@@ -1,0 +1,27 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Coastal saltmarsh",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Sedge over brackish mud, pale green-grey and always a little wet.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 0.85,
+  "w_sedge": 2.6,
+  "w_fescue": 0.6,
+  "w_timothy": 0.3,
+  "w_flower": 0.2,
+  "w_moss": 0.1,
+  "height": 0.3,
+  "tall_height": 1.0,
+  "width": 0.024,
+  "droop": 0.7,
+  "col_spring": "#7a9a6a",
+  "col_summer": "#6c9060",
+  "col_autumn": "#8a9060",
+  "col_winter": "#6a7a68",
+  "col_dry": "#a0a878",
+  "col_seedhead": "#c8c090",
+  "tint_moist": 0.65,
+  "val_var": 0.2
+ }
+}

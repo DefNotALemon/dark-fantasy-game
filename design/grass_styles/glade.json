@@ -1,0 +1,29 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Enchanted glade",
+ "based_on": "session:grass-palette-2026-09-13",
+ "blurb": "Unnaturally lush and faintly luminous -- something is feeding this ground.",
+ "exported": "2026-09-13",
+ "params": {
+  "density": 1.2,
+  "w_flower": 2.6,
+  "w_clover": 1.8,
+  "w_fern": 1.2,
+  "w_moss": 0.6,
+  "height": 0.2,
+  "size_var": 1.4,
+  "vigour": 1.4,
+  "col_spring": "#4fae5a",
+  "col_summer": "#3f9e6a",
+  "col_autumn": "#6db860",
+  "col_winter": "#4a8f6a",
+  "col_dry": "#7bc27a",
+  "col_moss": "#2e7a4a",
+  "col_seedhead": "#e8d97a",
+  "hue_var": 0.22,
+  "val_var": 0.3,
+  "tip_light": 0.6,
+  "backlight": 0.7,
+  "normal_up": 0.6
+ }
+}

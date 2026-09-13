@@ -1,3 +1,7 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+## GrassLook contact sheets -- regenerate with tests/GrassLook.gd, do not commit
+design/grass_shots/
+scripts/*.gd.bak

@@ -6,19 +6,30 @@ extends PanelContainer
 ## Lemon (2026-09-11): "we gotta fix the grass, show me a bunch of different
 ## styles, and colors, and shapes, and patterns with density, size, and other
 ## sliders in the dev menu for me to edit." The browser bench (the Cowork
-## artifact "Myrkfell Grass Lab") was the first half; this is the in-game
-## half, driving the REAL GrassSystem through GrassSystem.apply_style().
+## artifact "Myrkfell Grass Lab") was the first half; the in-game half drives
+## the REAL GrassSystem through GrassSystem.apply_style().
+##
+## 2026-09-13 (Lemon: "make a bunch of new styles... like a pallet, and make
+## the grass menu more readable and in a different spot"): the preset row
+## became a PALETTE -- a grid of colour swatches (one per style, click to
+## switch, no dropdown to open first) -- design/grass_styles/ grew from
+## twelve styles to two dozen; the wall of 38 sliders split into three tabs
+## (Look / Shape / Place) behind the palette tab, each a shorter scroll with
+## its own cost note, bigger type; and the panel moved off the full-height
+## left edge to a fixed-height card pinned top-right, so it no longer eats
+## the whole view while you drag a knob.
 ##
 ## What it does:
-##   * a PRESET row -- design/grass_styles/*.json (the bench's thirteen styles
-##     plus whatever you save), applied whole;
-##   * one slider per knob, grouped by what a change COSTS: shader knobs and
-##     colours land the same frame, geometry rebuilds the tuft meshes (ms),
-##     placement re-places the whole ring -- so placement changes are
-##     DEBOUNCED and applied RESEED_DELAY after the last drag;
+##   * a PALETTE tab -- design/grass_styles/*.json, one swatch per style,
+##     coloured from that style's col_summer, click to apply it whole;
+##   * Look / Shape / Place tabs -- one slider per knob, grouped by what a
+##     change COSTS: shader knobs and colours land the same frame, geometry
+##     rebuilds the tuft meshes (ms), placement re-places the whole ring --
+##     so placement changes are DEBOUNCED and applied RESEED_DELAY after the
+##     last drag;
 ##   * SHIP writes design/grass_style.json, which GrassSystem.setup() reads
-##     before the first blade is built -- the chosen style is the game's style,
-##     not a dev overlay; SAVE PRESET adds a named file to the preset row.
+##     before the first blade is built -- the chosen style is the game's
+##     style, not a dev overlay; SAVE adds a named file to the palette.
 ##
 ## Player owns the key: F3 -> Player._toggle_menu("grass") shows and hides
 ## this panel like every other menu (map, spawn, creative), so the cursor,
@@ -27,7 +38,9 @@ extends PanelContainer
 ## ===========================================================================
 
 const RESEED_DELAY := 0.7      ## s after the last placement drag before the ring re-places
-const PANEL_W := 470.0
+const PANEL_W := 440.0
+const PANEL_MAX_H := 660.0     ## a fixed card, not the whole screen -- see _process()
+const TABS_MIN_H := 470.0
 
 ## [key, label, min, max, step, group]  group: "place" | "geom" | "shader"
 const KNOBS := [
@@ -76,21 +89,27 @@ const COLOURS := [
 	["col_dry", "Dry / cured"], ["col_moss", "Moss"], ["col_snow", "Snow"], ["col_seedhead", "Timothy head"],
 	["col_bluestem_summer", "Bluestem summer"], ["col_bluestem_cured", "Bluestem cured"],
 ]
-const GROUP_TITLES := {"place": "PLACEMENT  (re-places the ring, %.1f s after you stop)",
-	"geom": "SHAPE  (rebuilds the tufts)", "shader": "LOOK  (instant)"}
+## group -> [tab title, cost note]
+const GROUP_TABS := {
+	"shader": ["Look", "Colours and shader knobs land the same frame."],
+	"geom": ["Shape", "Rebuilds the tuft meshes -- a few milliseconds."],
+	"place": ["Place", "Re-places the whole ring, a beat after you stop dragging."],
+}
 
 var grass: Node = null            ## the GrassSystem, found on open
-var preset_btn: OptionButton
 var status: Label
 var name_edit: LineEdit
 var _sliders: Dictionary = {}     ## key -> HSlider
 var _vals: Dictionary = {}        ## key -> Label
 var _pickers: Dictionary = {}     ## key -> ColorPickerButton
 var _presets: Array = []          ## [{name, path, file}]
+var _swatches: Array = []         ## Button per preset, same order as _presets
+var _palette_grid: GridContainer
 var _pending: Dictionary = {}     ## placement changes waiting on the debounce
 var _reseed_t := -1.0
 var _syncing := false             ## true while the widgets are being set from the style
 var _based_on := ""
+var _selected := 0                ## index into _presets the palette shows as active
 
 
 func _ready() -> void:
@@ -103,70 +122,125 @@ func _ready() -> void:
 ## ------------------------------------------------------------- the panel --
 
 func _build() -> void:
+	add_theme_stylebox_override("panel", _panel_style())
+
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 12)
+		margin.add_theme_constant_override(side, 14)
 	add_child(margin)
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 6)
+	vb.add_theme_constant_override("separation", 8)
 	margin.add_child(vb)
 
 	var title := Label.new()
 	title.text = "GRASS LAB   [F3]"
-	title.add_theme_font_size_override("font_size", 20)
-	title.add_theme_color_override("font_color", Color(0.86, 0.78, 0.52))
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(0.92, 0.83, 0.55))
 	vb.add_child(title)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	vb.add_child(row)
-	preset_btn = OptionButton.new()
-	preset_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	preset_btn.focus_mode = Control.FOCUS_NONE
-	preset_btn.item_selected.connect(_on_preset)
-	row.add_child(preset_btn)
-	row.add_child(_button("Reseed", _reseed_now, "Re-place the ring with the current numbers"))
-	row.add_child(_button("Reset", _reset, "Back to the v2.7 numbers"))
-
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 6)
-	vb.add_child(row2)
-	name_edit = LineEdit.new()
-	name_edit.placeholder_text = "preset name"
-	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row2.add_child(name_edit)
-	row2.add_child(_button("Save preset", _save_preset, "design/grass_styles/<name>.json"))
-	row2.add_child(_button("SHIP", _ship, "Write design/grass_style.json -- the game boots with it"))
+	var subtitle := Label.new()
+	subtitle.text = "Click a swatch to switch the whole meadow, or drag a knob under Look / Shape / Place."
+	subtitle.add_theme_font_size_override("font_size", 13)
+	subtitle.add_theme_color_override("font_color", Color(0.72, 0.70, 0.62))
+	subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(subtitle)
 
 	status = Label.new()
 	status.add_theme_font_size_override("font_size", 13)
-	status.add_theme_color_override("font_color", Color(0.72, 0.70, 0.62))
+	status.add_theme_color_override("font_color", Color(0.80, 0.78, 0.68))
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vb.add_child(status)
+
+	var tabs := TabContainer.new()
+	tabs.custom_minimum_size = Vector2(0, TABS_MIN_H)
+	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_theme_font_size_override("font_size", 14)
+	vb.add_child(tabs)
+
+	tabs.add_child(_build_palette_tab())
+	for group in ["shader", "geom", "place"]:
+		var t: Array = GROUP_TABS[group]
+		tabs.add_child(_build_group_tab(group, String(t[0]), String(t[1])))
+
+
+func _panel_style() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.075, 0.072, 0.062, 0.94)
+	sb.border_color = Color(0.86, 0.78, 0.52, 0.55)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(10)
+	sb.set_content_margin_all(0)
+	return sb
+
+
+func _build_palette_tab() -> Control:
+	var root_c := VBoxContainer.new()
+	root_c.name = "Palette"
+	root_c.add_theme_constant_override("separation", 8)
+
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 6)
+	actions.add_child(_button("Reseed", _reseed_now, "Re-place the ring with the current numbers"))
+	actions.add_child(_button("Reset", _reset, "Back to the v2.7 numbers"))
+	root_c.add_child(actions)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 6)
+	name_edit = LineEdit.new()
+	name_edit.placeholder_text = "preset name"
+	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	save_row.add_child(name_edit)
+	save_row.add_child(_button("Save", _save_preset, "design/grass_styles/<name>.json"))
+	save_row.add_child(_button("SHIP", _ship, "Write design/grass_style.json -- the game boots with it"))
+	root_c.add_child(save_row)
+
+	var hint := Label.new()
+	hint.text = "PALETTE"
+	hint.add_theme_font_size_override("font_size", 14)
+	hint.add_theme_color_override("font_color", Color(0.86, 0.78, 0.52))
+	root_c.add_child(hint)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	vb.add_child(scroll)
+	root_c.add_child(scroll)
+	_palette_grid = GridContainer.new()
+	_palette_grid.columns = 2
+	_palette_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_palette_grid.add_theme_constant_override("h_separation", 8)
+	_palette_grid.add_theme_constant_override("v_separation", 8)
+	scroll.add_child(_palette_grid)
+
+	return root_c
+
+
+func _build_group_tab(group: String, title: String, note: String) -> Control:
+	var scroll := ScrollContainer.new()
+	scroll.name = title
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var body := VBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 3)
+	body.add_theme_constant_override("separation", 5)
 	scroll.add_child(body)
 
-	for group in ["shader", "geom", "place"]:
-		var head := Label.new()
-		var t := String(GROUP_TITLES[group])
-		head.text = t % RESEED_DELAY if t.contains("%") else t
-		head.add_theme_font_size_override("font_size", 13)
-		head.add_theme_color_override("font_color", Color(0.86, 0.78, 0.52))
-		body.add_child(head)
-		if group == "shader":
-			for c in COLOURS:
-				body.add_child(_colour_row(String(c[0]), String(c[1])))
-		for k in KNOBS:
-			if String(k[5]) != group:
-				continue
-			body.add_child(_slider_row(String(k[0]), String(k[1]), float(k[2]), float(k[3]), float(k[4])))
+	if note != "":
+		var lbl := Label.new()
+		lbl.text = note
+		lbl.add_theme_font_size_override("font_size", 12)
+		lbl.add_theme_color_override("font_color", Color(0.70, 0.68, 0.60))
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		body.add_child(lbl)
+		body.add_child(HSeparator.new())
+
+	if group == "shader":
+		for c in COLOURS:
+			body.add_child(_colour_row(String(c[0]), String(c[1])))
+		body.add_child(HSeparator.new())
+	for k in KNOBS:
+		if String(k[5]) != group:
+			continue
+		body.add_child(_slider_row(String(k[0]), String(k[1]), float(k[2]), float(k[3]), float(k[4])))
+	return scroll
 
 
 func _button(text: String, fn: Callable, tip := "") -> Button:
@@ -183,8 +257,8 @@ func _slider_row(key: String, label: String, lo: float, hi: float, step: float) 
 	row.add_theme_constant_override("separation", 8)
 	var l := Label.new()
 	l.text = label
-	l.custom_minimum_size = Vector2(178, 0)
-	l.add_theme_font_size_override("font_size", 13)
+	l.custom_minimum_size = Vector2(192, 0)
+	l.add_theme_font_size_override("font_size", 14)
 	row.add_child(l)
 	var s := HSlider.new()
 	s.min_value = lo
@@ -195,9 +269,9 @@ func _slider_row(key: String, label: String, lo: float, hi: float, step: float) 
 	s.value_changed.connect(_on_slider.bind(key))
 	row.add_child(s)
 	var v := Label.new()
-	v.custom_minimum_size = Vector2(52, 0)
+	v.custom_minimum_size = Vector2(56, 0)
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	v.add_theme_font_size_override("font_size", 12)
+	v.add_theme_font_size_override("font_size", 13)
 	row.add_child(v)
 	_sliders[key] = s
 	_vals[key] = v
@@ -209,17 +283,107 @@ func _colour_row(key: String, label: String) -> HBoxContainer:
 	row.add_theme_constant_override("separation", 8)
 	var l := Label.new()
 	l.text = label
-	l.custom_minimum_size = Vector2(178, 0)
-	l.add_theme_font_size_override("font_size", 13)
+	l.custom_minimum_size = Vector2(192, 0)
+	l.add_theme_font_size_override("font_size", 14)
 	row.add_child(l)
 	var p := ColorPickerButton.new()
-	p.custom_minimum_size = Vector2(120, 22)
+	p.custom_minimum_size = Vector2(126, 24)
 	p.focus_mode = Control.FOCUS_NONE
 	p.edit_alpha = false
 	p.color_changed.connect(_on_colour.bind(key))
 	row.add_child(p)
 	_pickers[key] = p
 	return row
+
+
+## ------------------------------------------------------------- the palette
+
+## Where a style's picture lives. tests/GrassLook.gd renders one per preset
+## (the "field" vantage, 200x125) so the palette shows the MEADOW rather than
+## a flat chip of its summer colour -- which is the whole difference between
+## a dropdown with nicer paint on it and an actual palette.
+const THUMB_DIR := "res://design/grass_styles/thumbs/"
+const SWATCH := Vector2(196, 150)
+
+
+func _build_swatch(i: int, p: Dictionary) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = SWATCH
+	b.toggle_mode = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.text = String(p["name"])
+	## clip_text chopped "Moonlit silver meadow" to "Moonlit silver me" with no
+	## sign it had been cut. Ellipsis says so.
+	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	b.tooltip_text = String(p.get("blurb", p["name"]))
+	b.add_theme_font_size_override("font_size", 13)
+
+	var col := _swatch_colour(p)
+	var tex := _swatch_thumb(String(p.get("file", "")))
+	if tex != null:
+		## picture on top, name underneath, both inside the one button
+		b.icon = tex
+		b.expand_icon = true
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = col.darkened(0.55) if tex != null else col
+	normal.set_corner_radius_all(6)
+	normal.set_border_width_all(2)
+	normal.border_color = Color(0, 0, 0, 0.35)
+	normal.set_content_margin_all(4)
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.border_color = Color(0.95, 0.85, 0.40)
+	pressed.set_border_width_all(3)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.border_color = Color(0.95, 0.85, 0.40, 0.65)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("hover_pressed", pressed)
+	## over a photograph the label is always light; over a flat chip it has to
+	## follow the chip
+	var text_col := Color(0.97, 0.96, 0.90) if tex != null else _text_colour_for(col)
+	b.add_theme_color_override("font_color", text_col)
+	b.add_theme_color_override("font_hover_color", text_col)
+	b.add_theme_color_override("font_pressed_color", text_col)
+	b.pressed.connect(_on_preset.bind(i))
+	_palette_grid.add_child(b)
+	return b
+
+
+static func _swatch_thumb(file: String) -> Texture2D:
+	## Image.load_from_file, not load(): design/ PNGs are data, not imported
+	## resources, so load() finds nothing outside the editor.
+	if file == "":
+		return null
+	var path := THUMB_DIR + file + ".png"
+	if not FileAccess.file_exists(path):
+		return null
+	var img := Image.new()
+	if img.load(path) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
+
+
+func _swatch_colour(p: Dictionary) -> Color:
+	var path := String(p.get("path", ""))
+	var hexv := String(GrassSystem.STYLE_DEFAULTS["col_summer"])
+	if path != "":
+		var params: Dictionary = GrassSystem.load_style_file(path)
+		hexv = String(params.get("col_summer", hexv))
+	return Color.html(hexv)
+
+
+static func _text_colour_for(c: Color) -> Color:
+	return Color(0.05, 0.05, 0.05) if c.get_luminance() > 0.5 else Color(0.96, 0.96, 0.92)
+
+
+func _refresh_palette_selection(idx: int) -> void:
+	_selected = idx
+	for i in range(_swatches.size()):
+		(_swatches[i] as Button).button_pressed = (i == idx)
 
 
 ## ------------------------------------------------------------- open/close -
@@ -250,13 +414,18 @@ func _find_grass() -> Node:
 
 
 func _load_presets() -> void:
-	_presets = [{"name": "Myrkfell now (v2.7 defaults)", "path": "", "file": ""}]
+	## "default" is the thumbnail GrassLook writes for the empty style
+	_presets = [{"name": "Myrkfell now (v2.7 defaults)", "path": "", "file": "default"}]
 	if grass != null:
 		for p in grass.call("preset_files"):
 			_presets.append(p)
-	preset_btn.clear()
-	for p in _presets:
-		preset_btn.add_item(String((p as Dictionary)["name"]))
+	if _palette_grid != null:
+		for c in _palette_grid.get_children():
+			c.queue_free()
+		_swatches.clear()
+		for i in range(_presets.size()):
+			_swatches.append(_build_swatch(i, _presets[i]))
+		_refresh_palette_selection(_selected if _selected < _presets.size() else 0)
 
 
 func sync_from_style() -> void:
@@ -322,10 +491,11 @@ static func _group_of(key: String) -> String:
 func _process(delta: float) -> void:
 	if not visible:
 		return
-	## sit at the left edge, full height, under nothing
+	## a fixed-height card, pinned top-right -- not the whole left edge
 	var vp := get_viewport().get_visible_rect().size
-	custom_minimum_size = Vector2(PANEL_W, vp.y - 32.0)
-	position = Vector2(16.0, 16.0)
+	var h := minf(vp.y - 32.0, PANEL_MAX_H)
+	custom_minimum_size = Vector2(PANEL_W, h)
+	position = Vector2(maxf(16.0, vp.x - PANEL_W - 16.0), 16.0)
 	if _reseed_t >= 0.0:
 		_reseed_t -= delta
 		if _reseed_t < 0.0:
@@ -359,6 +529,7 @@ func _reset() -> void:
 		return
 	_apply_whole(_defaults(), "Myrkfell now")
 	_based_on = ""
+	_refresh_palette_selection(0)
 
 
 func _on_preset(idx: int) -> void:
@@ -378,6 +549,7 @@ func _on_preset(idx: int) -> void:
 		whole[k] = d[k]
 	_based_on = String(p["file"])
 	_apply_whole(whole, String(p["name"]))
+	_refresh_palette_selection(idx)
 
 
 func _apply_whole(d: Dictionary, label: String) -> void:
@@ -404,7 +576,7 @@ func _save_preset() -> void:
 		_load_presets()
 		for i in range(_presets.size()):
 			if String((_presets[i] as Dictionary)["path"]) == path:
-				preset_btn.select(i)
+				_refresh_palette_selection(i)
 	else:
 		_say("could not write %s" % path)
 
