@@ -26,8 +26,19 @@ extends Node
 ## ever ONE definition of what a button does. The two exceptions are the
 ## analog ones -- the sticks -- which have no keyboard equivalent to borrow:
 ## the left stick is added to move_input by Player._pad_move(), and the right
-## stick drives the look, the item wheel, and the menu cursor from here.
+## stick drives the look and the item wheel from here.
+##
+## IN A MENU the right stick is the pointer. That pointer is THE CURSOR
+## (scripts/MenuCursor.gd, a child of this node): the game's own arrow, drawn
+## whenever the mouse is loose, moved by the mouse and by the stick alike.
+## R2 stays the left click and lands where the arrow is. Lemon, 2026-09-14:
+## "make the mouse a cursor in all menus that's always active, that way when a
+## controller is being used you don't have to select each item in your
+## inventory." (Until then the stick warped the OS pointer, which on macOS
+## posts no motion event -- the pointer twitched in place and nothing hovered.)
 ## =============================================================================
+
+const CursorScript := preload("res://scripts/MenuCursor.gd")
 
 const DEAD_MOVE := 0.18          ## radial dead zone, left stick
 const DEAD_LOOK := 0.14          ## radial dead zone, right stick
@@ -35,7 +46,6 @@ const LOOK_SPEED := 3.1          ## rad/s at full deflection (x the sensitivity 
 const LOOK_CURVE := 2.0          ## >1 = fine aim near the centre, fast at the rim
 const TRIG_ON := 0.50            ## trigger pull that counts as a click...
 const TRIG_OFF := 0.35           ## ...and the lower edge it has to fall back through
-const CURSOR_SPEED := 950.0      ## px/s for the right-stick cursor in menus
 const WHEEL_REACH := 60.0        ## stick deflection -> pixels, for the item wheel
 
 const ALL_BUTTONS := [
@@ -49,6 +59,7 @@ const ALL_BUTTONS := [
 ]
 
 var player: Node = null
+var cursor: CanvasLayer = null   ## the menu cursor (scripts/MenuCursor.gd)
 var device := -1                 ## -1 = no pad plugged in
 
 var _btn := {}                   ## JoyButton -> was it down last frame
@@ -62,6 +73,12 @@ var _sprint := false             ## L3 latch
 func _ready() -> void:
 	_refresh_device()
 	Input.joy_connection_changed.connect(_on_joy_changed)
+	## THE CURSOR lives here, under the pad, because the pad is what needs it
+	## most -- but it is up for the mouse too, pad or no pad, in every menu.
+	cursor = CursorScript.new()
+	cursor.name = "MenuCursor"
+	cursor.pad = self
+	add_child(cursor)
 
 
 func _on_joy_changed(_dev: int, _connected: bool) -> void:
@@ -83,7 +100,12 @@ func connected() -> bool:
 	return device >= 0
 
 
-## --- what Player asks us for --------------------------------------------- ##
+func cursor_up() -> bool:
+	## A menu has the mouse loose and the arrow is on screen.
+	return cursor != null and cursor.active
+
+
+## --- what Player (and the cursor) ask us for ------------------------------ ##
 
 func move_vec() -> Vector3:
 	## The left stick in the same shape Player writes WASD into: -z forward,
@@ -96,6 +118,14 @@ func move_vec() -> Vector3:
 	return Vector3(v.x, 0.0, v.y)
 
 
+func look_stick() -> Vector2:
+	## The right stick, dead-zoned and curved: what the look, the item wheel
+	## and the menu cursor all steer by. Zero with no pad.
+	if device < 0:
+		return Vector2.ZERO
+	return _stick(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y, DEAD_LOOK, LOOK_CURVE)
+
+
 ## --- the frame ------------------------------------------------------------ ##
 
 func _process(delta: float) -> void:
@@ -104,8 +134,19 @@ func _process(delta: float) -> void:
 	if device < 0:
 		return
 	if player.input_locked:
-		_release_all()
+		## Asleep -- blackouts, the bed animation, and the whole time the
+		## front-door card is up. Every key is let go and the edges are
+		## swallowed so nothing fires the instant control returns. ONE thing
+		## stays awake: with the mouse loose (the card, or settings over it)
+		## the arrow is up and the stick is steering it (the cursor reads the
+		## stick itself), so R2 / L2 keep being the mouse buttons here -- or a
+		## click could never land on the row the arrow is over.
+		_release_keys()
 		_sync_buttons()
+		if cursor_up():
+			_triggers()
+		else:
+			_release_mouse()
 		return
 	if player.godmode != null and player.godmode.typing:
 		## The editor's text fields own the keyboard; don't post keys into them.
@@ -171,7 +212,7 @@ func _sticks(delta: float) -> void:
 		_sprint = false
 	_hold_key(KEY_SHIFT, _sprint)
 
-	var lk := _stick(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y, DEAD_LOOK, LOOK_CURVE)
+	var lk := look_stick()
 
 	## THE ITEM WHEEL owns the right stick while it is up. The mouse version
 	## accumulates a drag; a stick already points somewhere, so we hand the
@@ -181,14 +222,10 @@ func _sticks(delta: float) -> void:
 		player._wheel_highlight_from(player._wheel_vec, 26.0)
 		return
 
-	## A MENU is up and the cursor is loose: the right stick drives it and R2
-	## is the click, so the pad can reach the inventory, the map and settings.
-	if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
-		if lk != Vector2.ZERO:
-			var vp := get_viewport()
-			var p := vp.get_mouse_position() + lk * CURSOR_SPEED * delta
-			var sz := vp.get_visible_rect().size
-			Input.warp_mouse(Vector2(clampf(p.x, 0.0, sz.x - 1.0), clampf(p.y, 0.0, sz.y - 1.0)))
+	## A MENU is up: the arrow has the stick (MenuCursor reads look_stick()
+	## itself and moves the pointer) and R2 is the click (_triggers). Nothing
+	## to do here but keep the stick off the look.
+	if cursor_up():
 		return
 
 	if lk == Vector2.ZERO:
@@ -247,7 +284,10 @@ func _hold_mouse(btn: int, down: bool) -> void:
 	var e := InputEventMouseButton.new()
 	e.button_index = btn
 	e.pressed = down
-	var mp := get_viewport().get_mouse_position()
+	## The click lands where the ARROW is when a menu is up -- the cursor's
+	## own position, not the viewport's idea of the mouse, which can be a
+	## frame behind the stick.
+	var mp: Vector2 = cursor.pos if cursor_up() else get_viewport().get_mouse_position()
 	e.position = mp
 	e.global_position = mp
 	Input.parse_input_event(e)
@@ -268,10 +308,19 @@ func _tap(btn: int, code: int) -> void:
 
 
 func _release_all() -> void:
+	_release_keys()
+	_release_mouse()
+
+
+func _release_keys() -> void:
 	for code in _held.keys():
 		if bool(_held[code]):
 			_held[code] = false
 			_key(int(code), false)
+	_sprint = false
+
+
+func _release_mouse() -> void:
 	for btn in _mouse.keys():
 		if bool(_mouse[btn]):
 			_mouse[btn] = false
@@ -281,7 +330,6 @@ func _release_all() -> void:
 			Input.parse_input_event(e)
 	_trig_l = false
 	_trig_r = false
-	_sprint = false
 
 
 ## --- plumbing -------------------------------------------------------------- ##
