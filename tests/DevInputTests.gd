@@ -123,7 +123,7 @@ func _report() -> void:
 func _t_table() -> void:
 	claim("table", 14)
 	var b := REG.bindings()
-	ok(b.size() == 25, "twenty-five rows, one per match case in Player._input (got %d)" % b.size())
+	ok(b.size() == 26, "twenty-six rows, one per match case in Player._input (got %d)" % b.size())
 	var toks := {}
 	var codes := {}
 	var labels := {}
@@ -550,7 +550,7 @@ func _t_live_spec() -> void:
 	for r in b:
 		var k := String((r as Dictionary)["live"])
 		kinds[k] = int(kinds.get(k, 0)) + 1
-	ok(int(kinds.get("menu", 0)) == 7, "seven keys toggle a menu open and shut (%d)" % kinds.get("menu", 0))
+	ok(int(kinds.get("menu", 0)) == 8, "eight keys toggle a menu open and shut (%d)" % kinds.get("menu", 0))
 	ok(int(kinds.get("menu1", 0)) == 2, "two open one without toggling it shut")
 	ok(int(kinds.get("stance", 0)) == 2, "two move the stance")
 	ok(int(kinds.get("hold", 0)) == 1, "one is a hold")
@@ -560,7 +560,7 @@ func _t_live_spec() -> void:
 	for r in b:
 		if String((r as Dictionary)["live"]) != "none":
 			probeable += 1
-	ok(probeable == 14, "fourteen rows can be driven live (%d)" % probeable)
+	ok(probeable == 15, "fifteen rows can be driven live (%d)" % probeable)
 	## More than the twelve-key manual pass covered, which is the trade this
 	## whole item was taken for.
 	ok(probeable >= 12, "which is at least what the hand pass used to cover")
@@ -569,8 +569,8 @@ func _t_live_spec() -> void:
 		var d := r as Dictionary
 		if String(d["live"]) in ["menu", "menu1"]:
 			menus[String(d["expect"])] = int(menus.get(String(d["expect"]), 0)) + 1
-	same(sorted_join(menus.keys()), "creative, god, grass, map, settings, sky, spawn, tab",
-			"the eight menu names the prober will look for")
+	same(sorted_join(menus.keys()), "claude, creative, god, grass, map, settings, sky, spawn, tab",
+			"the nine menu names the prober will look for")
 	ok(int(menus.get("tab", 0)) == 2, "Tab and I both land on the tab menu")
 	var live := read("res://tests/DevInputLive.gd")
 	ok(live.length() > 2000, "the prober was read (%d bytes)" % live.length())

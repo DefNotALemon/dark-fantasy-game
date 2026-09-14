@@ -103,6 +103,7 @@ var flying := false
 var god_speed := 1.0
 var godmode: GodEditor = null
 var grass_lab: GrassLab = null   ## F3 -- the grass lab (scripts/GrassLab.gd)
+var claude_chat: ClaudeChat = null   ## F4 -- Claude, riding along (scripts/ClaudeChat.gd)
 var pad: Node = null             ## the gamepad translator (scripts/Pad.gd)
 var _space_tap_ms := 0
 var _god_mask_saved := -1      ## collision_mask parked while noclipping
@@ -1350,6 +1351,10 @@ func _build_hud() -> void:
 	## The grass lab builds itself too (scripts/GrassLab.gd) -- F3 opens it.
 	grass_lab = GrassLab.new()
 	hud_layer.add_child(grass_lab)
+	## Claude rides along too (scripts/ClaudeChat.gd) -- F4 opens the chat.
+	claude_chat = ClaudeChat.new()
+	hud_layer.add_child(claude_chat)
+	claude_chat.player = self
 	_build_wheel_ui()
 
 
@@ -1477,6 +1482,10 @@ func _input(event: InputEvent) -> void:
 	## GodEditor.eat_input returns true when it has taken the event.
 	if godmode != null and godmode.eat_input(event):
 		return
+	## THE CLAUDE CARD (F4) owns the keyboard while it is up -- a typed M
+	## must never open the map. Esc and F4 fall through to close/toggle it.
+	if claude_chat != null and claude_chat.eat_input(event):
+		return
 	if god and menu_open == "" and event is InputEventMouseButton \
 			and (godmode == null or not godmode.visible):
 		## The wheel is the speed dial even with the panel closed -- but not
@@ -1562,6 +1571,9 @@ func _input(event: InputEvent) -> void:
 			KEY_F3:
 				## F3 IS THE GRASS LAB. Styles, colours, shapes and sliders for the meadow.
 				_toggle_menu("grass")
+			KEY_F4:
+				## F4 IS CLAUDE. A live chat card over the game; the game keeps running.
+				_toggle_menu("claude")
 			KEY_SPACE:
 				## GOD: double-tap Space toggles flight, Minecraft-style. While
 				## flying, Space is "up" and never a jump.
@@ -5752,6 +5764,8 @@ func _toggle_menu(which: String) -> void:
 		map_panel.visible = which == "map"
 	if grass_lab:
 		grass_lab.visible = which == "grass"
+	if claude_chat:
+		claude_chat.visible = which == "claude"
 	if which == "sky" and sky_panel:
 		sky_panel.refresh()
 	if which == "map" and map_panel:

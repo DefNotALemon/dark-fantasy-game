@@ -33,6 +33,7 @@ See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for a
 | G | **Creative menu (dev)**: every item in the game — sword / 5-pc armor set / raw ore for all 10 metals, plus shield, torch, pickaxe, arrows, bedroll, wood, and the junk loot |
 | Tab | Menu: **1** Inventory · **2** Stats · **3** Progression · **4** Bestiary — the Inventory is **Terraria rules**: click a pack item to equip it (it MOVES into its slot), click a worn slot on the doll to take it off. The **Old Rucksack** is worn on its own **Back** slot and IS your grid: worn = 27 slots, bare back = 9. You start dressed, and saves put everything back exactly where you left it |
 | I | Straight to the Inventory page |
+| F4 | **Claude (dev)**: a live chat card over the game — streamed replies with the game state riding along (where you are, the hour, the weather, health, FPS). Backend dropdown: Anthropic (key from `ANTHROPIC_API_KEY` or the card's KEY field → `user://claude.cfg`) or any OpenAI-compatible local server. A Haiku note-taker writes bugs/ideas/requests to `user://claude_notes/`, and **Send up the line** drops notes + transcript into `notes/claude-handoff/` for the Cowork session |
 | Esc | Settings menu (ray-traced lighting, shadows, display, input, the Hunch, **Main Hand** — mirror the whole kit for lefties — and **Save / Load**) — or closes the open menu. All menus render 67% larger |
 
 (Heavy/light builds and dodge are coming later — dropped from this slice for now.)
