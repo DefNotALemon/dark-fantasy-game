@@ -326,7 +326,7 @@ static func prompt_for(rec: Dictionary, harv: Dictionary, edge: String,
 	var left := float(rec.get("left", 0.0))
 	var nm := String(rec.get("nm", "it"))
 	if Carcasses.stage_of(rec) >= Carcasses.STAGE_BONES:
-		return "Bones. There is nothing on it to take"
+		return "Bones. Nothing left to cut -- take them if you want them"
 	if not butcherable(harv):
 		return "There is nothing on a %s a knife is for" % nm.to_lower()
 	if edge == "":

@@ -265,6 +265,7 @@ var _ground: Object = null
 
 var _by_id: Dictionary = {}
 var _known: Dictionary = {}      ## instance_id of a dying body -> record id
+var _pending: Dictionary = {}    ## instance_id of a dying body -> record id, its ragdoll not yet settled
 var _staged: Dictionary = {}
 var _mown: Dictionary = {}
 var _told_player: Dictionary = {}
@@ -782,7 +783,54 @@ func harvest() -> int:
 		_known[iid] = int(rec.get("id", 0)) if not rec.is_empty() else 0
 		if not rec.is_empty():
 			made += 1
+			_watch_pose(e, rec)
+	_capture_pending()
 	return made
+
+
+func _watch_pose(e: Node3D, rec: Dictionary) -> void:
+	## THE POSE IS THE DEATH'S. A wild animal that dies through `Enemy._die()`
+	## hands its body to the CreatureSkin ragdoll, which settles for five
+	## seconds and freezes. Until it has, the corpse IS the picture and this
+	## bus stages nothing over it; once it has, the skeleton is read once,
+	## written on the record, and the body this bus builds wears it -- in
+	## the same frame the corpse is hidden, so nothing on screen changes. It
+	## just stops being the animal's and starts being the ledger's.
+	var skin := CreatureSkin.of(e)
+	if skin == null or skin.bone_count() <= 1:
+		return
+	_pending[e.get_instance_id()] = int(rec.get("id", 0))
+	## and the grass goes down now, not five seconds from now
+	var prof: Dictionary = CritterDex.get_profile(String(rec.get("species", "")))
+	_mow(rec["at"] as Vector3, mow_radius(float(prof.get("len", 1.0))))
+
+
+func _capture_pending() -> void:
+	for k in _pending.keys():
+		var id := int(_pending[k])
+		var rec: Dictionary = _by_id.get(id, {})
+		var o := instance_from_id(int(k))
+		if rec.is_empty() or o == null or not is_instance_valid(o):
+			_pending.erase(k)     ## gone before it settled: the fallback pose, then
+			continue
+		var skin := CreatureSkin.of(o as Node)
+		if skin == null or skin.bone_count() <= 1:
+			_pending.erase(k)
+			continue
+		if skin.ragdoll or not skin.frozen:
+			continue              ## still falling
+		## Settled. The record moves to where the body actually lies -- a
+		## ragdoll slides -- and the pose is written relative to that point.
+		var pel := skin.pelvis_global().origin
+		var at0: Vector3 = rec["at"]
+		var at := Vector3(pel.x, at0.y, pel.z)
+		at.y = _ground_y(at)
+		rec["at"] = at
+		rec["pose"] = _body_script().pose_of(skin, at)
+		_pending.erase(k)
+		_restage()
+		if _staged.has(id):
+			skin.visible = false
 
 
 func _prune_known() -> void:
@@ -1001,12 +1049,17 @@ func _restage() -> void:
 		var rec: Dictionary = _by_id.get(id, {})
 		if rec.is_empty() or (rec["at"] as Vector3).distance_to(here) > STRIKE_RADIUS:
 			_strike(id)
+	## A record whose corpse is still settling is not staged: the corpse is
+	## the picture until `_capture_pending` has read its pose.
+	var held: Dictionary = {}
+	for v in _pending.values():
+		held[int(v)] = true
 	for row in near(here, STAGE_RADIUS):
 		if _staged.size() >= MAX_STAGED:
 			break
 		var rec2: Dictionary = (row as Dictionary)["rec"]
 		var id2 := int(rec2["id"])
-		if _staged.has(id2):
+		if _staged.has(id2) or held.has(id2):
 			continue
 		var body := _build_body(rec2)
 		if body == null:
@@ -1088,122 +1141,39 @@ func _ring(at: Vector3, threat: int, who: String) -> void:
 	Telegraph.ring(self, at, RING_M, threat, who, 0)
 
 
+static var _body_gd: GDScript = null
+
+
+static func _body_script() -> GDScript:
+	## Loaded by path rather than named: this file must parse on a machine
+	## whose class cache has not met CarcassBody yet (a fresh clone, a
+	## headless run before the editor has scanned).
+	if _body_gd == null:
+		_body_gd = load("res://scripts/CarcassBody.gd")
+	return _body_gd
+
+
 func _build_body(rec: Dictionary) -> Node3D:
-	## PSX flat-shaded: four boxes that read as a dead thing IS the correct
-	## answer here, and the stage is the whole of what changes.
-	var root := Node3D.new()
-	root.name = "Carcass%d" % int(rec["id"])
+	## The picture of the record: the species' OWN rounded skin, lying in
+	## the pose its death left it in, with the stained ground under it. Until
+	## 2026-09-14 this was four flat boxes and some spars -- "some cube
+	## that's stuck". CarcassBody owns every box, colour and bone of it now;
+	## this bus only says which record and where the ground is.
 	var at: Vector3 = rec["at"]
-	root.position = Vector3(at.x, _ground_y(at), at.z)
-	root.add_to_group("carcass_bodies")
-	_dress(root, rec)
-	return root
+	return _body_script().build(rec, world_seed, _ground_y(at), Callable(self, "_ground_y")) as Node3D
 
 
 func _dress(root: Node3D, rec: Dictionary) -> void:
-	for c in root.get_children():
-		c.queue_free()
-	var st := stage_of(rec)
-	var id := int(rec["id"])
-	var length := 1.0
-	var prof: Dictionary = CritterDex.get_profile(String(rec.get("species", "")))
-	if not prof.is_empty():
-		length = float(prof.get("len", 1.0))
-	var yaw := _unit(_hash(world_seed ^ id, 0, SALT_BODY), 7) * TAU
-	root.rotation.y = yaw
-	## THE GROUND UNDER IT IS WHAT YOU SEE FIRST, and the first live look at
-	## this feature is the reason this slab exists. A flat-shaded box lying
-	## in stubble is a dark lump at ten metres and invisible at twenty; a
-	## patch of trodden, stained earth the size of the animal reads from
-	## across a field -- and it is the honest thing to draw, because this is
-	## where something bled and where five kinds of animal have been standing
-	## on it for three days. It goes down at EVERY stage, including the last:
-	## the bare ground is the longest-lived part of a carcass.
-	var soil := Color(0.17, 0.12, 0.09)
-	if st >= STAGE_PICKED:
-		soil = Color(0.24, 0.20, 0.15)
-	_slab(root, length * GROUND_SCALE, soil)
-	## The hide is the LIVE animal's colour, barely touched. The first draft
-	## darkened it 35 %, which is exactly how the croft's walls vanished into
-	## a summer hillside at 196/0 green.
-	var hide := Color(0.40, 0.32, 0.24)
-	if not prof.is_empty() and prof.get("col") is Color:
-		hide = (prof["col"] as Color).lightened(0.10)
-	var bone := Color(0.88, 0.85, 0.76)
-	var meat := Color(0.44, 0.14, 0.13)
-	var lift := length * 0.05
-	match st:
-		STAGE_WHOLE:
-			_box(root, Vector3(length * 0.86, length * 0.32, length * 0.34),
-					Vector3(0.0, lift + length * 0.16, 0.0), hide)
-			_box(root, Vector3(length * 0.30, length * 0.22, length * 0.22),
-					Vector3(length * 0.55, lift + length * 0.11, 0.0), hide)
-			_legs(root, length, lift, hide, 4)
-		STAGE_OPENED:
-			_box(root, Vector3(length * 0.80, length * 0.26, length * 0.32),
-					Vector3(0.0, lift + length * 0.13, 0.0), hide)
-			_box(root, Vector3(length * 0.34, length * 0.12, length * 0.26),
-					Vector3(-length * 0.10, lift + length * 0.25, 0.0), meat)
-			_legs(root, length, lift, hide, 3)
-		STAGE_PICKED:
-			_box(root, Vector3(length * 0.62, length * 0.16, length * 0.26),
-					Vector3(0.0, lift + length * 0.08, 0.0), meat)
-			_legs(root, length, lift, bone, 1)
-			for i in 5:
-				var u := _unit(_hash(world_seed ^ id, i + 11, SALT_JIT), 2)
-				_box(root, Vector3(length * 0.05, length * 0.20, length * 0.05),
-						Vector3(length * (u - 0.5) * 0.7, lift + length * 0.17,
-								length * (0.11 if i % 2 == 0 else -0.11)), bone)
-		STAGE_BONES, STAGE_GONE:
-			for i in 7:
-				var h := _hash(world_seed ^ id, i + 21, SALT_JIT)
-				_box(root, Vector3(length * 0.07, length * 0.06, length * 0.28),
-						Vector3(length * (_unit(h, 2) - 0.5) * 0.9, lift * 0.5,
-								length * (_unit(h, 4) - 0.5) * 0.6), bone)
-	root.set_meta("stage", st)
-
-
-func _slab(root: Node3D, radius: float, col: Color) -> void:
-	## The trodden ground. Deliberately not a decal and not a shader: a flat
-	## box two centimetres proud of the terrain is what every other prop in
-	## this project is made of, and it takes the same flat shading.
-	_box(root, Vector3(radius * 1.9, 0.04, radius * 1.5), Vector3(0.0, 0.02, 0.0), col)
-
-
-func _legs(root: Node3D, length: float, lift: float, col: Color, n: int) -> void:
-	## Stiff legs are the whole silhouette. A box on its own in long grass
-	## reads as a rock; four thin spars sticking out of it reads, at any
-	## distance, as a dead animal -- and losing them one at a time is how
-	## the stages tell each other apart from far enough away to matter.
-	for i in n:
-		var pivot := Node3D.new()
-		var fore := 1.0 if i < 2 else -1.0
-		var side := 1.0 if i % 2 == 0 else -1.0
-		pivot.position = Vector3(length * 0.30 * fore, lift + length * 0.14,
-				length * 0.13 * side)
-		pivot.rotation.z = side * 0.95
-		root.add_child(pivot)
-		_box(pivot, Vector3(length * 0.07, length * 0.44, length * 0.07),
-				Vector3(0.0, length * 0.20, 0.0), col)
-
-
-func _box(root: Node3D, size: Vector3, at: Vector3, col: Color) -> void:
-	var m := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	m.mesh = bm
-	m.position = at
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = col
-	mat.roughness = 0.95
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
-	m.material_override = mat
-	root.add_child(m)
+	if root != null and is_instance_valid(root) and root.has_method("dress"):
+		root.call("dress", rec)
 
 
 func _drive_bodies() -> void:
 	## A body is a picture of the record and nothing else, so the only thing
-	## driving it is the stage changing under it.
+	## driving it is the stage changing under it -- and, at the bones stage,
+	## the one thing the picture can tell the record: that a bone which was
+	## lying there has been picked up. A bone never expires and nothing else
+	## frees one, so a bone node that is gone IS a bone that was taken.
 	for k in _staged.keys():
 		var id := int(k)
 		var rec: Dictionary = _by_id.get(id, {})
@@ -1214,6 +1184,11 @@ func _drive_bodies() -> void:
 		var want := stage_of(rec)
 		if int(body.get_meta("stage", -1)) != want:
 			_dress(body, rec)
+		if body.has_method("sweep_taken"):
+			for bk in body.call("sweep_taken"):
+				var taken: Dictionary = rec.get("bones", {})
+				taken[String(bk)] = true
+				rec["bones"] = taken
 
 
 func _ground_y(at: Vector3) -> float:
@@ -1247,14 +1222,28 @@ func to_dict() -> Dictionary:
 			"near_player": bool(rec.get("near_player", false)),
 			"place": String(rec.get("place", "")),
 			"told": (rec.get("told", {}) as Dictionary).duplicate(),
+			"pose": _pose_packed(rec.get("pose", null)),
+			"bones": (rec.get("bones", {}) as Dictionary).duplicate(),
 		})
 	return {"v": 1, "hours": _hours, "steps": _steps, "next": _next_id, "rows": rows}
+
+
+static func _pose_packed(v: Variant) -> PackedFloat32Array:
+	## A pose is twelve floats a bone. Anything else -- an old row with none,
+	## a JSON detour that turned it into an Array -- comes back as a pose or
+	## as nothing, never as a type the body has to reason about.
+	if v is PackedFloat32Array:
+		return v
+	if v is Array:
+		return PackedFloat32Array(v as Array)
+	return PackedFloat32Array()
 
 
 func from_dict(d: Dictionary) -> void:
 	records.clear()
 	_by_id.clear()
 	_known.clear()
+	_pending.clear()
 	_asked.clear()
 	for k in _staged.keys():
 		_strike(int(k))
@@ -1282,6 +1271,8 @@ func from_dict(d: Dictionary) -> void:
 			"near_player": bool(r.get("near_player", false)),
 			"place": String(r.get("place", "")),
 			"told": (r.get("told", {}) as Dictionary).duplicate(),
+			"pose": _pose_packed(r.get("pose", null)),
+			"bones": (r.get("bones", {}) as Dictionary).duplicate(),
 		}
 		records.append(rec)
 		_by_id[int(rec["id"])] = rec

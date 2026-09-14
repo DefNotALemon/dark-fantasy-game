@@ -643,6 +643,70 @@ func pelvis_global() -> Transform3D:
 	return bone_global(_pelvis_bone)
 
 
+## ================================================================ poses ====
+## A carcass wears the pose its death left it in (CarcassBody). These are the
+## doors it uses: read a settled skeleton, write one back, and hold it.
+
+func bone_of(n: Node) -> int:
+	## The bone a pivot drives, or 0 for a node that carries no flesh.
+	return int(_bone_of.get(n, 0))
+
+
+func bone_aabb(id: int) -> AABB:
+	## Bone-space box around everything the bone wears -- what the ragdoll
+	## shape is cut from, and what a bone item is sized from.
+	return _bone_geo.get(id, AABB())
+
+
+func rest_global(id: int) -> Transform3D:
+	return _rest_global[id] if id >= 0 and id < _rest_global.size() else Transform3D.IDENTITY
+
+
+func parent_of(id: int) -> int:
+	return int(_parent[id]) if id >= 0 and id < _parent.size() else -1
+
+
+func bone_pose(id: int) -> Transform3D:
+	## Owner-space pose of a bone right now (skeleton space == owner space:
+	## the skin and its skeleton both sit at identity under the owner).
+	## Works OFF the tree, which `bone_global` cannot.
+	if skeleton == null or id < 0 or id >= skeleton.get_bone_count():
+		return Transform3D.IDENTITY
+	return skeleton.get_bone_global_pose(id)
+
+
+func pose_globals() -> Array:
+	## Every bone's owner-space pose, index = bone id, [0] identity. A frozen
+	## corpse answers with the pose the ragdoll left it in.
+	var out: Array = []
+	if skeleton == null:
+		return out
+	for i in skeleton.get_bone_count():
+		out.append(Transform3D.IDENTITY if i == 0 else skeleton.get_bone_global_pose(i))
+	return out
+
+
+func pose_apply(globals: Array) -> void:
+	## Write a pose straight onto the bones and HOLD it: no pivots, no
+	## physics, no clocks. After this call nothing in here moves a bone
+	## again -- `frozen` short-circuits the sync, and the corpse clocks never
+	## start because `_linger_t` stays at zero. The segment mirror keeps
+	## running, so colour and `visible` on the proxies still land.
+	if skeleton == null or globals.size() != bone_nodes.size():
+		return
+	if ragdoll and _sim != null:
+		_sim.physical_bones_stop_simulation()
+	ragdoll = false
+	_blend_t = 0.0
+	_fade_t = -1.0
+	_linger_t = 0.0
+	_g = globals.duplicate()
+	_g[0] = Transform3D.IDENTITY
+	_apply_globals()
+	frozen = true
+	permanent = true
+
+
 ## ============================================================== ragdoll ====
 
 func _build_physics() -> void:

@@ -1331,7 +1331,10 @@ func save_state() -> Dictionary:
 	var dropped: Array = []
 	for d in get_tree().get_nodes_in_group("dropped_items"):
 		var di := d as DroppedItem
-		if di != null:
+		## [carcasses] a bone still lying on its carcass is the CARCASS record's
+		## to remember (CarcassBody lays it back down from the ledger); saving
+		## it here too would put a second skull on the ground after a reload.
+		if di != null and not di.has_meta("carcass_bone"):
 			dropped.append({"item": di.item.duplicate(true), "pos": di.global_position})
 	var beds: Array = []
 	for b in get_tree().get_nodes_in_group("beds"):

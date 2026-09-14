@@ -216,6 +216,8 @@ func _build_mesh() -> void:
 				_build_potion()
 			elif nm == "Old Rucksack":
 				_build_rucksack()
+			elif item.has("bone"):
+				_build_bone(String(item["bone"]))
 			else:
 				## Plain loot (tusks, bones, pickaxes...): a humble bundle.
 				_add_box(Vector3(0.16, 0.14, 0.16), col, Vector3(0, 0.05, 0))
@@ -311,6 +313,42 @@ func _build_rucksack() -> void:
 	_add_box(Vector3(0.32, 0.11, 0.15), Color(0.38, 0.33, 0.24), Vector3(0, 0.36, 0), Vector3(-14, 0, 4))
 	_add_box(Vector3(0.20, 0.14, 0.05), leath.darkened(0.12), Vector3(0, 0.10, 0.09), Vector3(-8, 0, 4))
 	_add_box(Vector3(0.05, 0.03, 0.26), leath.darkened(0.2), Vector3(0.16, 0.02, 0.10), Vector3(0, 30, 0))
+
+
+func _build_bone(kind: String) -> void:
+	## What is left of an animal when the woods are done with it. The carcass
+	## bus lays these where each bone settled (CarcassBody._make_bone) and
+	## they come back out of the pack the size they went in -- a moose femur
+	## is not a hare's. Everything lies along +X, so the keep_yaw settle lays
+	## it flat along its own length like a log. Never expires: "keep" is set.
+	var L := float(item.get("bone_len", 0.30))
+	var r := float(item.get("bone_r", 0.03))
+	var w := float(item.get("bone_w", r * 4.0))
+	var bone := Color(0.88, 0.85, 0.76)
+	var old := Color(0.78, 0.74, 0.63)
+	var dark := Color(0.10, 0.09, 0.08)
+	match kind:
+		"skull":
+			## braincase, muzzle, two sockets and a row of teeth
+			_add_box(Vector3(L * 0.52, w * 0.72, w * 0.82), bone, Vector3(-L * 0.20, w * 0.36, 0))
+			_add_box(Vector3(L * 0.50, w * 0.42, w * 0.50), bone, Vector3(L * 0.24, w * 0.22, 0))
+			_add_box(Vector3(L * 0.14, w * 0.20, w * 0.20), dark, Vector3(L * 0.03, w * 0.48, w * 0.30))
+			_add_box(Vector3(L * 0.14, w * 0.20, w * 0.20), dark, Vector3(L * 0.03, w * 0.48, -w * 0.30))
+			_add_box(Vector3(L * 0.44, w * 0.07, w * 0.46), old, Vector3(L * 0.26, w * 0.03, 0))
+		"ribs":
+			## a spine along +X and the ribs hanging off it either side
+			_add_box(Vector3(L, r * 1.6, r * 1.6), bone, Vector3(0, r * 0.8, 0))
+			var n := clampi(int(round(L / 0.16)), 3, 9)
+			for i in n:
+				var x := (float(i) + 0.5) / float(n) * L - L * 0.5
+				for s in [-1.0, 1.0]:
+					_add_box(Vector3(r * 1.2, r * 1.2, w * 0.46), old,
+						Vector3(x, r * 0.6, s * w * 0.24), Vector3(s * 26.0, 0, 0))
+		_:
+			## a long bone: the shaft and a knob at each end
+			_add_box(Vector3(L * 0.82, r * 1.4, r * 1.4), bone, Vector3(0, r * 0.7, 0))
+			_add_box(Vector3(L * 0.16, r * 2.2, r * 2.4), old, Vector3(L * 0.42, r * 1.0, 0), Vector3(0, 0, 12))
+			_add_box(Vector3(L * 0.16, r * 2.2, r * 2.4), old, Vector3(-L * 0.42, r * 1.0, 0), Vector3(0, 0, -12))
 
 
 func _build_billet() -> void:

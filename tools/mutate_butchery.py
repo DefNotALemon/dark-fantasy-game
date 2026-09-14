@@ -78,7 +78,7 @@ MUTATIONS = [
     # strip was dead code. The sweep found it; the code is deleted.
     # ---- Butchery.gd: the prompt ---------------------------------------
     ("prompt-no-bones-branch", B,
-     '\tif Carcasses.stage_of(rec) >= Carcasses.STAGE_BONES:\n\t\treturn "Bones. There is nothing on it to take"\n', "\n"),
+     '\tif Carcasses.stage_of(rec) >= Carcasses.STAGE_BONES:\n\t\treturn "Bones. Nothing left to cut -- take them if you want them"\n', "\n"),
     ("prompt-no-nomeat-branch", B,
      '\tif not butcherable(harv):\n\t\treturn "There is nothing on a %s a knife is for" % nm.to_lower()\n', "\n"),
     ("prompt-no-edge-branch", B,
