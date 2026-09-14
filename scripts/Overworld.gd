@@ -247,6 +247,11 @@ func _ready() -> void:
 ## the material exists, and it is the same ShaderMaterial every tile shares,
 ## so binding the textures once textures the whole world at once.
 var ground_paint: GroundPaint = null
+## GRASS PAINT (2026-09-14). Where the grass grows, on the same grid — the
+## god editor's Grass brush (scripts/GrassPaint.gd). Built beside the ground
+## textures, and even without them: the atlas is 8 MB of art that may not be
+## on disk, the grass map is a byte a cell and always is.
+var grass_paint: GrassPaint = null
 
 
 func _build_ground_paint() -> void:
@@ -259,6 +264,10 @@ func _build_ground_paint() -> void:
 	ground_paint.name = "GroundPaint"
 	add_child(ground_paint)
 	ground_paint.setup(mat, Vector2(x0, z0), Vector2i(nx, nz), step)
+	grass_paint = GrassPaint.new()
+	grass_paint.name = "GrassPaint"
+	add_child(grass_paint)
+	grass_paint.setup(mat, Vector2(x0, z0), Vector2i(nx, nz), step)
 
 
 ## The impostor textures exist. Every ring scattered before them is standing

@@ -631,6 +631,216 @@ func _run() -> void:
 		_note("thinned band draws %.0f%% of what it holds — %s tufts hidden for free"
 			% [shown * 100.0, _commas(thin_held - thin_shown)])
 
+	print("\n-- 16. v3.1: the horizon, the towns and the paving --")
+	## THE HORIZON. The GPU field's band table is arithmetic nobody can see
+	## until they are standing on a mountain, so check its shape here: the
+	## radii climb, every parallel table is the same length, and the hollow
+	## grid a band addresses is sized by the rule the process shader's slot
+	## addressing assumes (both sides EVEN, count = S^2 - Si^2).
+	var br: Array = GrassGPU.BAND_R
+	var climbing := true
+	for i in range(br.size() - 1):
+		if float(br[i + 1]) <= float(br[i]):
+			climbing = false
+	_ok(climbing, "the band radii climb, 0 -> %.0f m" % float(br[br.size() - 1]))
+	_ok(br.size() - 1 == GrassGPU.BANDS
+		and GrassGPU.BAND_MESH.size() == GrassGPU.BANDS
+		and GrassGPU.BAND_KEEP.size() == GrassGPU.BANDS
+		and GrassGPU.BAND_SCALE.size() == GrassGPU.BANDS
+		and GrassGPU.BAND_FADE.size() == GrassGPU.BANDS,
+		"%d bands, and every parallel table agrees" % GrassGPU.BANDS)
+	_ok(float(br[GrassGPU.RING_BAND + 1]) == float(br[GrassGPU.FAR_BAND]),
+		"the first horizon band starts where the draw ring ends (%.0f m)"
+			% float(br[GrassGPU.FAR_BAND]))
+	var horizon := float(br[GrassGPU.BANDS])
+	_ok(horizon >= 300.0, "the grass reaches %.0f m, not %.0f" % [horizon, GrassSystem.CULL_END])
+	var far_thin := float(GrassGPU.BAND_KEEP[GrassGPU.BANDS - 1]) < 0.05
+	var far_big := float(GrassGPU.BAND_SCALE[GrassGPU.BANDS - 1]) > 2.0
+	_ok(far_thin and far_big, "the last band is thin (%.3f) and its tufts are big (x%.1f)"
+		% [float(GrassGPU.BAND_KEEP[GrassGPU.BANDS - 1]),
+			float(GrassGPU.BAND_SCALE[GrassGPU.BANDS - 1])])
+	_ok(float(GrassGPU.BAND_FADE[GrassGPU.FAR_BAND]) < 0.75
+		and float(GrassGPU.BAND_FADE[0]) > 0.75,
+		"a horizon blade carries the FAR fade flag, a ring blade the near one")
+	var gpu := GrassGPU.new()
+	var pm := ShaderMaterial.new()
+	var cnt := gpu._size_grid(pm, 1.0, 40.0, 100.0)
+	var gs_S := int(pm.get_shader_parameter("grid_S"))
+	var gs_Si := int(pm.get_shader_parameter("grid_Si"))
+	_ok(gs_S % 2 == 0 and gs_Si % 2 == 0, "both sides of the hollow grid are even (%d, %d)"
+		% [gs_S, gs_Si])
+	_ok(cnt == gs_S * gs_S - gs_Si * gs_Si and gs_Si < gs_S,
+		"the band allocates the ring and not the hole it will never draw (%s cells)"
+			% _commas(cnt))
+	_ok(int(pm.get_shader_parameter("grid_t")) * 2 == gs_S - gs_Si,
+		"the strip width is half the difference — the slot addressing assumes it")
+	_note("horizon %.0f m; a 90-460 m field is ~%s cells against the ring's own"
+		% [horizon, _commas(cnt)])
+	gpu.free()
+
+	## The material carries BOTH fades, and the blade picks one off COLOR.a.
+	var src: String = GrassSystem.GRASS_SHADER
+	_ok(src.contains("uniform float fade_start_far") and src.contains("uniform float fade_end_far"),
+		"the grass shader declares the horizon fade")
+	_ok(src.contains("(COLOR.a < 0.75) ? fade_start_far : fade_start"),
+		"...and a blade picks its fade off the flag the placer set")
+	var gsrc: String = GrassGPU.PLACE_SHADER
+	_ok(gsrc.contains("uniform float band_scale") and gsrc.contains("* band_scale"),
+		"the process shader grows the far tufts")
+	_ok(gsrc.contains("uniform vec4 skip_rect[8]") and gsrc.contains("skip_n"),
+		"...and steps out of a town's rect the way it steps out of the valley")
+	_ok(gsrc.contains("col.a = fade_flag"),
+		"even a dead particle carries the fade flag (it is read before it is drawn)")
+
+	## THE TOWNS. A rect handed over by a staged city is the CPU's ground again.
+	var town_c := Vector3(240.0, 0.0, -180.0)
+	var town_key := gs._chunk_key_at(town_c.x, town_c.z)
+	_ok(not gs._town_chunk(town_key), "no towns yet: the chunk is the world's")
+	gs.set_towns([Rect2(town_c.x - 60.0, town_c.z - 60.0, 120.0, 120.0)])
+	_ok(gs._town_chunk(town_key), "the chunk under a staged city is the town's")
+	_ok(not gs._town_chunk(gs._chunk_key_at(town_c.x + 1200.0, town_c.z)),
+		"a chunk a kilometre away is not")
+	gs.set_towns([])
+	_ok(not gs._town_chunk(town_key), "...and striking the city gives it back")
+
+	## THE PAVING. A street is laid over ground the grass has already grown on,
+	## 0.6 m thick with its top AT the ground — so a tuft left standing under
+	## one comes up through the cobbles. Pave it and nothing is placed there.
+	var pave_key := Vector2i(2, -3)
+	var pc := gs._chunk_center(pave_key)
+	var before: Dictionary = gs._place_chunk(pave_key)
+	var half := 3.3
+	gs.pave([{"a": Vector2(pc.x - 40.0, pc.z), "b": Vector2(pc.x + 40.0, pc.z), "w": half * 2.0}])
+	var after: Dictionary = gs._place_chunk(pave_key)
+	var p_before := 0
+	var p_after := 0
+	var on_street := 0
+	for k in range(GrassSystem.KINDS.size()):
+		p_before += ((before["xf"] as Array)[k] as Array).size()
+		for t: Transform3D in ((after["xf"] as Array)[k] as Array):
+			p_after += 1
+			if absf(t.origin.z - pc.z) <= half:
+				on_street += 1
+	_ok(on_street == 0, "not one tuft stands in the street (%d checked)" % p_after)
+	_ok(p_after < p_before, "the street took its strip out of the chunk (%d -> %d tufts)"
+		% [p_before, p_after])
+	## ...and ONLY its strip. A 6.6 m street straight through a 12.8 m chunk is
+	## 52% of its area, so a little over half the tufts is exactly right and
+	## anything near 100% would mean the whole chunk went bald.
+	var lost := 1.0 - float(p_after) / maxf(float(p_before), 1.0)
+	_ok(lost > 0.40 and lost < 0.62,
+		"...and only its strip: %.0f%% gone against %.0f%% of the chunk covered"
+			% [lost * 100.0, half * 2.0 / GrassSystem.CHUNK_M * 100.0])
+	_ok(not gs._paved.has(Vector2i(40, 40)),
+		"a chunk the street never reaches holds no street record")
+	_note("paving a 6.6 m street through a 12.8 m chunk cost it %d of %d tufts"
+		% [p_before - p_after, p_before])
+
+	print("\n-- 17. GRASS PAINT: where it grows is a map, and the map is painted --")
+	## The map (scripts/GrassPaint.gd) on a grid over the valley: 60 x 60 cells
+	## of 4 m, cell (0,0) centred at (-118, -118) -- Overworld's convention.
+	var paint := GrassPaint.new()
+	paint._dir = "user://grass_test/"
+	DirAccess.make_dir_recursive_absolute("user://grass_test")
+	root.add_child(paint)
+	paint.setup(null, Vector2(-118.0, -118.0), Vector2i(60, 60), 4.0)
+	_ok(gs._paint == paint, "a map that comes up after the grass finds it through the group")
+	var pk := Vector2i(1, 1)                   ## 12.8 .. 25.6 m, well inside the valley
+	var pc2 := gs._chunk_center(pk)
+	var n_auto := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_auto += ((gs._place_chunk(pk)["xf"] as Array)[k] as Array).size()
+	_ok(n_auto > 200, "unpainted: the world's rule grows a meadow (%d tufts)" % n_auto)
+	## BARE
+	paint.paint_disc(pc2, 14.0, GrassPaint.BARE)
+	var n_bare := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_bare += ((gs._place_chunk(pk)["xf"] as Array)[k] as Array).size()
+	_ok(n_bare == 0, "painted bare: not one tuft (%d)" % n_bare)
+	## AUTO again -- the same meadow, tuft for tuft (deterministic placement)
+	paint.paint_disc(pc2, 14.0, GrassPaint.AUTO)
+	var n_back := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_back += ((gs._place_chunk(pk)["xf"] as Array)[k] as Array).size()
+	_ok(n_back == n_auto, "erased back to auto: the same meadow returns (%d)" % n_back)
+	## HALF density
+	paint.paint_disc(pc2, 14.0, GrassPaint.value_of_density(0.5))
+	var n_half := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_half += ((gs._place_chunk(pk)["xf"] as Array)[k] as Array).size()
+	var half_r := float(n_half) / float(maxi(n_auto, 1))
+	_ok(half_r > 0.30 and half_r < 0.70, "painted at 50%%: about half the tufts (%.0f%%)" % (half_r * 100.0))
+	## a dab that covers only PART of the chunk takes only its part
+	paint.paint_disc(pc2, 14.0, GrassPaint.AUTO)
+	paint.paint_disc(Vector3(pc2.x - GrassSystem.CHUNK_M * 0.5, 0.0, pc2.z), 4.0, GrassPaint.BARE)
+	var placed17: Dictionary = gs._place_chunk(pk)
+	var in_dab := 0
+	var n_part := 0
+	for k in range(GrassSystem.KINDS.size()):
+		for t: Transform3D in ((placed17["xf"] as Array)[k] as Array):
+			n_part += 1
+			if Vector2(t.origin.x - (pc2.x - GrassSystem.CHUNK_M * 0.5), t.origin.z - pc2.z).length() < 1.0:
+				in_dab += 1
+	_ok(in_dab == 0 and n_part > n_auto / 2,
+		"a 4 m dab on the chunk's edge bares the dab and nothing else (%d -> %d, %d in the dab)"
+			% [n_auto, n_part, in_dab])
+	paint.paint_disc(Vector3(pc2.x - GrassSystem.CHUNK_M * 0.5, 0.0, pc2.z), 4.0, GrassPaint.AUTO)
+
+	## THE STROKE REGROWS THE STANDING RING, off-thread, through the streamer.
+	gs.warm(Vector3.ZERO)
+	_ok(gs._chunks.has(pk), "the chunk is standing in the ring")
+	var mmi_before := 0
+	for kind: String in gs._chunks[pk]:
+		var mm17 := (gs._chunks[pk][kind] as MultiMeshInstance3D).multimesh
+		mmi_before += 0 if mm17 == null else mm17.instance_count
+	paint.paint_disc(pc2, 14.0, GrassPaint.BARE)
+	_ok(gs.regrow_pending() == 0, "a stroke alone marks nothing (the texture flush is the tick)")
+	paint.flush_texture()
+	_ok(gs.regrow_pending() > 0, "the flush's `changed` marks %d standing chunks to regrow"
+		% gs.regrow_pending())
+	## pump the streamer by hand: one batch out, wait, one batch in
+	var pumps := 0
+	while (gs.regrow_pending() > 0 or gs._job_gid >= 0 or not gs._apply_q.is_empty()) and pumps < 400:
+		gs._stream_step()
+		gs._drain_applies()
+		if gs._job_gid >= 0:
+			OS.delay_msec(5)
+		pumps += 1
+	_ok(pumps < 400, "the regrow drains (%d pumps)" % pumps)
+	_ok(not gs._chunks.has(pk), "...and the bared chunk is GONE from the ring, not hidden")
+	_ok(gs._empty.has(pk), "the streamer remembers it found nothing there")
+	gs._focus = Vector3.ZERO
+	gs._restream()
+	_ok(not gs._queue.has(pk), "...so it does not ask for it again on the next tick")
+	## paint it back: the empty memo lifts and the meadow returns
+	paint.paint_disc(pc2, 14.0, GrassPaint.AUTO)
+	paint.flush_texture()
+	_ok(not gs._empty.has(pk), "a stroke over an empty chunk lifts the memo")
+	gs._restream()
+	_ok(gs._queue.has(pk) or gs._pending.has(pk), "...and the streamer asks for it again")
+	pumps = 0
+	while (not gs._queue.is_empty() or gs.regrow_pending() > 0 or gs._job_gid >= 0
+			or not gs._apply_q.is_empty()) and pumps < 400:
+		gs._stream_step()
+		gs._drain_applies()
+		if gs._job_gid >= 0:
+			OS.delay_msec(5)
+		pumps += 1
+	var mmi_after := 0
+	if gs._chunks.has(pk):
+		for kind: String in gs._chunks[pk]:
+			var mm18 := (gs._chunks[pk][kind] as MultiMeshInstance3D).multimesh
+			mmi_after += 0 if mm18 == null else mm18.instance_count
+	_ok(mmi_after == mmi_before, "the meadow came back exactly (%d -> %d instances)" % [mmi_before, mmi_after])
+	_note("paint: %d tufts auto, 0 bare, %d at half; regrow drained in %d pumps"
+		% [n_auto, n_half, pumps])
+	_ok(gs._job_gid < 0 and gs._queue.is_empty() and gs._pending.is_empty()
+		and gs._regrow.is_empty() and gs._apply_q.is_empty(),
+		"the streamer is at rest afterwards (job %d, queue %d, pending %d, regrow %d, applies %d)"
+			% [gs._job_gid, gs._queue.size(), gs._pending.size(), gs._regrow.size(), gs._apply_q.size()])
+	gs.set_paint(null)
+	paint.queue_free()
+
 	print("\n=====================================================")
 	print("  %d passed, %d failed" % [_pass, _fail])
 	print("=====================================================")

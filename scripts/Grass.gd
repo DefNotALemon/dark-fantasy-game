@@ -40,14 +40,14 @@ const TUFTS_PER_CHUNK := 3400    ## placement attempts per chunk. History: 650 a
 const FULL_COVER := true         ## v2.6: every dry cell is full meadow — no
 								 ## treeline, sand, canopy, tideline or slope
 								 ## thinning. Flip false for the graded world.
-const GPU_FESCUE := false        ## v3: RED FESCUE outside the valley is placed by
-								 ## a particle process shader (scripts/GrassGPU.gd) and
-								 ## never touches this file's chunks. `std` was 284,653
-								 ## of 429,116 tufts — 66% of the meadow and effectively
-								 ## all of the _fill_mm cost. Flip false for the pure
-								 ## v2.7 MultiMesh meadow; everything else is unchanged
-								 ## either way, and the valley is ALWAYS CPU-placed
-								 ## because you can dig it.
+const GPU_FESCUE := false        ## v3 would hand RED FESCUE outside the valley to a
+								 ## particle process shader (scripts/GrassGPU.gd) — 66%
+								 ## of the meadow off the CPU. OFF, and not because of
+								 ## cost: measured live 2026-09-13, that file sets its
+								 ## emitters up cleanly and DRAWS NOT ONE BLADE (see the
+								 ## note at the top of it). Turning this on therefore
+								 ## does not move the fescue, it DELETES it. The valley
+								 ## is CPU-placed either way, because you can dig it.
 const SHORT_KEEP := 0.94         ## short grass keeps nearly all of its draw
 
 ## Distance bands. LOD keeps the near meadow expensive and the far one nearly
@@ -73,6 +73,13 @@ const DRAW_MIN := 30.0           ## Esc → Draw Distance: Low
 const DRAW_MAX := 180.0          ## ...to Ultra. Past this the streamer thrashes.
 const FADE_START_F := 0.58       ## blades start sinking + taking the ground's colour
 const FADE_END_F := 0.78         ## by here they ARE the ground
+## v3.1. The CPU chunks end at the draw ring and fade into it; the GPU horizon
+## bands run hundreds of metres further and must NOT, or the world past 70 m
+## goes back to being the bare ground this whole change exists to cover. So
+## there are two fades in the one shared material and the blade picks which,
+## off the flag the placer puts in COLOR.a (1.0 near, 0.5 horizon).
+const FADE_FAR_START_F := 0.72   ## x GrassGPU.horizon_dist()
+const FADE_FAR_END_F := 0.97
 const DETAIL_CULL_F := 0.33      ## flowers/clover/moss are small — cull them early
 const FADE_START := CULL_END * FADE_START_F
 const FADE_END := CULL_END * FADE_END_F
@@ -214,9 +221,30 @@ var _apply_q: Array = []         ## [key, placed] waiting for a main-thread fill
 
 ## --- v3: the GPU fescue field ------------------------------------------------
 var _gpu: GrassGPU = null        ## null when GPU_FESCUE is off or there is no bake
+## THE TOWNS. A city's ground is not a meadow: it is paved street, trodden
+## yard and dirt market square, and only the CPU placer knows where those are
+## (`_paved`, `_cut_cells`). So a staged city hands its rect over, the GPU
+## field steps out of it exactly as it steps out of the valley, and the chunks
+## inside place their own fescue again.
+##
+## Both of these are read from WORKER THREADS. They are only ever REPLACED
+## wholesale on the main thread (never appended to in place) so a worker sees
+## either the old table or the new one, never a half-built one.
+var _towns: Array = []           ## Rect2, world XZ
+var _paved: Dictionary = {}      ## chunk key -> Array of [ax, az, bx, bz, half_w]
 var _gpu_on := false             ## read from WORKER THREADS in _place_chunk, so it
 								 ## is a plain bool set once on the main thread and never
 								 ## touched again — do not make this a property lookup
+## GRASS PAINT (2026-09-14, scripts/GrassPaint.gd). WHERE the grass grows, as
+## a map Lemon paints in god mode: 0 = the rule below decides, 1 = bare,
+## 2..255 = grass at that density, whatever the rule says. Read per tuft from
+## the worker threads (an Image that is only written in place); a stroke lands
+## its chunks in `_regrow`, which the streamer re-places off-thread when its
+## queue is empty, so a brushful of meadow never hitches the frame.
+var _paint: GrassPaint = null
+var _regrow: Dictionary = {}     ## chunk key -> true: standing, and the paint under it changed
+var _empty: Dictionary = {}      ## chunk key -> true: placed and found NOTHING (sea, a bare
+								 ## paint) — _restream stops asking until a regrow says otherwise
 
 
 ## --- GRASS LAB (F3) -----------------------------------------------------------
@@ -454,6 +482,17 @@ func _ready() -> void:
 	add_to_group("grass_system")  ## the sword asks for cuts through here
 
 
+func _exit_tree() -> void:
+	## A placement batch still on the pool when this node goes reads `field`,
+	## the noises and `_bkeys` off a freed object — a segfault on the way out
+	## of the game. Wait for it; it is at most one batch.
+	if _job_gid >= 0:
+		WorkerThreadPool.wait_for_group_task_completion(_job_gid)
+		_job_gid = -1
+	if _paint != null and _paint.changed.is_connected(regrow_rect):
+		_paint.changed.disconnect(regrow_rect)
+
+
 func setup(f: CaveField, seed_v: int) -> void:
 	field = f
 	base_seed = seed_v
@@ -490,6 +529,8 @@ func setup(f: CaveField, seed_v: int) -> void:
 	_ow = Overworld.inst
 	if _ow != null:
 		_sea = _ow.sea_level
+	if GrassPaint.inst != null:
+		set_paint(GrassPaint.inst)
 	## v3. The GPU field owns the fescue everywhere the baked heightfield is the
 	## ground; this system keeps the valley (voxel, diggable) and the other eight
 	## kinds. It has to exist BEFORE warm(), because _place_chunk asks it whether
@@ -582,6 +623,9 @@ func set_draw_distance(m: float) -> void:
 	if _mat != null:
 		_mat.set_shader_parameter("fade_start", draw_dist * FADE_START_F)
 		_mat.set_shader_parameter("fade_end", draw_dist * FADE_END_F)
+		var horizon := _gpu.horizon_dist() if _gpu != null else draw_dist
+		_mat.set_shader_parameter("fade_start_far", horizon * FADE_FAR_START_F)
+		_mat.set_shader_parameter("fade_end_far", horizon * FADE_FAR_END_F)
 	for key: Vector2i in _chunks:
 		for kind: String in _chunks[key]:
 			(_chunks[key][kind] as MultiMeshInstance3D).visibility_range_end = \
@@ -618,7 +662,7 @@ func _restream() -> void:
 			## _pending is IN FLIGHT ONLY, never "queued": the queue is rebuilt
 			## from scratch here, so a key you walked away from before it was
 			## placed simply drops out, and walking back re-queues it.
-			if not _chunks.has(key) and not _pending.has(key):
+			if not _chunks.has(key) and not _pending.has(key) and not _empty.has(key):
 				_queue.append(key)
 	_queue.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return _chunk_dist(a) < _chunk_dist(b))
@@ -629,6 +673,11 @@ func _restream() -> void:
 			(_chunks[key][kind] as Node).queue_free()
 		_chunks.erase(key)
 		_chunk_lod.erase(key)
+	## The empty memo is only for the ring you are in; let the rest go so a
+	## long walk along the coast does not grow it without bound.
+	for key: Vector2i in _empty.keys():
+		if _chunk_dist(key) > keep:
+			_empty.erase(key)
 
 
 func _stream_step() -> void:
@@ -648,6 +697,19 @@ func _stream_step() -> void:
 		_bkeys.clear()
 		_bresults.clear()
 		return
+	if _queue.is_empty() and not _regrow.is_empty():
+		## The brush's chunks: standing, but the paint under them changed. New
+		## ground first (a bald patch you can walk into beats a stale one you
+		## are looking at), then these, a batch at a time off-thread.
+		for key: Vector2i in _regrow.keys():
+			if _pending.has(key):
+				continue      ## in flight, and it may have read the OLD paint:
+							  ## stays marked, goes again once that batch lands
+			if _chunk_dist(key) <= draw_dist:
+				_queue.append(key)
+			_regrow.erase(key)
+			if _queue.size() >= STREAM_BATCH:
+				break
 	if _queue.is_empty():
 		return
 	_bkeys.clear()
@@ -904,6 +966,135 @@ func cut_at(center: Vector3, radius: float) -> bool:
 	return any_new
 
 
+## A city has been staged (Cities.stage): nothing in this rect is meadow any
+## more, the GPU hands it back to the chunks, and the chunks standing in it are
+## re-placed so the change shows without walking away and back.
+func set_towns(rects: Array) -> void:
+	_towns = rects.duplicate()
+	if _gpu != null:
+		_gpu.set_town_rects(_towns)
+	_replace_standing(func(key: Vector2i) -> bool: return _town_chunk(key))
+
+
+## The streets of that city, as centre-line segments. A tuft inside one is not
+## placed at all — the street boxes sit 0.02 m over the ground, so grass left
+## under one grows straight through the cobbles.
+##
+## `segs` is an Array of {a: Vector2, b: Vector2, w: float}. Cumulative: a
+## second city adds to the record rather than replacing it.
+func pave(segs: Array) -> void:
+	var next := _paved.duplicate(true)
+	var touched := {}
+	for sv in segs:
+		var seg := sv as Dictionary
+		var a := seg["a"] as Vector2
+		var b := seg["b"] as Vector2
+		var half := float(seg.get("w", 6.0)) * 0.5
+		var row := [a.x, a.y, b.x, b.y, half]
+		## Every chunk the segment's fattened box touches, so a tuft is only
+		## ever tested against streets that could plausibly reach it.
+		var lo := _chunk_key_at(minf(a.x, b.x) - half, minf(a.y, b.y) - half)
+		var hi := _chunk_key_at(maxf(a.x, b.x) + half, maxf(a.y, b.y) + half)
+		for cx in range(lo.x, hi.x + 1):
+			for cz in range(lo.y, hi.y + 1):
+				var key := Vector2i(cx, cz)
+				if not next.has(key):
+					next[key] = []
+				(next[key] as Array).append(row)
+				touched[key] = true
+	_paved = next
+	_replace_standing(func(key: Vector2i) -> bool: return touched.has(key))
+
+
+## GRASS PAINT. Hand over the map (Overworld builds it after the terrain, so
+## it usually arrives AFTER setup has warmed the ring) and re-place whatever
+## is standing on painted ground. Every later stroke comes in through
+## regrow_rect via the map's `changed` signal.
+func set_paint(p: GrassPaint) -> void:
+	if p == _paint:
+		return
+	if _paint != null and _paint.changed.is_connected(regrow_rect):
+		_paint.changed.disconnect(regrow_rect)
+	_paint = p
+	if _paint == null:
+		return
+	if not _paint.changed.is_connected(regrow_rect):
+		_paint.changed.connect(regrow_rect)
+	if _paint.painted_cells > 0:
+		regrow_rect(_paint.world_rect())
+
+
+## The paint under this world XZ rect changed: every chunk it touches that is
+## standing (or was found empty) goes back through the placer — off-thread,
+## through the streamer, a batch a frame. Nothing is freed here, so the old
+## meadow stays up until the new one lands.
+func regrow_rect(r: Rect2) -> void:
+	var lo := _chunk_key_at(r.position.x, r.position.y)
+	var hi := _chunk_key_at(r.end.x, r.end.y)
+	var span := (hi.x - lo.x + 1) * (hi.y - lo.y + 1)
+	if span <= _chunks.size() + _empty.size() + 8:
+		## A brush: walk the rect.
+		for cx in range(lo.x, hi.x + 1):
+			for cz in range(lo.y, hi.y + 1):
+				var key := Vector2i(cx, cz)
+				if _empty.has(key):
+					_empty.erase(key)      ## _restream asks again next tick
+				if _chunks.has(key) or _pending.has(key):
+					_regrow[key] = true
+		return
+	## The whole map (fill / clear / a map handed over at boot): 474,000 keys
+	## is not a rect to walk — ask the standing chunks instead.
+	for key: Vector2i in _empty.keys():
+		if key.x >= lo.x and key.x <= hi.x and key.y >= lo.y and key.y <= hi.y:
+			_empty.erase(key)
+	for key: Vector2i in _chunks.keys():
+		if key.x >= lo.x and key.x <= hi.x and key.y >= lo.y and key.y <= hi.y:
+			_regrow[key] = true
+	for key: Vector2i in _pending.keys():
+		if key.x >= lo.x and key.x <= hi.x and key.y >= lo.y and key.y <= hi.y:
+			_regrow[key] = true
+
+
+func regrow_pending() -> int:
+	return _regrow.size()
+
+
+func _replace_standing(want: Callable) -> void:
+	for key: Vector2i in _chunks.keys():
+		if want.call(key):
+			_apply_chunk(key, _place_chunk(key))
+
+
+func _town_chunk(key: Vector2i) -> bool:
+	## Chunk-level, not tuft-level: a chunk is either a town's or the world's.
+	## The rect is grown by a chunk so the boundary chunk belongs to the town
+	## and the GPU's rect test (which IS per tuft) never lands inside a chunk
+	## the CPU has already skipped fescue in.
+	if _towns.is_empty():
+		return false
+	var c := _chunk_center(key)
+	for t in _towns:
+		if (t as Rect2).grow(CHUNK_M).has_point(Vector2(c.x, c.z)):
+			return true
+	return false
+
+
+static func _on_segment(rows: Array, wx: float, wz: float) -> bool:
+	for r in rows:
+		var row := r as Array
+		var ax := float(row[0])
+		var az := float(row[1])
+		var dx := float(row[2]) - ax
+		var dz := float(row[3]) - az
+		var L2 := dx * dx + dz * dz
+		var t := 0.0 if L2 < 0.000001 else clampf(((wx - ax) * dx + (wz - az) * dz) / L2, 0.0, 1.0)
+		var px := ax + dx * t - wx
+		var pz := az + dz * t - wz
+		if px * px + pz * pz <= float(row[4]) * float(row[4]):
+			return true
+	return false
+
+
 func rebuild_area(lo: Vector3i, hi: Vector3i) -> void:
 	## The ground changed (dig / new mouth) — reseed the grass chunks over it.
 	if hi.y < CaveField.SY - 10:
@@ -1007,6 +1198,11 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 	## thread-safe because nothing shares it. Only the VALLEY pays this; the
 	## heightfield outside is a bilinear read off a byte array and needs no memo.
 	var floors := {}
+	## Both looked up ONCE per chunk, not once per tuft: whether this chunk is
+	## a town's (the GPU has stepped out of it, so we place fescue again) and
+	## which street segments run through it.
+	var in_town := _town_chunk(key)
+	var paved: Array = _paved.get(key, [])
 	var ox := float(key.x) * CHUNK_M
 	var oz := float(key.y) * CHUNK_M
 	var ylo := 1.0e20
@@ -1014,6 +1210,18 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 	for _i in range(_s_attempts):   ## GRASS LAB (F3): TUFTS_PER_CHUNK x style density
 		var wx := ox + rng.randf() * CHUNK_M
 		var wz := oz + rng.randf() * CHUNK_M
+		if not paved.is_empty() and _on_segment(paved, wx, wz):
+			continue      ## a street. Nothing grows through the cobbles.
+		## GRASS PAINT. The map says bare, and that is the end of it; the map
+		## says grass, and `painted` is how much of a meadow to grow here
+		## instead of asking the world's rule below.
+		var painted := -1.0
+		if _paint != null:
+			var pv := _paint.value_at(wx, wz)
+			if pv == GrassPaint.BARE:
+				continue
+			if pv > GrassPaint.BARE:
+				painted = GrassPaint.density_of(pv)
 		## WHICH GROUND ANSWERS HERE. Inside the CaveField footprint it is the
 		## voxel surface, so digging still uproots the grass over it; everywhere
 		## else it is the baked heightfield. The two never overlap and the seam
@@ -1034,7 +1242,11 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 				continue      ## nothing grows in the lake, the river or the sea
 			gc = _ow.sample_color(wx, wz)
 			fw = _ow._forest_weight(gc)
-			cover = _cover_at(gy, fw)
+			cover = _cover_at(gy, fw) if painted < 0.0 else painted
+			if cover <= 0.02:
+				continue
+		elif painted >= 0.0:
+			cover = painted
 			if cover <= 0.02:
 				continue
 		var in_tall := _tall_noise_at(wx, wz)
@@ -1124,7 +1336,7 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 		## the particle shader from the same heightfield, the same noise tiles and
 		## the same draw roll, so dropping it here removes the instances and not the
 		## grass. Everything else on this square metre is still ours.
-		if _gpu_on and not on_field and kind == K_STD:
+		if _gpu_on and not on_field and kind == K_STD and not in_town:
 			continue
 
 		## Rich ground grows taller. One noise doing two jobs keeps the height
@@ -1212,7 +1424,9 @@ func _apply_chunk(key: Vector2i, placed: Dictionary) -> void:
 				(_chunks[key][kind] as Node).queue_free()
 			_chunks.erase(key)
 			_chunk_lod.erase(key)
+		_empty[key] = true
 		return
+	_empty.erase(key)
 	if not _chunks.has(key):
 		_chunks[key] = {}
 	var per_kind: Dictionary = _chunks[key]
@@ -1877,6 +2091,11 @@ global uniform float player_push;
 // 90 m ring, so the shader is sane on the frame before the first push.
 uniform float fade_start = 52.2;
 uniform float fade_end = 70.2;
+// v3.1: the horizon pair. A blade whose COLOR.a is below 0.75 was placed by
+// one of GrassGPU's far bands and fades on THIS pair instead — it has hundreds
+// of metres to go before it is allowed to become the ground.
+uniform float fade_start_far = 331.0;
+uniform float fade_end_far = 446.0;
 // v2.7 — the trample is a set of DIALS now (Lemon: "far less dramatic"). It was
 // a 1.35 m radius with a 0.30 m sideways shove that applied even while you stood
 // still, so a 2.7 m ring of grass lay flat and slid around with you wherever you
@@ -1952,7 +2171,9 @@ void vertex() {
 
 	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float dist = distance(root, INV_VIEW_MATRIX[3].xyz);
-	v_fade = 1.0 - clamp((dist - fade_start) / max(fade_end - fade_start, 0.01), 0.0, 1.0);
+	float fs = (COLOR.a < 0.75) ? fade_start_far : fade_start;
+	float fe = (COLOR.a < 0.75) ? fade_end_far : fade_end;
+	v_fade = 1.0 - clamp((dist - fs) / max(fe - fs, 0.01), 0.0, 1.0);
 	// Sink into the sod over the last stretch instead of popping out. It never
 	// reaches zero — by then it is the ground's colour anyway (see fragment).
 	VERTEX.y *= mix(0.34, 1.0, v_fade);

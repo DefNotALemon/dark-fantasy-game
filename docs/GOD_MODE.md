@@ -162,6 +162,22 @@ Radius 2–160 m; the ring on the ground is the brush (red = erase). Fill / Clea
 the whole world are two-click confirms. Written to `design/ground_paint.dat` +
 `design/ground.json` 2.5 s after you stop. Full notes: `docs/GROUND.md`.
 
+### Grass
+**Paints WHERE THE GRASS GROWS.** Three brushes: **Grow** lays meadow at the
+density on the slider (100 % is the full meadow; 30 % is a thin, trodden
+field) — on rock, on the beach, up to the snow, whatever the world's rule
+says; only water still refuses it. **Bare** takes the grass away — a yard, a
+quarry, a road you have not laid yet. **Auto** erases the paint and hands the
+cell back to the rule: every dry cell is meadow, and streets, water and a
+town's cobbles are not. Same 4 m cells as Ground; the ring is the brush
+(green = grow, red = bare, grey = auto). The blades re-place under the brush
+as you drag (a batch a frame, off-thread — the old meadow stays up until the
+new one lands) and the far meadow the terrain paints past the draw ring reads
+the same map, so a bare patch is bare to the horizon. Grass on every dry cell
+/ Clear are two-click confirms. Written to `design/grass_paint.dat` 2.5 s after
+you stop. Data layer: `scripts/GrassPaint.gd`; the readers are
+`GrassSystem._place_chunk` and `shaders/terrain_psx.gdshader`.
+
 ### Erase
 **Objects** removes a built piece or a tree you planted. **Plan marks** removes
 the smallest zone under the cursor, and its notes with it.
@@ -191,6 +207,7 @@ the cursor is yours again. `tools/patch_ground.py` is the Player.gd wiring.
 | `design/WORLD_PLAN.md` | the same thing as prose, grouped by zone. **Claude reads this.** |
 | `design/build_placements.json` | the stuff — every piece and planted tree. |
 | `design/ground_paint.dat` + `design/ground.json` | the ground — painted tile ids on the 4 m grid, and the world style. `docs/GROUND.md`. |
+| `design/grass_paint.dat` | the grass — where it grows and how thick, a byte a cell on the same grid (0 auto, 1 bare, 2–255 density). |
 
 Written into `res://design/` when the game is run from the Godot editor (the only
 way anyone is using god mode) and `user://design/` otherwise. `WorldPlan.dir()`
@@ -216,6 +233,7 @@ and the town is still there.
 | `scripts/BuiltPiece.gd` | one placed piece; save / restore |
 | `scripts/GodEditor.gd` | the panel, the tools, the aim, the ghost |
 | `scripts/GroundPaint.gd` | the ground textures and the brush's data layer (`docs/GROUND.md`) |
+| `scripts/GrassPaint.gd` | where the grass grows — the Grass brush's data layer; read by the blades and the terrain's far meadow |
 | `scripts/EditorCam.gd` | the spectator eye — take-over, release, free flight |
 | `scripts/EditorMode.gd` | one static flag, imported by Enemy and CritterSwarm |
 | `tools/patch_god.py` | the re-runnable Player.gd / World.gd / Enemy.gd / CritterSwarm.gd wiring |

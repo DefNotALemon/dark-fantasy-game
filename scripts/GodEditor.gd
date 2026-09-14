@@ -27,11 +27,15 @@ extends PanelContainer
 ##              aiming with. F again gives the cursor back.
 ##              Everything else stays live: weather, wildlife, the sun.
 ##
-##   TOOLS      Select · Zone · Path · Note · Trees · Build · Ground · Erase.
-##              LEFT MOUSE is always "do the current tool where I am aiming".
-##              Ground PAINTS the ground-sheet textures (scripts/GroundPaint.gd):
-##              hold LEFT MOUSE to stroke, the palette picks the tile, and the
-##              WORLD STYLE dropdown re-dresses every unpainted cell at once.
+##   TOOLS      Select · Zone · Path · Note · Trees · Build · Ground · Grass ·
+##              Erase. LEFT MOUSE is always "do the current tool where I am
+##              aiming". Ground PAINTS the ground-sheet textures
+##              (scripts/GroundPaint.gd): hold LEFT MOUSE to stroke, the palette
+##              picks the tile, and the WORLD STYLE dropdown re-dresses every
+##              unpainted cell at once. Grass PAINTS WHERE THE GRASS GROWS
+##              (scripts/GrassPaint.gd): Grow lays meadow at a density, Bare
+##              takes it away, Auto hands a cell back to the world's rule.
+##              The blades re-place under the brush and the far meadow follows.
 ##
 ##   THE MAP    M opens the map OVER the editor (it used to close it). The
 ##              spectator camera is the arrow; clicking travels camera and
@@ -45,6 +49,8 @@ extends PanelContainer
 ##                                            you actually put in the world.
 ##   design/ground_paint.dat + ground.json     the GROUND — painted tiles and
 ##                                            the world style (GroundPaint.gd).
+##   design/grass_paint.dat                    the GRASS — where it grows and
+##                                            how thick (GrassPaint.gd).
 ##
 ## Both live in res://design/ when the game is run from the Godot editor.
 ## Neither depends on a save game: start a new run and the town is still there.
@@ -106,6 +112,13 @@ var _paint_last := Vector3(INF, INF, INF)
 var _confirm := ""               ## a destructive button waiting for its second click
 var _ground_label: Label = null
 var _ground_hover: Label = null
+
+## Grass tool (where the grass grows, scripts/GrassPaint.gd)
+var grass_mode := "grow"         ## "grow" | "bare" | "auto"
+var grass_density := 1.0         ## 0..1, what Grow lays down
+var grass_brush := 14.0          ## metres
+var _grass_label: Label = null
+
 
 var selected_id := ""
 
@@ -604,6 +617,7 @@ func _click_world() -> void:
 		"tree":    _tree_click()
 		"build":   _build_click()
 		"ground":  _ground_click()
+		"grass":   _grass_click()
 		"erase":   _erase_at_aim()
 
 
@@ -851,6 +865,52 @@ func _refresh_ground_label() -> void:
 		gp.painted_cells, gp.paint_path()]
 
 
+## ---------------------------------------------------------------- grass ---
+
+func grass_value() -> int:
+	## The byte the brush writes (GrassPaint's encoding).
+	match grass_mode:
+		"bare": return GrassPaint.BARE
+		"auto": return GrassPaint.AUTO
+	return GrassPaint.value_of_density(grass_density)
+
+
+func _grass_click() -> void:
+	if GrassPaint.inst == null or not GrassPaint.inst.ready_ok:
+		_note("The grass map is not up (no terrain?).")
+		return
+	_painting = true
+	_paint_last = Vector3(INF, INF, INF)
+	_grass_dab()
+
+
+func _grass_dab() -> void:
+	var gp := GrassPaint.inst
+	if gp == null or not _aim_valid:
+		return
+	var min_move := maxf(grass_brush * 0.25, gp.step * 0.5)
+	if _paint_last.x != INF and _aim_pos.distance_to(_paint_last) < min_move:
+		return
+	_paint_last = _aim_pos
+	gp.paint_disc(_aim_pos, grass_brush, grass_value())
+	_refresh_grass_label()
+
+
+func _refresh_grass_label() -> void:
+	if _grass_label == null or GrassPaint.inst == null:
+		return
+	var gp := GrassPaint.inst
+	var gs := get_tree().get_first_node_in_group("grass_system")
+	var regrow := ""
+	if gs != null and gs.has_method("regrow_pending"):
+		var n := int(gs.call("regrow_pending"))
+		if n > 0:
+			regrow = " · %d chunks regrowing" % n
+	_grass_label.text = "brush: %s
+%d cells painted (%d bare) · %s%s" % [GrassPaint.describe(grass_value()),
+		gp.painted_cells, gp.bare_cells, gp.paint_path(), regrow]
+
+
 ## ---------------------------------------------------------------- build ---
 
 func _build_click() -> void:
@@ -949,6 +1009,8 @@ func _update_ghost() -> void:
 		want = "tree|%s|%d|%.1f" % [tree_species, tree_stage, tree_brush]
 	elif tool == "ground":
 		want = "ground|%.1f|%s" % [ground_brush, "e" if ground_erase else "p"]
+	elif tool == "grass":
+		want = "grass|%.1f|%s" % [grass_brush, grass_mode]
 	elif tool == "zone" and zone_mode == "circle":
 		want = "circle|%.1f|%s" % [circle_r, zone_kind]
 	if want == "":
@@ -1000,6 +1062,13 @@ func _make_ghost() -> Node3D:
 	elif tool == "ground":
 		root.add_child(_ring(maxf(ground_brush, 1.0),
 			Color(1.0, 0.45, 0.35) if ground_erase else Color(1.0, 0.85, 0.40)))
+	elif tool == "grass":
+		var gcol := Color(0.45, 1.0, 0.55)             ## grow: green
+		if grass_mode == "bare":
+			gcol = Color(1.0, 0.45, 0.35)               ## bare: the erase red
+		elif grass_mode == "auto":
+			gcol = Color(0.75, 0.80, 0.84)              ## auto: the panel grey
+		root.add_child(_ring(maxf(grass_brush, 1.0), gcol))
 	_ghostify(root)
 	return root
 
@@ -1061,11 +1130,13 @@ func _process(delta: float) -> void:
 	_update_aim()
 	_update_ghost()
 	_refresh_status()
-	if _painting and tool == "ground" and not map_over():
+	if _painting and (tool == "ground" or tool == "grass") and not map_over():
 		if _over_panel():
 			_paint_last = Vector3(INF, INF, INF)   ## lift the brush over the panel
-		elif _aim_valid:
+		elif _aim_valid and tool == "ground":
 			_ground_dab()
+		elif _aim_valid:
+			_grass_dab()
 	if _dirty:
 		_save_t += delta
 		if _save_t > 2.5:
@@ -1105,6 +1176,9 @@ func _refresh_status() -> void:
 		elif tool == "ground" and _aim_valid and GroundPaint.inst != null:
 			var worn := GroundPaint.inst.worn_id_at(_aim_pos.x, _aim_pos.z)
 			extra = "   ground: %s %s" % [GroundPaint.grid_ref(worn), GroundPaint.tile_name(worn)]
+		elif tool == "grass" and _aim_valid and GrassPaint.inst != null:
+			extra = "   grass: %s" % GrassPaint.describe(
+				GrassPaint.inst.value_at(_aim_pos.x, _aim_pos.z))
 		_hint.text = "aim %s%s" % [aim, extra]
 
 
@@ -1136,6 +1210,8 @@ func save_now() -> void:
 	WorldPlan.save_plan()
 	if GroundPaint.inst != null:
 		GroundPaint.inst.save_now()
+	if GrassPaint.inst != null:
+		GrassPaint.inst.save_now()
 	var pieces: Array = []
 	for p in _pieces:
 		if is_instance_valid(p):
@@ -1272,16 +1348,17 @@ func _build_ui() -> void:
 
 	## --- tool row ----------------------------------------------------------
 	var tools := GridContainer.new()
-	tools.columns = 4
+	tools.columns = 3
 	tools.add_theme_constant_override("h_separation", 4)
 	tools.add_theme_constant_override("v_separation", 4)
 	outer.add_child(tools)
 	for t in [["select", "Select"], ["zone", "Zone"], ["path", "Path"], ["note", "Note"],
-			["tree", "Trees"], ["build", "Build"], ["ground", "Ground"], ["erase", "Erase"]]:
+			["tree", "Trees"], ["build", "Build"], ["ground", "Ground"], ["grass", "Grass"],
+			["erase", "Erase"]]:
 		var b := Button.new()
 		b.text = t[1]
 		b.add_theme_font_size_override("font_size", 13)
-		b.custom_minimum_size = Vector2(78, 26)
+		b.custom_minimum_size = Vector2(104, 26)
 		var id: String = t[0]
 		b.pressed.connect(func(): _set_tool(id))
 		tools.add_child(b)
@@ -1441,6 +1518,7 @@ func _refresh_tool_page() -> void:
 	_sel_name = null
 	_ground_label = null
 	_ground_hover = null
+	_grass_label = null
 	for id in _tool_btns:
 		(_tool_btns[id] as Button).add_theme_color_override("font_color",
 			Color(0.45, 1.0, 0.6) if id == tool else Color(0.78, 0.80, 0.82))
@@ -1452,6 +1530,7 @@ func _refresh_tool_page() -> void:
 		"tree":   _page_tree()
 		"build":  _page_build()
 		"ground": _page_ground()
+		"grass":  _page_grass()
 		"erase":  _page_erase()
 
 
@@ -1844,6 +1923,80 @@ func _page_ground() -> void:
 	_button("Save ground now", func():
 		gp.save_now()
 		_note("Ground written to %s" % gp.paint_path()))
+
+
+func _page_grass() -> void:
+	var gp := GrassPaint.inst
+	if gp == null or not gp.ready_ok:
+		_para("The grass map is not up. Overworld builds it with the terrain "
+			+ "(scripts/GrassPaint.gd) — no terrain, no map.")
+		return
+	_para("Paint WHERE THE GRASS GROWS. Hold LEFT MOUSE and drag. Cells are 4 m; "
+		+ "the blades re-place under the brush as you go and the far meadow "
+		+ "follows. Unpainted ground obeys the world's rule: every dry cell is "
+		+ "meadow, and streets, water and the towns' cobbles are not. "
+		+ "Saved to design/grass_paint.dat 2.5 s after you stop.")
+
+	_head("BRUSH")
+	var gm := _grid(3)
+	_chip(gm, "Grow", grass_mode == "grow", func():
+		grass_mode = "grow"
+		_ghost_key = ""
+		_refresh_tool_page())
+	_chip(gm, "Bare", grass_mode == "bare", func():
+		grass_mode = "bare"
+		_ghost_key = ""
+		_refresh_tool_page())
+	_chip(gm, "Auto", grass_mode == "auto", func():
+		grass_mode = "auto"
+		_ghost_key = ""
+		_refresh_tool_page())
+	if grass_mode == "grow":
+		_para("Grow lays meadow whatever the rule says — on rock, on the beach, "
+			+ "up to the snow. Only water still refuses it.")
+		_slider("density: %d%%" % int(round(grass_density * 100.0)), grass_density,
+			0.05, 1.0, 0.05, func(v):
+				grass_density = v
+				_refresh_grass_label())
+	elif grass_mode == "bare":
+		_para("Bare takes the grass away — a yard, a quarry, a road you have not "
+			+ "laid yet. Nothing grows there until you paint it back.")
+	else:
+		_para("Auto erases the paint: the cell goes back to the world's rule.")
+	_slider("radius: %.0f m" % grass_brush, grass_brush, 2.0, 160.0, 1.0, func(v):
+		grass_brush = v
+		_ghost_key = "")
+
+	_grass_label = Label.new()
+	_grass_label.add_theme_font_size_override("font_size", 12)
+	_grass_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_grass_label.custom_minimum_size = Vector2(PANEL_W - 40, 0)
+	_grass_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.6))
+	_body.add_child(_grass_label)
+	_refresh_grass_label()
+
+	_head("WHOLE WORLD")
+	_button("Grass on every dry cell (full meadow)" if _confirm != "grass_fill"
+			else "Really paint the whole world green? Click again", func():
+		if _confirm == "grass_fill":
+			_confirm = ""
+			gp.fill_all(GrassPaint.FULL)
+			_note("The whole world is meadow — every dry cell painted full.")
+		else:
+			_confirm = "grass_fill"
+		_refresh_tool_page())
+	_button("Clear grass paint (back to the rule)" if _confirm != "grass_clear"
+			else "Really clear every painted cell? Click again", func():
+		if _confirm == "grass_clear":
+			_confirm = ""
+			gp.clear_all()
+			_note("Grass paint cleared — the world's rule decides everywhere.")
+		else:
+			_confirm = "grass_clear"
+		_refresh_tool_page())
+	_button("Save grass now", func():
+		gp.save_now()
+		_note("Grass written to %s" % gp.paint_path()))
 
 
 func _page_erase() -> void:

@@ -75,9 +75,59 @@ class_name GrassGPU
 ## bare ground. So the noises are baked ONCE into seamless tiles and BOTH sides
 ## read the same image. They agree because they are the same numbers.
 
-const BAND_R := [0.0, 9.0, 16.0, 52.0, 90.0]   ## band n spans BAND_R[n] .. [n+1]
-const BAND_MESH := [0, 1, 2, 2]                ## index into the std mesh ladder
-const BAND_KEEP := [1.0, 1.0, 1.0, 0.35]       ## v2.7's FAR_KEEP past the fade
+## ==========================================================================
+## MEASURED 2026-09-13, IN THE RUNNING GAME: THIS FILE DRAWS NOTHING.
+##
+## Setup is clean — `GrassGPU: 6 emitters, 490068 particles, 6 draw calls`
+## in the game log, every emitter alive with the amount it should have, no
+## shader error in the editor or the game — and not one blade reaches the
+## screen. Three runs in god mode at noon, against v3.0's four bands and
+## against v3.1's six, were pixel-for-pixel the same, and a diagnostic band
+## forced to place EVERY particle in its annulus at eight times size (a
+## 1.4 m blade at 90-210 m, unmissable) was still invisible.
+##
+## So v3.0 was never verified on screen, GrassSystem.GPU_FESCUE stays FALSE,
+## and the horizon is carried by the terrain shader's meadow layer instead
+## (shaders/terrain_psx.gdshader, `meadow_*`). Everything below is kept and
+## still maintained — the band table, the town rects, the tests — because
+## the placement half is right and only the DRAW is missing. Before flipping
+## GPU_FESCUE on, prove a GPUParticles3D with a custom process shader draws
+## at all in this project, in its own scene, with one emitter and one cube.
+## ==========================================================================
+##
+## v3.1 — THE HORIZON. Bands 0-3 are v3.0's ring and are unchanged: they end
+## where the CPU meadow ends (the Esc draw distance, 90 m by default). Bands 4
+## and 5 are new and they are the whole point of v3.1 — the world outside the
+## ring used to be bare terrain the moment you climbed anything, and Lemon
+## asked for grass on all of it.
+##
+## The far bands are affordable because a blade 300 m away is two pixels: they
+## thin out hard (BAND_KEEP) and grow to compensate (BAND_SCALE), so the
+## carpet still READS as grass while costing a twentieth of the tufts per
+## square metre that the near ring does.
+##
+##   band  radii m     keep    cell m   scale   particles
+##   4     90 - 210    0.085   1.10     1.9     ~120k
+##   5     210 - 460   0.022   2.17     3.4     ~143k
+const BAND_R := [0.0, 9.0, 16.0, 52.0, 90.0, 210.0, 460.0]
+const BAND_MESH := [0, 1, 2, 2, 2, 2]          ## index into the std mesh ladder
+const BAND_KEEP := [1.0, 1.0, 1.0, 0.35, 0.085, 0.022]   ## v2.7's FAR_KEEP, then the horizon
+## How much bigger a far tuft stands. Thinning alone leaves gaps you can see
+## from a hilltop as bare ground between blades; a blade at 300 m is a couple
+## of pixels, so widening it is free and it is what turns scatter into cover.
+const BAND_SCALE := [1.0, 1.0, 1.0, 1.0, 1.9, 3.4]
+## Which fade the spatial shader uses. 1.0 = the near fade (it must agree with
+## the CPU chunks, which end at the ring); 0.5 = the HORIZON fade, hundreds of
+## metres out. The flag rides in COLOR.a, which the fragment never reads.
+const BAND_FADE := [1.0, 1.0, 1.0, 1.0, 0.5, 0.5]
+const BANDS := 6                               ## BAND_R.size() - 1
+## The A/B switch for v3.1. False builds v3.0's four-band ring and nothing
+## past it — the world goes back to bare terrain the moment you climb, which
+## is the thing worth being able to look at side by side when tuning the far
+## density. Everything else in this file is unchanged either way.
+const HORIZON := true
+const RING_BAND := 3                           ## the band whose outer edge is draw_dist
+const FAR_BAND := 4                            ## ...and the one whose inner edge follows it
 const BASE_DENSITY := 9.65                     ## tufts/m^2 — measured off v2.7:
 											   ## 284,653 std over a 29,491 m^2 ring
 const TALL_T := 0.34                           ## must match GrassSystem.TALL_T
@@ -102,6 +152,11 @@ var _noise := {}                         ## name -> the seamless Image both side
 var _tall_img: Image = null              ## ...and the one the STEALTH check reads
 var _ow: Overworld = null
 var _ready_ok := false
+var _towns: Array = []           ## Rect2 per staged city — the GPU places nothing inside
+
+
+func _bands() -> int:
+	return BANDS if HORIZON else RING_BAND + 1
 
 
 # =============================================================================
@@ -135,7 +190,7 @@ func setup(spatial_mat: ShaderMaterial, meshes: Array, seed_v: int,
 	var sh := Shader.new()
 	sh.code = PLACE_SHADER
 
-	for b in range(4):
+	for b in range(_bands()):
 		var g := _make_band(b, sh, meshes)
 		g.process_material.set_shader_parameter("hmap", hm)
 		g.process_material.set_shader_parameter("wmap", wm)
@@ -159,6 +214,7 @@ func setup(spatial_mat: ShaderMaterial, meshes: Array, seed_v: int,
 		g.process_material.set_shader_parameter("field_max", field_max)
 		g.process_material.set_shader_parameter("tall_t", TALL_T)
 		g.process_material.set_shader_parameter("clump_cut", CLUMP_CUT)
+	set_town_rects(_towns)
 	_ready_ok = true
 	print("GrassGPU: %d emitters, %d particles, %d draw calls for the whole horizon"
 		% [_emit.size(), total_particles(), _emit.size()])
@@ -168,27 +224,15 @@ func setup(spatial_mat: ShaderMaterial, meshes: Array, seed_v: int,
 func _make_band(b: int, sh: Shader, meshes: Array) -> GPUParticles3D:
 	var r0 := float(BAND_R[b])
 	var r1 := float(BAND_R[b + 1])
-	var cell := sqrt(1.0 / (BASE_DENSITY * float(BAND_KEEP[b])))
-	## Outer and inner side in cells. Both are forced EVEN so the hollow ring
-	## (S - Si) splits into two equal strips — the addressing below assumes it.
-	var s := int(ceil(2.0 * r1 / cell))
-	var si := int(floor(2.0 * r0 / cell))
-	s += s & 1
-	si -= si & 1
-	if si >= s:
-		si = s - 2
-	var t := (s - si) / 2
-	var count := s * s - si * si
+	var cell := _cell_m(b)
 
 	var pm := ShaderMaterial.new()
 	pm.shader = sh
-	pm.set_shader_parameter("grid_S", s)
-	pm.set_shader_parameter("grid_Si", si)
-	pm.set_shader_parameter("grid_t", t)
 	pm.set_shader_parameter("cell_m", cell)
-	pm.set_shader_parameter("r0", r0)
-	pm.set_shader_parameter("r1", r1)
 	pm.set_shader_parameter("centre", Vector3.ZERO)
+	pm.set_shader_parameter("band_scale", float(BAND_SCALE[b]))
+	pm.set_shader_parameter("fade_flag", float(BAND_FADE[b]))
+	var count := _size_grid(pm, cell, r0, r1)
 
 	var g := GPUParticles3D.new()
 	g.name = "GrassBand%d" % b
@@ -235,6 +279,61 @@ func _make_band(b: int, sh: Shader, meshes: Array) -> GPUParticles3D:
 	_emit.append(g)
 	_pmat.append(pm)
 	return g
+
+
+func _cell_m(b: int) -> float:
+	return sqrt(1.0 / (BASE_DENSITY * float(BAND_KEEP[b])))
+
+
+func _size_grid(pm: ShaderMaterial, cell: float, r0: float, r1: float) -> int:
+	## The hollow square a band addresses, in cells. Outer and inner side are
+	## both forced EVEN so the ring (S - Si) splits into two equal strips — the
+	## slot addressing in the process shader assumes exactly that.
+	##
+	## v3.1: pulled out of _make_band because set_draw_distance now moves TWO
+	## edges — the ring band's outer radius and the first horizon band's inner
+	## one — and the two must be sized by the same arithmetic or the horizon
+	## either overlaps the ring (double density, a visible bright annulus) or
+	## leaves a bald gap between them.
+	var s := int(ceil(2.0 * r1 / cell))
+	var si := int(floor(2.0 * r0 / cell))
+	s += s & 1
+	si -= si & 1
+	if si >= s:
+		si = s - 2
+	pm.set_shader_parameter("grid_S", s)
+	pm.set_shader_parameter("grid_Si", si)
+	pm.set_shader_parameter("grid_t", (s - si) / 2)
+	pm.set_shader_parameter("r0", r0)
+	pm.set_shader_parameter("r1", r1)
+	return s * s - si * si
+
+
+## How far the grass reaches — the outer edge of the last horizon band. The
+## spatial material's FAR fade is set off this, so blades stay green until they
+## are nearly at it instead of sinking into the sod at 70 m.
+func horizon_dist() -> float:
+	return float(BAND_R[_bands()])
+
+
+## The towns. Inside one of these rects the GPU places nothing and the CPU
+## chunks own the ground — they are the only ones that know about paved
+## streets, mown yards and the dirt under a market square. Up to 8 (the
+## shader's array size); nearest first is the caller's business.
+func set_town_rects(rects: Array) -> void:
+	_towns = rects
+	if _pmat.is_empty():
+		return
+	var packed := PackedVector4Array()
+	var n := mini(rects.size(), 8)
+	for i in range(n):
+		var r: Rect2 = rects[i]
+		packed.append(Vector4(r.position.x, r.position.y, r.end.x, r.end.y))
+	while packed.size() < 8:
+		packed.append(Vector4(0.0, 0.0, 0.0, 0.0))
+	for pm in _pmat:
+		pm.set_shader_parameter("skip_rect", packed)
+		pm.set_shader_parameter("skip_n", n)
 
 
 # =============================================================================
@@ -336,17 +435,18 @@ func set_draw_distance(m: float) -> void:
 	## The outer band is the only one whose radius moves; the near ladder is
 	## about how big a blade is on screen, not about how far you can see.
 	draw_dist = clampf(m, 30.0, 180.0)
-	if _emit.size() < 4:
+	if _emit.size() <= RING_BAND:
 		return
-	var r1 := maxf(draw_dist, float(BAND_R[3]) + 4.0)
-	_pmat[3].set_shader_parameter("r1", r1)
-	var cell := sqrt(1.0 / (BASE_DENSITY * float(BAND_KEEP[3])))
-	var s := int(ceil(2.0 * r1 / cell))
-	s += s & 1
-	var si := int(_pmat[3].get_shader_parameter("grid_Si"))
-	_pmat[3].set_shader_parameter("grid_S", s)
-	_pmat[3].set_shader_parameter("grid_t", (s - si) / 2)
-	_emit[3].amount = s * s - si * si
+	## The ring band ends where the CPU meadow ends...
+	var r1 := maxf(draw_dist, float(BAND_R[RING_BAND]) + 4.0)
+	_emit[RING_BAND].amount = _size_grid(_pmat[RING_BAND], _cell_m(RING_BAND),
+		float(BAND_R[RING_BAND]), r1)
+	## ...and the first horizon band starts exactly there. Anchoring it at a
+	## constant 90 m instead would double the density inside a 180 m ring and
+	## draw a bright annulus round the player at the Ultra setting.
+	if _emit.size() > FAR_BAND:
+		_emit[FAR_BAND].amount = _size_grid(_pmat[FAR_BAND], _cell_m(FAR_BAND),
+			r1, float(BAND_R[FAR_BAND + 1]))
 
 
 func total_particles() -> int:
@@ -383,6 +483,12 @@ uniform float cell_m;
 uniform float r0;
 uniform float r1;
 uniform vec3 centre;
+// v3.1: how much bigger this band's blades stand (the horizon bands are thin
+// and wide), and which fade the spatial shader should use for them — 1.0 the
+// near fade the CPU chunks share, 0.5 the horizon fade. It travels in COLOR.a,
+// which the grass fragment shader never reads.
+uniform float band_scale = 1.0;
+uniform float fade_flag = 1.0;
 
 // --- the bake ---------------------------------------------------------------
 uniform sampler2D hmap : filter_nearest, repeat_disable;
@@ -413,6 +519,14 @@ uniform vec2 field_max;
 
 uniform float tall_t;
 uniform float clump_cut;
+
+// --- the towns, which belong to the CPU chunks ------------------------------
+// A city is paved streets, mown yards and a dirt market square, and all three
+// of those records live in GrassSystem's chunk placer. So the GPU steps out of
+// a city's rect exactly as it steps out of the valley, and `_place_chunk`
+// stops skipping fescue there. x0, z0, x1, z1.
+uniform vec4 skip_rect[8];
+uniform int skip_n = 0;
 
 const float SKY_WATER_MAX = 30.0;
 const float NO_WATER = -100000.0;
@@ -524,6 +638,10 @@ void grass_place(uint idx, out mat4 xf, out vec4 col) {
 	if (w.x > field_min.x && w.x < field_max.x && w.y > field_min.y && w.y < field_max.y) {
 		live = false;
 	}
+	for (int i = 0; i < skip_n; i++) {
+		vec4 sr = skip_rect[i];
+		if (w.x > sr.x && w.x < sr.z && w.y > sr.y && w.y < sr.w) { live = false; }
+	}
 	if (w.x < map_origin.x || w.y < map_origin.y
 			|| w.x > map_origin.x + map_size.x * map_step
 			|| w.y > map_origin.y + map_size.y * map_step) {
@@ -556,6 +674,7 @@ void grass_place(uint idx, out mat4 xf, out vec4 col) {
 		// Degenerate, not deleted: a particle that is not drawn still has to be
 		// somewhere, and a zero basis is the cheapest triangle there is.
 		xf = mat4(vec4(0.0), vec4(0.0), vec4(0.0), vec4(w.x, -9000.0, w.y, 1.0));
+		col.a = fade_flag;
 		return;
 	}
 
@@ -577,8 +696,11 @@ void grass_place(uint idx, out mat4 xf, out vec4 col) {
 	float vigour = 1.0 + lush * 0.34 + moist * 0.12;
 	float h1 = hash11(float(idx) * 0.7 + wc.x * 0.013 + wc.y * 0.029);
 	float h2 = hash21(wc * 1.7 + vec2(41.0, 13.0));
-	float sxz = mix(0.82, 1.28, h1);
-	float sy = mix(0.72, 1.36, h2) * vigour;
+	float sxz = mix(0.82, 1.28, h1) * band_scale;
+	// Not the full scale in Y. A horizon tuft three times as wide reads as
+	// cover; three times as TALL reads as a cornfield the moment you walk up
+	// to the band edge and see it against the near meadow.
+	float sy = mix(0.72, 1.36, h2) * vigour * (1.0 + (band_scale - 1.0) * 0.55);
 
 	xf = mat4(vec4(rgt * sxz, 0.0), vec4(up * sy, 0.0), vec4(bwd * sxz, 0.0),
 		vec4(p.x, p.y - 0.02, p.z, 1.0));
@@ -596,7 +718,7 @@ void grass_place(uint idx, out mat4 xf, out vec4 col) {
 	tint *= mix(gc / gm, vec3(1.0), 0.62);
 	// COLOR reaches the spatial shader in LINEAR space, same as the CPU path's
 	// srgb_to_linear() on the instance colour.
-	col = vec4(pow(tint, vec3(2.2)), 1.0);
+	col = vec4(pow(tint, vec3(2.2)), fade_flag);
 }
 
 // THE ONE NON-OBVIOUS LINE IN THIS FILE is `EMISSION_TRANSFORM * x` below.
