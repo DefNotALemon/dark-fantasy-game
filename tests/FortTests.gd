@@ -140,7 +140,7 @@ func _geometry(f: FortKnox) -> void:
 
 
 # ---------------------------------------------------------------------------
-func _frame(f: FortKnox) -> void:
+func _frame(_f: FortKnox) -> void:
 	## Note 3 in the header: get these backwards and the fort turns inside out.
 	## CORNERS are clockwise in (x, z), so _outward must point AWAY from the
 	## centre on every face. This is the assertion that catches the flip.

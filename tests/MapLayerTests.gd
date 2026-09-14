@@ -173,6 +173,7 @@ func _t_partition() -> void:
 	var biggest := 0
 	for v3 in seen.values():
 		biggest = maxi(biggest, int(v3))
+	@warning_ignore("integer_division")
 	ok(biggest < CELLS / 2,
 		"no single region owns half the map (biggest holds %d of %d)" % [biggest, CELLS])
 
@@ -464,6 +465,7 @@ func _t_walls() -> void:
 	ok(short_chains == 0, "and nothing shorter than MIN_CHAIN survives")
 	ok(total_used <= total_segs,
 		"no segment is threaded twice (%d used of %d)" % [total_used, total_segs])
+	@warning_ignore("integer_division")
 	ok(total_used > total_segs / 2,
 		"and most of them are threaded, not dropped (%d of %d)" % [total_used, total_segs])
 	ok(MapLayers.MIN_CHAIN == 3, "a wall or two on its own is a cut corner, not a border")
@@ -804,6 +806,7 @@ func _t_chronicle() -> void:
 			steps.append(pl0[i0].distance_to(pl0[i0 + 1]))
 	steps.sort()
 	ok(steps.size() > 100, "there are border steps to measure (%d)" % steps.size())
+	@warning_ignore("integer_division")
 	ok(steps[steps.size() / 2] < CELL_M * 0.75,
 		"the border IS smoothed: its median step is %.1f m against a %.1f m cell" % [
 			steps[steps.size() / 2], CELL_M])
@@ -956,7 +959,7 @@ func _t_ground() -> void:
 	var adj: Dictionary = c._fadj
 	ok(not (adj.get("AROOSTOOK", []) as Array).has("KATAHDIN"),
 		"the graph says Aroostook and Katahdin are not neighbours")
-	var sides := MapLayers.sides(_roster, c.factions)
+	var _sides := MapLayers.sides(_roster, c.factions)
 	var ai := -1
 	var ki := -1
 	for k2 in range(_roster.size()):
@@ -982,6 +985,7 @@ func _t_ground() -> void:
 	var edges := 0
 	for a in adj.keys():
 		edges += (adj[a] as Array).size()
+	@warning_ignore("integer_division")
 	ok(edges / 2 == 17, "it holds 17 undirected edges (%d)" % (edges / 2))
 	ok(true, "AND THIS IS A QUEUE ITEM, NOT A BUG THIS ROUND FIXES: two provinces can share a walkable border and never spill into each other")
 	c.free()
@@ -1007,7 +1011,7 @@ func _t_cost() -> void:
 		c.advance(24.0, 4000)
 	var sides := MapLayers.sides(_roster, c.factions)
 	var t1 := Time.get_ticks_usec()
-	var b := MapLayers.border(_roster, c.factions, p2, NX, NZ, ORIGIN, SIZE)
+	var _b := MapLayers.border(_roster, c.factions, p2, NX, NZ, ORIGIN, SIZE)
 	var march_ms := float(Time.get_ticks_usec() - t1) / 1000.0
 	ok(march_ms < 60.0, "and re-marching it costs %.2f ms (measured 6)" % march_ms)
 	ok(march_ms < build_ms,

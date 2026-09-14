@@ -25,14 +25,14 @@ func _init() -> void:
 	world.add_child(light)
 	light.rotation_degrees = Vector3(-50, 35, 0)
 	light.light_energy = 1.4
-	var floor := MeshInstance3D.new()
+	var flr := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(40, 40)
-	floor.mesh = pm
+	flr.mesh = pm
 	var fm := StandardMaterial3D.new()
 	fm.albedo_color = Color(0.25, 0.32, 0.18)
-	floor.material_override = fm
-	world.add_child(floor)
+	flr.material_override = fm
+	world.add_child(flr)
 	var sb := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()

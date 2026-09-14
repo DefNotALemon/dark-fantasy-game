@@ -51,7 +51,6 @@ static var _shader: Shader = null
 static var _outline_shader: Shader = null
 var _outline: MeshInstance3D = null    ## the inverted-hull rim (set_outline)
 static var enabled := true        ## debug switch: false leaves the boxes as they are
-static var _blend_lock := false
 
 var owner_node: Node3D = null
 var skeleton: Skeleton3D = null
@@ -174,7 +173,7 @@ func _build(opts: Dictionary) -> void:
 	var bones := PackedInt32Array()
 	var weights := PackedFloat32Array()
 	var idx := PackedInt32Array()
-	var rest_global: Array = _rest_global
+	var rest_g: Array = _rest_global
 	for si in boxes.size():
 		var bx := boxes[si] as MeshInstance3D
 		var bone: int = _bone_of.get(bx.get_parent(), 0)
@@ -184,7 +183,7 @@ func _build(opts: Dictionary) -> void:
 		seg_bone.append(bone)
 		_seg_col.append(Color(1, 1, 1, 1))
 		_seg_emis.append(Color(0, 0, 0, 0))
-		_emit_segment(bx, si, bone, parent_bone, tile, rest_global[bone],
+		_emit_segment(bx, si, bone, parent_bone, tile, rest_g[bone],
 			verts, norms, uvs, uv2s, bones, weights, idx)
 		## proxy: keep the node (references, visibility, materials), drop the draw
 		bx.mesh = null

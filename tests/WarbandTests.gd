@@ -210,9 +210,9 @@ func _t_sites() -> void:
 	var maxz := -INF
 	for r in Chronicle.REGION_ROSTER:
 		var rd := r as Dictionary
-		var c: Vector2 = rd.get("pos", Vector2.ZERO)
-		minx = minf(minx, c.x - float(rd.get("r", 0.0)))
-		maxz = maxf(maxz, c.y + float(rd.get("r", 0.0)))
+		var c0: Vector2 = rd.get("pos", Vector2.ZERO)
+		minx = minf(minx, c0.x - float(rd.get("r", 0.0)))
+		maxz = maxf(maxz, c0.y + float(rd.get("r", 0.0)))
 	near_f(b.x, minx, 0.01, "and its west edge is the roster's own")
 	near_f(b.w, maxz, 0.01, "and its north edge likewise")
 	ok(b.z - b.x > 6000.0 and b.w - b.y > 8000.0, "Myrkfell is kilometres across")
@@ -230,6 +230,7 @@ func _t_sites() -> void:
 	for i in range(mini(l1.size(), l3.size())):
 		if (l1[i] as Vector2).distance_to(l3[i] as Vector2) > 1.0:
 			moved += 1
+	@warning_ignore("integer_division")
 	ok(moved > l1.size() / 2, "a different seed moves most of them")
 	ok(l1.size() > Warbands.lattice(Warbands.PITCH * 1.4, 20260912).size(),
 			"a coarser pitch gives fewer cells")

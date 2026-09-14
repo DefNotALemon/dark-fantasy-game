@@ -278,6 +278,7 @@ static func tile_id(row: int, col: int) -> int:
 
 
 static func row_of(id: int) -> int:
+	@warning_ignore("integer_division")
 	return (id - 1) / N_COLS
 
 

@@ -54,10 +54,10 @@ func _init() -> void:
 	print("=== THE SCATTER: spacing x clearance ===")
 	for spacing: float in [500.0, 700.0, 900.0]:
 		for clear: float in [190.0, 300.0]:
-			var sites := _scatter(land, spacing, clear, places, net)
-			var nn := _nn_stats(sites)
+			var sites0 := _scatter(land, spacing, clear, places, net)
+			var nn := _nn_stats(sites0)
 			print("  spacing %4.0f clear %3.0f -> %3d sites   nn min %.0f p50 %.0f   road dist p50 %.0f max %.0f" % [
-				spacing, clear, sites.size(), nn.x, nn.y, _road_p(sites, net, 0.5), _road_p(sites, net, 1.0)])
+				spacing, clear, sites0.size(), nn.x, nn.y, _road_p(sites0, net, 0.5), _road_p(sites0, net, 1.0)])
 	print("")
 
 	var SPACING := 700.0
@@ -119,7 +119,7 @@ func _init() -> void:
 	quit(0)
 
 
-func _scatter(land: Array, spacing: float, clear: float, places: Array, net: RoadNet) -> Array:
+func _scatter(land: Array, spacing: float, clear: float, places: Array, _net: RoadNet) -> Array:
 	## Candidate sites: a deterministic hashed scatter inside each region circle,
 	## rejected for spacing, for sitting on a town, and for open water.
 	var out: Array = []
@@ -174,6 +174,7 @@ func _nn_stats(sites: Array) -> Vector2:
 	ds.sort()
 	if ds.is_empty():
 		return Vector2.ZERO
+	@warning_ignore("integer_division")
 	return Vector2(ds[0], ds[ds.size() / 2])
 
 

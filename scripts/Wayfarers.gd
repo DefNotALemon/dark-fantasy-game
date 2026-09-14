@@ -453,26 +453,26 @@ func _circuit(seat: String, k: Dictionary, rows: Array, ki: int) -> Array:
 			return String(a["name"]) < String(b["name"]))
 		if shortlist.size() > CIRCUIT_LOOK * 2:
 			shortlist.resize(CIRCUIT_LOOK * 2)
-		var near: Array = []
+		var nearby: Array = []
 		for c0 in shortlist:
 			var nm := String((c0 as Dictionary)["name"])
 			var rt: Dictionary = net.call("route", cur, nm)
 			if not bool(rt.get("ok", false)):
 				continue
-			near.append({"name": nm, "d": float(rt.get("length", 0.0)),
+			nearby.append({"name": nm, "d": float(rt.get("length", 0.0)),
 				"rank": int((c0 as Dictionary)["rank"])})
-		if near.is_empty():
+		if nearby.is_empty():
 			break
-		near.sort_custom(func(a, b):
+		nearby.sort_custom(func(a, b):
 			if not is_equal_approx(float(a["d"]), float(b["d"])):
 				return float(a["d"]) < float(b["d"])
 			return String(a["name"]) < String(b["name"]))
-		if near.size() > CIRCUIT_LOOK:
-			near.resize(CIRCUIT_LOOK)
+		if nearby.size() > CIRCUIT_LOOK:
+			nearby.resize(CIRCUIT_LOOK)
 		var best := ""
 		var bs := -1.0
-		for j in near.size():
-			var c := near[j] as Dictionary
+		for j in nearby.size():
+			var c := nearby[j] as Dictionary
 			var fit := 1.0 - 0.30 * float(absi(int(c["rank"]) - want))
 			var jitter := 0.35 * _unit(_hash(world_seed, ki * 97 + step * 13 + j, SALT_CIRCUIT), 3)
 			var s := fit + jitter
@@ -730,7 +730,7 @@ func _arrive(b: Dictionary, t: float) -> void:
 ## ============================ Carrying the news ==========================
 
 
-func _deposit(b: Dictionary, place: String, t: float) -> void:
+func _deposit(b: Dictionary, place: String, _t: float) -> void:
 	var c: Dictionary = b.get("carried", {})
 	if c.is_empty() or String(c.get("text", "")).is_empty():
 		return
@@ -809,6 +809,7 @@ func _locate(b: Dictionary, along: float) -> Dictionary:
 	var lo := 0
 	var hi := legs.size() - 1
 	while lo < hi:
+		@warning_ignore("integer_division")
 		var mid := (lo + hi + 1) / 2
 		last_examined += 1
 		if float((legs[mid] as Dictionary)["cum"]) <= want:

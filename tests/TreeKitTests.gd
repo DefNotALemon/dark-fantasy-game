@@ -310,10 +310,10 @@ func _bark() -> void:
 		var lo := 1e9
 		var hi := -1e9
 		for i in range(240):
-			var d := TreeKit._bark_offset(kind, float(i % cells) + float(i) * 0.017,
+			var d0 := TreeKit._bark_offset(kind, float(i % cells) + float(i) * 0.017,
 				float(i) * 0.031, cells, vk, amp)
-			lo = minf(lo, d)
-			hi = maxf(hi, d)
+			lo = minf(lo, d0)
+			hi = maxf(hi, d0)
 		ok(hi - lo > amp * 0.25,
 			"%s: relief has real range (%.3f m over an amp of %.3f)" % [sp, hi - lo, amp])
 		ok(absf(lo) < amp * 3.0 and absf(hi) < amp * 3.0,
@@ -440,11 +440,13 @@ func _contract() -> void:
 					for si in range(mi.mesh.get_surface_count()):
 						var m := mi.mesh.surface_get_material(si)
 						if m != null and String(m.resource_name).begins_with("leaf_"):
+							@warning_ignore("integer_division")
 							cards += (mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_INDEX]
 								as PackedInt32Array).size() / 6
 				for si2 in range(trunk.mesh.get_surface_count()):
 					var m2 := trunk.mesh.surface_get_material(si2)
 					if m2 != null and String(m2.resource_name).begins_with("leaf_"):
+						@warning_ignore("integer_division")
 						cards += (trunk.mesh.surface_get_arrays(si2)[Mesh.ARRAY_INDEX]
 							as PackedInt32Array).size() / 6
 
@@ -567,6 +569,7 @@ func _budget() -> void:
 					if mi == null or mi.mesh == null:
 						continue
 					for si in range(mi.mesh.get_surface_count()):
+						@warning_ignore("integer_division")
 						tris += (mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_INDEX]
 							as PackedInt32Array).size() / 3
 				ok(tris <= int(TRI_CEIL[st]),

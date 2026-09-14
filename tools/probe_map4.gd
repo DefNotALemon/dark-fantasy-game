@@ -45,12 +45,14 @@ func _init() -> void:
 	mins.sort()
 	var n := mins.size()
 	print("pair-min margin over %d HELD border pairs across 200 days:" % n)
+	@warning_ignore("integer_division")
 	print("  p05=%.4f p25=%.4f p50=%.4f p75=%.4f p95=%.4f  max=%.4f" % [
 		mins[int(n*0.05)], mins[int(n*0.25)], mins[n/2], mins[int(n*0.75)],
 		mins[int(n*0.95)], mins[-1]])
 	print("  held pairs=%d  contested pairs=%d  (%.0f%% of borders are frayed)" % [
 		held_pairs, contested_pairs,
 		100.0 * float(contested_pairs) / float(held_pairs + contested_pairs)])
+	@warning_ignore("integer_division")
 	print("  a threshold at the pair-min MEDIAN %.4f splits the held half in two:" % mins[n/2])
 	for t: float in [0.02, 0.04, 0.06, 0.08, 0.10, 0.1229, 0.15, 0.2062]:
 		var below := 0

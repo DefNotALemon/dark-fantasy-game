@@ -343,6 +343,7 @@ func _build_kit() -> void:
 	## on surface 1. So everything below this function is the code that was
 	## already here.
 	var sd: int = tree_seed if tree_seed != 0 else hash(str(position))
+	@warning_ignore("integer_division")
 	kit_variant = posmod(sd / 7, TreeKit.variants(species))
 	_model = TreeKit.build(species, stage, kit_variant, dead)
 	if _model == null:
@@ -564,8 +565,11 @@ func _apply_materials(mi: MeshInstance3D, mats: Array) -> void:
 func _seed_bark_look(mi: MeshInstance3D) -> void:
 	var sd: int = tree_seed if tree_seed != 0 else hash(str(position))
 	var a := float(posmod(sd, 977)) / 977.0
+	@warning_ignore("integer_division")
 	var b := float(posmod(sd / 977, 811)) / 811.0
+	@warning_ignore("integer_division")
 	var c := float(posmod(sd / 13, 599)) / 599.0
+	@warning_ignore("integer_division")
 	var d := float(posmod(sd / 7, 421)) / 421.0
 	mi.set_instance_shader_parameter("bark_var",
 		Vector4(a * 4.0, b * 6.0, 1.0 if c > 0.5 else 0.0, d))

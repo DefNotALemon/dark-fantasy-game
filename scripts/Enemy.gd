@@ -578,11 +578,11 @@ static func _swing_arc(p: float, chamber: float, through: float) -> float:
 	## chamber, whip through accelerating into the impact (p=0.62, where the
 	## damage lands), then settle off the follow-through with a little recoil.
 	if p < 0.30:
-		var u := p / 0.30
-		return chamber * (1.0 - (1.0 - u) * (1.0 - u))
+		var u0 := p / 0.30
+		return chamber * (1.0 - (1.0 - u0) * (1.0 - u0))
 	elif p < 0.62:
-		var u := (p - 0.30) / 0.32
-		return lerpf(chamber, through, u * u)
+		var u1 := (p - 0.30) / 0.32
+		return lerpf(chamber, through, u1 * u1)
 	var u := (p - 0.62) / 0.38
 	return lerpf(through, through * 0.82, 1.0 - pow(1.0 - u, 3.0))
 
@@ -598,11 +598,11 @@ static func _cut_arc(p: float, carry: float, chamber: float, through: float) -> 
 	## rotation.x swings an arm FORWARD at the target and negative points it
 	## behind. Chambers/windups go negative, impacts land positive.
 	if p < 0.34:
-		var u := p / 0.34
-		return lerpf(carry, chamber, u * u * (3.0 - 2.0 * u))
+		var u0 := p / 0.34
+		return lerpf(carry, chamber, u0 * u0 * (3.0 - 2.0 * u0))
 	elif p < 0.62:
-		var u := (p - 0.34) / 0.28
-		return lerpf(chamber, through, u * u)
+		var u1 := (p - 0.34) / 0.28
+		return lerpf(chamber, through, u1 * u1)
 	var u := (p - 0.62) / 0.38
 	return lerpf(through, lerpf(through, carry, 0.55), u * u * (3.0 - 2.0 * u))
 
@@ -833,7 +833,7 @@ func _animate(_delta: float) -> void:
 	pass
 
 
-func _on_hit_landed(_target: Node) -> void:
+func _on_hit_landed(_who: Node) -> void:
 	## Virtual: a melee or strong hit just landed on `_target` (the player,
 	## or another creature). Generated monsters put their touch — burn,
 	## poison, chill, shock, tar — on you here (scripts/Monster.gd).
@@ -1294,9 +1294,9 @@ func _die() -> void:
 			skin.permanent = true
 		else:
 			skin.ragdoll_start(fling, 0.0, true)
-		var t := create_tween()
-		t.tween_interval(0.35)
-		t.tween_callback(_spawn_pickups)
+		var tw := create_tween()
+		tw.tween_interval(0.35)
+		tw.tween_callback(_spawn_pickups)
 		return
 	_apply_white()  ## step 1: turn fully white
 	## Step 2: after a second, burst into pieces, then vanish (no sinking).

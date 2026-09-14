@@ -72,6 +72,7 @@ func _process(_d: float) -> bool:
 					total += 1
 					if rad < r_here * 0.6 or rad > r_here * 1.5 + 0.08: off += 1
 		print("pivots off the taper: %d / %d" % [off, total])
+		@warning_ignore("integer_division")
 		ok(total > 50 and off < total / 5, "cards sit on the bark, not in the air")
 		## save + restore
 		var t0: TreeV2 = null

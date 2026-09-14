@@ -94,14 +94,14 @@ func _init() -> void:
 	_world = StubWorld.new()
 	root.add_child(_world)
 	_world.add_to_group("world")
-	var floor := StaticBody3D.new()
+	var flr := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = Vector3(600, 1, 600)
 	cs.shape = bs
-	floor.add_child(cs)
-	floor.position.y = -0.5
-	_world.add_child(floor)
+	flr.add_child(cs)
+	flr.position.y = -0.5
+	_world.add_child(flr)
 	_player = TalkPlayer.new()
 	_world.add_child(_player)
 	_player.position = Vector3(200, 0, 200)   ## far: nobody notices it until a section moves it
@@ -143,7 +143,7 @@ func spawn(job := "villager", at := Vector3(0, 0.05, 0), npc_name := "Test Perso
 	return n
 
 
-func settle(n: NPC, frames := 12) -> void:
+func settle(_n: NPC, frames := 12) -> void:
 	## Let physics put it on the floor.
 	for _i in range(frames):
 		await physics_frame
@@ -879,8 +879,8 @@ func t_dialogue_pure() -> void:
 	## every tree validates, for every job and personality
 	for job in NPCDirector.JOBS:
 		for p in NPCDialogue.PERSONALITIES:
-			var tree := NPCDialogue.default_tree(job, p)
-			var problems := NPCDialogue.validate(tree)
+			var tree0 := NPCDialogue.default_tree(job, p)
+			var problems := NPCDialogue.validate(tree0)
 			ok(problems.is_empty(), "%s/%s tree validates %s" % [job, p, str(problems)])
 	ok(not NPCDialogue.validate({"start": {"choices": [{"to": "nowhere"}]}}).is_empty(), "a dangling choice is a problem")
 	ok(not NPCDialogue.validate({"hub": {}}).is_empty(), "no start is a problem")
@@ -894,11 +894,11 @@ func t_dialogue_pure() -> void:
 	## E takes the LAST choice: in every node it must be a way onward or out,
 	## never a topic loop and never the hostile answer
 	for job in NPCDirector.JOBS:
-		var tr := NPCDialogue.default_tree(job, "friendly")
-		for id in tr.keys():
+		var xf := NPCDialogue.default_tree(job, "friendly")
+		for id in xf.keys():
 			if id == "openers":
 				continue
-			var nd: Dictionary = tr[id]
+			var nd: Dictionary = xf[id]
 			var cs: Array = nd.get("choices", [])
 			if cs.is_empty():
 				ok(bool(nd.get("end", false)), "%s/%s: a node with no choices is an end" % [job, id])

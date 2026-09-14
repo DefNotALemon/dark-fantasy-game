@@ -108,7 +108,7 @@ func _init() -> void:
 	var con_count: Array[int] = []
 	var hold_sum := {}
 	var mgn_sum := {}
-	var gob_share_days := {}
+	var _gob_share_days := {}
 	for d in range(96 * 4):
 		c2.advance(24.0, 400)
 		Factions.step(state, pushes, anch, adj, seats, 1.0)

@@ -312,6 +312,7 @@ static func pose_of(sk: CreatureSkin, origin: Vector3) -> PackedFloat32Array:
 
 static func pose_unpack(p: PackedFloat32Array) -> Array:
 	var out: Array = []
+	@warning_ignore("integer_division")
 	var n := int(p.size() / POSE_STRIDE)
 	for i in n:
 		var k := i * POSE_STRIDE

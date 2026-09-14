@@ -638,6 +638,7 @@ func _t_looping() -> void:
 	## cannot lie about.
 	var bytes := FileAccess.get_file_as_bytes("res://assets/audio/fire/fire_bed_big.wav")
 	ok(bytes.size() > 100000, "the big bed is on disk (%d bytes)" % bytes.size())
+	@warning_ignore("integer_division")
 	var true_frames := (bytes.size() - 44) / 2      ## 16-bit mono PCM, minus the header
 	var end_f := FireAudio.wav_loop_end(float(true_frames) / 44100.0, 44100)
 	ok(end_f > 4 * 44100,

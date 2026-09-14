@@ -191,7 +191,7 @@ func _march(pitch: float, deep: float, places: Array, net: RoadNet, land: Array)
 	return out
 
 
-func _areas(land: Array) -> Dictionary:
+func _areas(_land: Array) -> Dictionary:
 	var minx := INF
 	var maxx := -INF
 	var minz := INF

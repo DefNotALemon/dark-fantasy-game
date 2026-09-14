@@ -636,6 +636,7 @@ func reachable_air(max_nodes := 60000) -> Array[Vector3i]:
 			## Midpoint check too: the stride-2 walk must never HOP a rock
 			## wall into a sealed pocket — content only ever spawns in air
 			## that genuinely connects to a mouth.
+			@warning_ignore("integer_division")
 			if seen.has(nxt) or not _air_at(nxt) or not _air_at(cur + n / 2):
 				continue
 			seen[nxt] = true

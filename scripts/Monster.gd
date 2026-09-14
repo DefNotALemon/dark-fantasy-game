@@ -223,19 +223,19 @@ func _build_quadruped() -> void:
 	var b := float(genome["bulk"])
 	var L := float(genome["leg_len"])
 	var h := 0.55 * s * L                 ## hip height (foot sole on y = 0)
-	var len := 1.1 * s
+	var body_len := 1.1 * s
 	var col := _col()
-	_add_collision(Vector3(0.5 * s * b, h + 0.5 * s, len), Vector3(0, (h + 0.5 * s) * 0.5, 0))
+	_add_collision(Vector3(0.5 * s * b, h + 0.5 * s, body_len), Vector3(0, (h + 0.5 * s) * 0.5, 0))
 	base_body_color = col
 	stride_deg = 30.0
 	bob_h = 0.05 * s
-	var torso := _part(rig, Vector3(0.44 * s * b, 0.42 * s, len * 0.8), col, Vector3(0, h + 0.18 * s, 0))
+	var torso := _part(rig, Vector3(0.44 * s * b, 0.42 * s, body_len * 0.8), col, Vector3(0, h + 0.18 * s, 0))
 	body_mat = torso.material_override as StandardMaterial3D
-	_part(rig, Vector3(0.46 * s * b, 0.40 * s, 0.32 * s), col, Vector3(0, h + 0.22 * s, -len * 0.38))
-	_part(rig, Vector3(0.42 * s * b, 0.36 * s, 0.30 * s), col.darkened(0.08), Vector3(0, h + 0.15 * s, len * 0.36))
+	_part(rig, Vector3(0.46 * s * b, 0.40 * s, 0.32 * s), col, Vector3(0, h + 0.22 * s, -body_len * 0.38))
+	_part(rig, Vector3(0.42 * s * b, 0.36 * s, 0.30 * s), col.darkened(0.08), Vector3(0, h + 0.15 * s, body_len * 0.36))
 	## Legs — registered FL, FR, BR, BL so Enemy's even/odd phase makes a trot
 	## (diagonal pairs together).
-	for leg in [[-1.0, -len * 0.36], [1.0, -len * 0.36], [1.0, len * 0.34], [-1.0, len * 0.34]]:
+	for leg in [[-1.0, -body_len * 0.36], [1.0, -body_len * 0.36], [1.0, body_len * 0.34], [-1.0, body_len * 0.34]]:
 		var hip := Node3D.new()
 		rig.add_child(hip)
 		hip.position = Vector3(float(leg[0]) * 0.17 * s * b, h, float(leg[1]))
@@ -248,12 +248,12 @@ func _build_quadruped() -> void:
 	head_pivot = Node3D.new()
 	head_pivot.name = "Head"
 	rig.add_child(head_pivot)
-	head_pivot.position = Vector3(0, h + 0.28 * s + neck * 0.25 * s, -len * 0.5 - neck * 0.25 * s)
+	head_pivot.position = Vector3(0, h + 0.28 * s + neck * 0.25 * s, -body_len * 0.5 - neck * 0.25 * s)
 	if neck > 0.15:
-		_part(rig, Vector3(0.22 * s, 0.22 * s, (0.2 + neck * 0.3) * s), col, Vector3(0, h + 0.25 * s + neck * 0.1 * s, -len * 0.45 - neck * 0.12 * s), Vector3(20.0 * neck, 0, 0))
+		_part(rig, Vector3(0.22 * s, 0.22 * s, (0.2 + neck * 0.3) * s), col, Vector3(0, h + 0.25 * s + neck * 0.1 * s, -body_len * 0.45 - neck * 0.12 * s), Vector3(20.0 * neck, 0, 0))
 	_build_head(head_pivot, s * float(genome.get("head_size", 1.0)))
-	_build_back(rig, Vector3(0, h + 0.39 * s, 0), len * 0.7, s)
-	_build_tail(rig, Vector3(0, h + 0.2 * s, len * 0.5), s)
+	_build_back(rig, Vector3(0, h + 0.39 * s, 0), body_len * 0.7, s)
+	_build_tail(rig, Vector3(0, h + 0.2 * s, body_len * 0.5), s)
 
 
 func _build_biped() -> void:
@@ -564,7 +564,7 @@ func _on_hit_landed(target: Node) -> void:
 
 ## ============================================================ animation ===
 
-func _choose_strong(dist: float) -> void:
+func _choose_strong(_dist: float) -> void:
 	## One special per species (configure set the knobs); the flurry and the
 	## slam only fire from melee range, the rest only from a gap.
 	pass

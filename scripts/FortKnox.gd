@@ -662,7 +662,6 @@ func _undercroft() -> void:
 	## The side walls, with a gap cut where each throat comes off. Without
 	## these gaps the magazines are sealed rooms behind a decorative arch —
 	## which is exactly what they were until the suite tried to walk into one.
-	var span := TUNNEL_Z.y - TUNNEL_Z.x
 	var east_gaps: Array = []
 	for mz: float in [-14.0, 14.0]:
 		east_gaps.append(Vector2(mz - TUNNEL_Z.x - 1.9, mz - TUNNEL_Z.x + 1.9))
@@ -687,6 +686,7 @@ func _undercroft() -> void:
 			## stacked at the BACK of the magazine: barrels standing in the
 			## doorway line is how the suite first found its way in blocked
 			var bx := 16.3 + float(b % 3) * 1.6
+			@warning_ignore("integer_division")
 			var bz := mz - 2.4 + float(b / 3) * 1.7
 			_box(Vector3(1.0, 1.25, 1.0), Vector3(bx, fy + 0.92, bz), "timber",
 				_rng.randf_range(-0.08, 0.05),
@@ -804,7 +804,7 @@ func _curtains() -> void:
 
 ## A river face: solid below the gun ports, solid above them, piers between
 ## them. This is what makes the casemates actually see the water.
-func _river_curtain(face: int, a: Vector2, b: Vector2, foot: float) -> void:
+func _river_curtain(_face: int, a: Vector2, b: Vector2, foot: float) -> void:
 	var ts := casemate_ts(a, b)
 	var gaps: Array = []
 	for t: float in ts:
@@ -901,6 +901,7 @@ func _gun(at: Vector2, wall_yaw: float, y: float) -> void:
 	_box(Vector3(0.62, 0.62, 0.72), Vector3(breech.x, y + 1.05, breech.y), "iron", -0.05, r, false)
 	var pile := at + side * 1.8 - fwd * 0.6
 	for k in range(4):
+		@warning_ignore("integer_division")
 		_box(Vector3(0.3, 0.3, 0.3),
 			Vector3(pile.x + float(k % 2) * 0.33, y + 0.15 + float(k / 2) * 0.3,
 				pile.y + float(k % 2) * 0.33), "iron", 0.0, Vector3.ZERO, false)
@@ -1287,17 +1288,17 @@ func _mesh_of(boxes: Array, mat_id: String) -> MeshInstance3D:
 		var b: Dictionary = entry
 		var size: Vector3 = b["size"]
 		var half := size * 0.5
-		var basis := Basis.from_euler(b["rot"] as Vector3)
+		var bas := Basis.from_euler(b["rot"] as Vector3)
 		var origin: Vector3 = b["pos"]
 		var t: float = b["tint"]
 		var col := base.lightened(t) if t > 0.0 else base.darkened(-t)
 		for f in range(6):
-			var n: Vector3 = basis * _FACE_N[f]
+			var n: Vector3 = bas * _FACE_N[f]
 			var quad: Array = _FACE_V[f]
 			var p: Array = []
 			for c in range(4):
 				var s: Vector3 = quad[c]
-				p.append(origin + basis * Vector3(s.x * half.x, s.y * half.y, s.z * half.z))
+				p.append(origin + bas * Vector3(s.x * half.x, s.y * half.y, s.z * half.z))
 			## a touch of shade on the downward faces and light on the top, so
 			## flat granite still reads as courses under the banded light
 			var fc := col

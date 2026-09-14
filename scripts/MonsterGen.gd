@@ -186,6 +186,7 @@ static func harden(g: Dictionary, tier: int, hseed: int) -> void:
 	for a in ab:
 		if TOUCHES.has(a):
 			touched = true
+	@warning_ignore("integer_division")
 	for _i in range(steps / 2):
 		var pool: Array = []
 		for a in ABILITIES:

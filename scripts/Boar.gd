@@ -86,18 +86,18 @@ func _build_body() -> void:
 	add_child(rig)
 	loco_root = rig  ## base locomotion bobs the whole body with each footfall
 
-	var hide := Color(0.28, 0.20, 0.14)
+	var hide_col := Color(0.28, 0.20, 0.14)
 	var dark := Color(0.18, 0.13, 0.09)
 	var tusk := Color(0.85, 0.82, 0.70)
-	base_body_color = hide
+	base_body_color = hide_col
 
 	## Main body (faces -z).
-	var body := _box_in(rig, Vector3(0.7, 0.6, 1.2), hide, Vector3(0, 0.62, 0))
+	var body := _box_in(rig, Vector3(0.7, 0.6, 1.2), hide_col, Vector3(0, 0.62, 0))
 	body_mat = body.material_override as StandardMaterial3D
 	## Shoulder hump.
 	_box_in(rig, Vector3(0.6, 0.3, 0.5), dark, Vector3(0, 0.92, 0.2))
 	## Head + snout at the front (-z).
-	_box_in(rig, Vector3(0.42, 0.40, 0.40), hide, Vector3(0, 0.55, -0.75))
+	_box_in(rig, Vector3(0.42, 0.40, 0.40), hide_col, Vector3(0, 0.55, -0.75))
 	_box_in(rig, Vector3(0.24, 0.22, 0.22), dark, Vector3(0, 0.48, -0.98))
 	## Tusks.
 	_box_in(rig, Vector3(0.05, 0.05, 0.18), tusk, Vector3(-0.12, 0.44, -1.02), Vector3(20, 0, 0))

@@ -1770,7 +1770,7 @@ const DROWNED_RISK_PER_S := 0.022   ## ~45 s of exposure on average
 const DROWNED_COOLDOWN := 150.0
 
 
-func _drowned_tick(delta: float, uw: float) -> void:
+func _drowned_tick(delta: float, _uw: float) -> void:
 	if _player != null and _player.god:
 		return   ## god / spectator: the lake has no claim on a body it cannot see
 	_drowned_cd = maxf(0.0, _drowned_cd - delta)

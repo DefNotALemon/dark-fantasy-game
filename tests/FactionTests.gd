@@ -239,6 +239,7 @@ func _t_map() -> void:
 			if not (_adj.get(String(q), []) as Array).has(an):
 				asym.append("%s->%s" % [an, String(q)])
 	ok(edges % 2 == 0, "every edge is counted twice (%d)" % edges)
+	@warning_ignore("integer_division")
 	ok(edges / 2 == ADJ_EDGES, "the map has %d borders (%d)" % [ADJ_EDGES, edges / 2])
 	ok(asym.is_empty(), "and not one of them is one-way (%s)" % str(asym))
 	var seen := Factions.hops_from(String(_land[0]), _adj)

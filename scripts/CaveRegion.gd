@@ -751,8 +751,10 @@ func _stamp_sphere(s: Dictionary) -> void:
 				field.data[id] = lerpf(field.data[id], data[n], w)
 	## Remember which chunks this reached so only those get re-skinned.
 	var hi := lo + size
+	@warning_ignore("integer_division")
 	_restore_lo = Vector3i(clampi(lo.x / CH, 0, _ncx - 1), clampi(lo.y / CH, 0, _ncy - 1),
 		clampi(lo.z / CH, 0, _ncz - 1))
+	@warning_ignore("integer_division")
 	_restore_hi = Vector3i(clampi(hi.x / CH, 0, _ncx - 1), clampi(hi.y / CH, 0, _ncy - 1),
 		clampi(hi.z / CH, 0, _ncz - 1))
 	## A dig that broke the surface changes the meadow above it too.

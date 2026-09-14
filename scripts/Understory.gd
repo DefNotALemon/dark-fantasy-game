@@ -414,6 +414,7 @@ func cut_at(center: Vector3, radius: float) -> bool:
 func _chunk_key_at(wx: float, wz: float) -> Vector2i:
 	var i := int((wx - field.origin.x) / CaveField.VOX)
 	var k := int((wz - field.origin.z) / CaveField.VOX)
+	@warning_ignore("integer_division")
 	return Vector2i(clampi(i / CHUNK_CELLS, 0, _ncx - 1), clampi(k / CHUNK_CELLS, 0, _ncz - 1))
 
 

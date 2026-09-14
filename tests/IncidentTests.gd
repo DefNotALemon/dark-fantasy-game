@@ -284,9 +284,9 @@ func _uids_of(rows: Array) -> Array:
 
 ## The direct children of a staged incident's root whose prop kind is `kind`,
 ## in build order.
-func _props_of(root: Node, kind: String) -> Array:
+func _props_of(rt: Node, kind: String) -> Array:
 	var out: Array = []
-	for ch in root.get_children():
+	for ch in rt.get_children():
 		if String(ch.name).begins_with("Prop_%s_" % kind):
 			out.append(ch)
 	return out
@@ -1077,11 +1077,11 @@ func _test_layout() -> void:
 	d.scan(900.05)
 	var uid := int(e["uid"])
 	eq(d.record_for(uid).get("state", ""), "staged", "the fold is up")
-	var root: Node = d._nodes[uid]
+	var rt: Node = d._nodes[uid]
 
-	var hurdles := _props_of(root, "hurdle")
+	var hurdles := _props_of(rt, "hurdle")
 	eq(hurdles.size(), 3, "three hurdle panels were built")
-	var tracks := _props_of(root, "track")
+	var tracks := _props_of(rt, "track")
 	ok(tracks.size() >= 4, "and a scatter of tracks to compare them against (%d)" % tracks.size())
 
 	## A line is a line: every panel on one bearing through the anchor.
@@ -1117,7 +1117,7 @@ func _test_layout() -> void:
 		"the scattered props are not on a line")
 
 	## PURE. Strike it, restage it, and every panel is on the same grass.
-	var before := _digest_node(root)
+	var before := _digest_node(rt)
 	_put(p, at + Vector2(5000.0, 0.0))
 	d.scan(900.1)
 	_put(p, at)
@@ -1203,9 +1203,9 @@ func _test_critters() -> void:
 
 	## The critters are NOT children of the incident root -- the wildlife
 	## director owns them -- but they DO count towards the incident's props.
-	var root: Node = d._nodes[uid]
-	eq(_props_of(root, NOT_BUILT).size(), 0, "no box deer was parented to the incident")
-	eq(int(d.record_for(uid).get("props", 0)), root.get_child_count() + want_deer,
+	var rt: Node = d._nodes[uid]
+	eq(_props_of(rt, NOT_BUILT).size(), 0, "no box deer was parented to the incident")
+	eq(int(d.record_for(uid).get("props", 0)), rt.get_child_count() + want_deer,
 		"the prop count is the geometry on the ground plus every animal asked for")
 	var placed := 0
 	for a in w.asked:
@@ -2299,7 +2299,7 @@ func _test_cap() -> void:
 	## ------------------------------------------------------------------------
 	var c2 := _chron()
 	var far_pl: Dictionary = c2.places[20]
-	var far_at: Vector2 = far_pl["pos"]
+	var _far_at: Vector2 = far_pl["pos"]
 	var p2 := _body()
 	var d2 := _dir(null, p2)
 	var struck: Array = []
@@ -2460,9 +2460,9 @@ class Tap extends Telegraph:
 	## SceneTree looking for critters, and nothing in this suite is ever in a
 	## live tree -- so the bus is stood in for at the one method the Director
 	## actually calls.
-	var log: Array = []
+	var lg: Array = []
 	func _ring(pos: Vector3, radius: float, threat: int, source_name: String, hops: int) -> void:
-		log.append({"pos": pos, "radius": radius, "threat": threat, "src": source_name, "hops": hops})
+		lg.append({"pos": pos, "radius": radius, "threat": threat, "src": source_name, "hops": hops})
 
 
 func _test_earshot() -> void:
@@ -2493,8 +2493,8 @@ func _test_earshot() -> void:
 	eq(heard.size(), 2, "and the player is standing in both of them, so both are heard")
 	eq(d.record_for(lu).get("heard", false), true, "the fire latched")
 	eq(d.record_for(qu).get("heard", false), true, "the murrain latched too -- it is plainly visible")
-	eq(tap.log.size(), 1, "but only one of them rang the Telegraph")
-	var ring: Dictionary = tap.log[0]
+	eq(tap.lg.size(), 1, "but only one of them rang the Telegraph")
+	var ring: Dictionary = tap.lg[0]
 	eq(int(ring["threat"]), IncidentKit.threat_for("fire"), "the ring carries the recipe's live threat")
 	eq(String(ring["src"]), IncidentKit.hear_for("fire"), "and the recipe's sound")
 	near(float(ring["radius"]), IncidentDirector.EARSHOT, 1e-4, "and rings at earshot")
@@ -2506,7 +2506,7 @@ func _test_earshot() -> void:
 	for i in 12:
 		d.scan(500.06 + float(i) * 0.01)
 	eq(heard.size(), 2, "twelve more scans in earshot and nothing was heard twice")
-	eq(tap.log.size(), 1, "and the Telegraph rang once")
+	eq(tap.lg.size(), 1, "and the Telegraph rang once")
 
 	## Across a strike and a restage.
 	_put(p, at + Vector2(6000.0, 0.0))
@@ -2516,7 +2516,7 @@ func _test_earshot() -> void:
 	d.scan(500.4)
 	eq(d.staged_uids().size(), 2, "walked back: restaged")
 	eq(heard.size(), 2, "and the world did not tell the same thing twice")
-	eq(tap.log.size(), 1, "the Telegraph stayed quiet on the second visit")
+	eq(tap.lg.size(), 1, "the Telegraph stayed quiet on the second visit")
 	eq(d.record_for(lu).get("heard", false), true, "the latch survived the teardown")
 
 	## Across a save round trip.
@@ -2531,7 +2531,7 @@ func _test_earshot() -> void:
 	d2.scan(500.5)
 	eq(d2.staged_uids().size(), 2, "the loaded Director rebuilt both")
 	eq(heard2.size(), 0, "and heard nothing: the latch survived the save")
-	eq(tap.log.size(), 1, "and rang nothing")
+	eq(tap.lg.size(), 1, "and rang nothing")
 
 	## Earshot is a radius, not a chunk boundary: staged but out of earshot is
 	## staged and silent.
@@ -2591,9 +2591,9 @@ func _test_threat_after() -> void:
 	d.scan(700.02)
 	var fu := int(fire["uid"])
 	eq(heard, [fu], "the fire is heard while it burns")
-	eq(tap.log.size(), 1, "and it rang")
-	eq(int((tap.log[0] as Dictionary)["threat"]), 3, "at PANIC")
-	eq(int((tap.log[0] as Dictionary)["threat"]), IncidentKit.threat_for("fire"),
+	eq(tap.lg.size(), 1, "and it rang")
+	eq(int((tap.lg[0] as Dictionary)["threat"]), 3, "at PANIC")
+	eq(int((tap.lg[0] as Dictionary)["threat"]), IncidentKit.threat_for("fire"),
 		"which is exactly the recipe's live threat")
 
 	## The aftermath of that same fire is `threat_after: -1` -- cold char, and
@@ -2605,13 +2605,13 @@ func _test_threat_after() -> void:
 	var heard2: Array = []
 	d2.incident_heard.connect(func(rec): heard2.append(int(rec["uid"])))
 	_resolve(c, fire)
-	tap.log.clear()
+	tap.lg.clear()
 	d2.scan(700.1)
 	eq(d2.record_for(fu).get("live", true), false, "the second Director sees the fire as finished")
 	eq(d2.record_for(fu).get("state", ""), "staged", "and stages the char")
 	eq(heard2, [fu], "and the char is still noticed")
 	eq(d2.record_for(fu).get("heard", false), true, "and latched")
-	eq(tap.log.size(), 0, "but it rang nothing at all")
+	eq(tap.lg.size(), 0, "but it rang nothing at all")
 	eq(IncidentKit.threat_after_for("fire"), -1, "because its threat_after is -1")
 
 	## A raided hall is the other way round: still worth the watch turning out.
@@ -2623,12 +2623,12 @@ func _test_threat_after() -> void:
 	var d3 := _dir(c3, p3)
 	var raid := _ev(c3, "goblin_raid", pl3, 700.0, _first_outcome("goblin_raid"))
 	c3.resolved.append(raid)
-	tap.log.clear()
+	tap.lg.clear()
 	d3.scan(700.2)
 	eq(d3.record_for(int(raid["uid"])).get("heard", false), true, "the raided hall is heard")
-	eq(tap.log.size(), 1, "and rings")
-	eq(int((tap.log[0] as Dictionary)["threat"]), 2, "at ALARM, days later")
-	eq(int((tap.log[0] as Dictionary)["threat"]), IncidentKit.threat_after_for("goblin_raid"),
+	eq(tap.lg.size(), 1, "and rings")
+	eq(int((tap.lg[0] as Dictionary)["threat"]), 2, "at ALARM, days later")
+	eq(int((tap.lg[0] as Dictionary)["threat"]), IncidentKit.threat_after_for("goblin_raid"),
 		"which is the recipe's explicit threat_after")
 
 	## And a recipe that says nothing gets mini(threat, 1): quieter, not silent.
@@ -2639,14 +2639,14 @@ func _test_threat_after() -> void:
 	var d4 := _dir(c4, p4)
 	var fold := _ev(c4, "wolves_at_fold", pl4, 700.0, "ewes_lost")
 	c4.resolved.append(fold)
-	tap.log.clear()
+	tap.lg.clear()
 	d4.scan(700.3)
-	eq(tap.log.size(), 1, "an unset aftermath still rings")
-	eq(int((tap.log[0] as Dictionary)["threat"]), mini(IncidentKit.threat_for("wolves_at_fold"), 1),
+	eq(tap.lg.size(), 1, "an unset aftermath still rings")
+	eq(int((tap.lg[0] as Dictionary)["threat"]), mini(IncidentKit.threat_for("wolves_at_fold"), 1),
 		"at mini(threat, 1)")
-	ok(int((tap.log[0] as Dictionary)["threat"]) < IncidentKit.threat_for("wolves_at_fold"),
+	ok(int((tap.lg[0] as Dictionary)["threat"]) < IncidentKit.threat_for("wolves_at_fold"),
 		"which is quieter than the wolves themselves were")
-	eq(String((tap.log[0] as Dictionary)["src"]), IncidentKit.hear_for("wolves_at_fold"),
+	eq(String((tap.lg[0] as Dictionary)["src"]), IncidentKit.hear_for("wolves_at_fold"),
 		"and it is still the same sound")
 
 	Telegraph._instance = null

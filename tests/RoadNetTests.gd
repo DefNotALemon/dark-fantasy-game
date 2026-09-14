@@ -545,6 +545,7 @@ func _t_index() -> void:
 					narrowed += 1
 	ok(probes > 100, "%d probes taken 250 m off the side of every road" % probes)
 	ok(wrong == 0, "the grid agrees with brute force on every one of them (%d off)" % wrong)
+	@warning_ignore("integer_division")
 	ok(narrowed > probes / 2, "and it looked at fewer roads than all of them for most (%d of %d)"
 			% [narrowed, probes])
 	n.nearest_road_brute(Vector2.ZERO)

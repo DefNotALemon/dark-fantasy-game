@@ -2279,9 +2279,9 @@ static func _b_post(root: Node3D, arg: String, i: int, u: float) -> void:
 	## splintered stump with three or four spikes of heartwood standing out of
 	## it; a sapling taken off with a hatchet leaves one flat pale face. From
 	## fifteen metres the difference is the spikes, so that is what gets built.
-	var snapped := arg == "snapped"
+	var is_snapped := arg == "snapped"
 	var h := _spanned(u, i, 1, 1.05, 1.55) - (0.45 if burnt else 0.0)
-	if snapped:
+	if is_snapped:
 		h = _spanned(u, i, 21, 0.45, 0.9)
 	var lean := deg_to_rad(_spanned(u, i, 2, -16.0, 16.0))
 	var mat := _mat(_col("char") if burnt else _col("wood"))
@@ -2293,7 +2293,7 @@ static func _b_post(root: Node3D, arg: String, i: int, u: float) -> void:
 		_add(root, _box(0.17, 0.05, 0.17), _mat(_col("wood_pale")),
 			Vector3(sin(lean) * h * 0.5, h, sin(lean * 0.55) * h * 0.5),
 			Vector3(0.35, _wob(u, i, 3) * TAU, 0.25))
-	if snapped:
+	if is_snapped:
 		for k in 3:
 			var sp := _spanned(u, i, 22 + k, 0.16, 0.38)
 			var sa := _wob(u, i, 25 + k) * TAU
@@ -2512,7 +2512,7 @@ static func _b_cloth(root: Node3D, arg: String, i: int, u: float) -> void:
 			Vector3(deg_to_rad(-24.0), _wob(u, i, 9) * TAU, deg_to_rad(-31.0)))
 
 
-static func _b_fleece(root: Node3D, arg: String, i: int, u: float) -> void:
+static func _b_fleece(root: Node3D, _arg: String, i: int, u: float) -> void:
 	## Wool torn off on a thorn. Spec `y` lifts it into the hedge, which is
 	## where a shepherd would actually find it.
 	var mat := _mat(_col("fleece"))
@@ -2539,7 +2539,7 @@ static func _b_stone(root: Node3D, arg: String, i: int, u: float) -> void:
 		Vector3.ZERO, Vector3(1.0, 0.6, 0.9))
 
 
-static func _b_ash(root: Node3D, arg: String, i: int, u: float) -> void:
+static func _b_ash(root: Node3D, _arg: String, i: int, u: float) -> void:
 	## Where a fire was. Grey patch, a few black lumps at the rim, and the
 	## single most legible aftermath prop in the kit.
 	var w := _spanned(u, i, 1, 1.2, 2.0)
@@ -2551,7 +2551,7 @@ static func _b_ash(root: Node3D, arg: String, i: int, u: float) -> void:
 			Vector3(cos(a) * d, 0.05, sin(a) * d), Vector3.ZERO, Vector3(1.0, 0.5, 1.0))
 
 
-static func _b_char(root: Node3D, arg: String, i: int, u: float) -> void:
+static func _b_char(root: Node3D, _arg: String, i: int, u: float) -> void:
 	var mat := _mat(_col("char"))
 	for k in 3:
 		var l := _spanned(u, i, 1 + k, 0.35, 0.75)
@@ -2634,7 +2634,7 @@ static func _b_scat(root: Node3D, arg: String, i: int, u: float) -> void:
 			Vector3.ZERO, Vector3(1.0, 0.7, 1.0))
 
 
-static func _b_cairn(root: Node3D, arg: String, i: int, u: float) -> void:
+static func _b_cairn(root: Node3D, _arg: String, i: int, u: float) -> void:
 	## Stones over somebody, or a mark that somebody was here. Four flattened
 	## spheres getting smaller, stacked slightly wrong, because they always are.
 	var mat := _mat(_col("stone"))
@@ -2708,7 +2708,7 @@ static func _b_net(root: Node3D, arg: String, i: int, u: float) -> void:
 						Vector3(PI * 0.5, _wob(u, i, 14 + k) * TAU, 0.0))
 
 
-static func _b_float(root: Node3D, arg: String, i: int, u: float) -> void:
+static func _b_float(root: Node3D, _arg: String, i: int, u: float) -> void:
 	## Cork and a glass ball's worth of tarred wood. What a shore is made of
 	## when the boats are out, and what is left of one when they are not.
 	var cork := _mat(_col("cork"))

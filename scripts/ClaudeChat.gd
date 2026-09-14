@@ -167,6 +167,7 @@ class Http extends RefCounted:
 		if done:
 			return
 		if Time.get_ticks_msec() - _started_ms > timeout_ms:
+			@warning_ignore("integer_division")
 			fail("timed out after %d s" % int(timeout_ms / 1000))
 			return
 		if not _connecting:
@@ -230,22 +231,22 @@ class Http extends RefCounted:
 		## "https://host:port/path" -> {tls, host, port, path}. Defaults: https,
 		## 443/80 by scheme, "/" for an empty path.
 		var s := url.strip_edges()
-		var tls := true
+		var u_tls := true
 		if s.begins_with("http://"):
-			tls = false
+			u_tls = false
 			s = s.substr(7)
 		elif s.begins_with("https://"):
 			s = s.substr(8)
 		var slash := s.find("/")
 		var hostport := s if slash < 0 else s.substr(0, slash)
-		var path := "/" if slash < 0 else s.substr(slash)
-		var port := 443 if tls else 80
-		var host := hostport
+		var u_path := "/" if slash < 0 else s.substr(slash)
+		var u_port := 443 if u_tls else 80
+		var u_host := hostport
 		var colon := hostport.rfind(":")
 		if colon >= 0 and hostport.substr(colon + 1).is_valid_int():
-			host = hostport.substr(0, colon)
-			port = int(hostport.substr(colon + 1))
-		return {"tls": tls, "host": host, "port": port, "path": path}
+			u_host = hostport.substr(0, colon)
+			u_port = int(hostport.substr(colon + 1))
+		return {"tls": u_tls, "host": u_host, "port": u_port, "path": u_path}
 
 
 	static func join_path(base: String, tail: String) -> String:
@@ -261,14 +262,14 @@ class Http extends RefCounted:
 		## event's joined `data:` lines (an event ends at a blank line), and the
 		## unterminated tail to keep for the next chunk. `event:`, `id:`, `:`
 		## comment lines are dropped; CRLF is tolerated.
-		var text := buf.replace("\r\n", "\n")
+		var body_text := buf.replace("\r\n", "\n")
 		var datas: Array = []
 		var pos := 0
 		while true:
-			var end := text.find("\n\n", pos)
+			var end := body_text.find("\n\n", pos)
 			if end < 0:
 				break
-			var block := text.substr(pos, end - pos)
+			var block := body_text.substr(pos, end - pos)
 			pos = end + 2
 			var lines: Array = []
 			for ln in block.split("\n"):
@@ -279,7 +280,7 @@ class Http extends RefCounted:
 					lines.append(v)
 			if not lines.is_empty():
 				datas.append("\n".join(lines))
-		return [datas, text.substr(pos)]
+		return [datas, body_text.substr(pos)]
 
 
 	func _drain_sse(flush: bool) -> void:
@@ -438,7 +439,7 @@ static func window(msgs: Array, keep: int) -> Array:
 	return w
 
 
-static func chat_system(snapshot: Dictionary) -> String:
+static func chat_system(snap: Dictionary) -> String:
 	return ("You are Claude, riding along inside Myrkfell -- a Godot 4.7 first-person "
 		+ "dark-fantasy survival RPG set on a stylised map of Maine -- as the developer's "
 		+ "in-game assistant. The developer (Lemon) is playing right now and talking to you "
@@ -448,7 +449,7 @@ static func chat_system(snapshot: Dictionary) -> String:
 		+ "this conversation -- bugs, ideas, requests, decisions -- and sends them up the "
 		+ "line to the Claude Code session that edits the repo, so when Lemon says 'note "
 		+ "that' or 'remember this', acknowledge in a few words and move on.\n\n"
-		+ "GAME STATE (JSON): " + JSON.stringify(snapshot))
+		+ "GAME STATE (JSON): " + JSON.stringify(snap))
 
 
 static func notes_system() -> String:
@@ -463,9 +464,9 @@ static func notes_system() -> String:
 		+ "Reply {\"notes\":[]} when nothing durable was said.")
 
 
-static func notes_user(snapshot: Dictionary, user_text: String, assistant_text: String) -> String:
+static func notes_user(snap: Dictionary, user_text: String, assistant_text: String) -> String:
 	return ("GAME STATE: %s\n\nLEMON SAID:\n%s\n\nASSISTANT REPLIED:\n%s" %
-		[JSON.stringify(snapshot), user_text, assistant_text])
+		[JSON.stringify(snap), user_text, assistant_text])
 
 
 static func parse_notes(raw: String) -> Array:
@@ -507,7 +508,7 @@ static func note_line(n: Dictionary) -> String:
 		String(n["text"]), tail]
 
 
-static func handoff_md(title: String, when: String, snapshot: Dictionary, session_notes: Array, transcript: Array) -> String:
+static func handoff_md(title: String, when: String, snap: Dictionary, session_notes: Array, transcript: Array) -> String:
 	## The file that goes up the line: notes grouped by kind, then the
 	## transcript, then the state at the moment it was sent.
 	var out := "# %s\n\n" % title
@@ -533,7 +534,7 @@ static func handoff_md(title: String, when: String, snapshot: Dictionary, sessio
 	for h in transcript:
 		var who := "**Lemon:**" if String(h["role"]) == "user" else "**Claude:**"
 		out += "%s %s\n\n" % [who, String(h["text"]).strip_edges()]
-	out += "## Game state when sent\n\n```json\n%s\n```\n" % JSON.stringify(snapshot, "  ")
+	out += "## Game state when sent\n\n```json\n%s\n```\n" % JSON.stringify(snap, "  ")
 	return out
 
 

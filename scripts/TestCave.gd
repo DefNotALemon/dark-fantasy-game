@@ -447,8 +447,6 @@ func _build_chunk(key: Vector3i) -> Dictionary:
 	## convert to Packed buffers once, at the end.
 	var vids := {}
 	var pos := []
-	var nrm := []
-	var col := []
 	var idx := []
 	var tris := []  ## collision faces
 
@@ -569,8 +567,11 @@ func carve_bite(pos_world: Vector3) -> bool:
 					any = true
 	if not any:
 		return false
+	@warning_ignore("integer_division")
 	for a in range(maxi((lo.x - 1) / CH, 0), (hi.x + 1) / CH + 1):
+		@warning_ignore("integer_division")
 		for b in range(maxi((lo.y - 1) / CH, 0), (hi.y + 1) / CH + 1):
+			@warning_ignore("integer_division")
 			for c in range(maxi((lo.z - 1) / CH, 0), (hi.z + 1) / CH + 1):
 				var key := Vector3i(a, b, c)
 				if _bkeys.has(key):
@@ -685,6 +686,7 @@ func _spawn_dwellers() -> void:
 	spots.sort_custom(func(a, b): return a.z < b.z)
 	var front: Vector3 = spots[0]
 	var back: Vector3 = spots[spots.size() - 1]
+	@warning_ignore("integer_division")
 	var mid: Vector3 = spots[spots.size() / 2]
 	_spawn_pack(Kobold, rng.randi_range(4, 6), front, rng)
 	if spots.size() >= 2:

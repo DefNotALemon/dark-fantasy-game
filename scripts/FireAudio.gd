@@ -267,6 +267,7 @@ static func pop_key(n: int) -> String:
 	## shifts instead — deterministic, so two fires fed the same wood sound the
 	## same, exactly like they burn down to the same second.
 	if n > 0 and n % SETTLE_EVERY == 0:
+		@warning_ignore("integer_division")
 		return "settle_%d" % (1 + ((n / SETTLE_EVERY) % SETTLE_KINDS))
 	return "crackle_%d" % (1 + (n % POP_KINDS))
 

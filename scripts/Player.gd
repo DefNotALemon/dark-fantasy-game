@@ -846,7 +846,7 @@ func _make_sword(parent: Node, base_pos := Vector3.ZERO, mat_id := "iron") -> No
 	var blade_col: Color = mat["color"]
 	var elem: Dictionary = mat["element"]
 	var dark := Color(0.12, 0.10, 0.09)
-	var gold := Color(0.50, 0.42, 0.22)
+	var gold_col := Color(0.50, 0.42, 0.22)
 	var blade := _box(s, Vector3(0.05, 0.09, 0.95), blade_col, Vector3(0, 0, -0.55), Vector3.ZERO, true)  ## blade (-z)
 	if not elem.is_empty():
 		var ecol: Color = elem["color"]
@@ -864,9 +864,9 @@ func _make_sword(parent: Node, base_pos := Vector3.ZERO, mat_id := "iron") -> No
 		smat.emission = ecol
 		smat.emission_energy_multiplier = 2.0
 		smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_box(s, Vector3(0.26, 0.05, 0.05), gold, Vector3(0, 0, -0.05))                        ## crossguard
+	_box(s, Vector3(0.26, 0.05, 0.05), gold_col, Vector3(0, 0, -0.05))                        ## crossguard
 	_box(s, Vector3(0.04, 0.04, 0.16), dark, Vector3(0, 0, 0.06))                          ## grip
-	_box(s, Vector3(0.06, 0.06, 0.05), gold, Vector3(0, 0, 0.16))                          ## pommel
+	_box(s, Vector3(0.06, 0.06, 0.05), gold_col, Vector3(0, 0, 0.16))                          ## pommel
 	## The high metals have WEATHER (Materials.blade_fx): the fire metals shed
 	## pixel flame and orange lamplight, mithril burns white, adamant amber,
 	## and voidsteel wears a slow pixel void crawling the steel.
@@ -1284,12 +1284,12 @@ func _build_axe_mesh() -> void:
 	var skin := Color(0.62, 0.46, 0.36)
 	var armor := Color(0.30, 0.31, 0.36)
 	var wood := Color(0.30, 0.20, 0.11)
-	var wrap := Color(0.20, 0.14, 0.09)
+	var wrap_col := Color(0.20, 0.14, 0.09)
 	var iron := Color(0.58, 0.60, 0.64)
 	_box(axe_vm, Vector3(0.10, 0.10, 0.13), skin, Vector3(0, 0, 0.02))                          ## hand
 	_box(axe_vm, Vector3(0.09, 0.09, 0.30), armor, Vector3(0, -0.05, 0.18), Vector3(8, 0, 0))   ## forearm
 	_box(axe_vm, Vector3(0.055, 0.055, 0.66), wood, Vector3(0, 0.02, -0.34))                    ## haft (-z)
-	_box(axe_vm, Vector3(0.06, 0.06, 0.10), wrap, Vector3(0, 0.02, -0.06))                      ## grip wrap
+	_box(axe_vm, Vector3(0.06, 0.06, 0.10), wrap_col, Vector3(0, 0.02, -0.06))                      ## grip wrap
 	_box(axe_vm, Vector3(0.07, 0.10, 0.13), iron, Vector3(0, 0.02, -0.64), Vector3.ZERO, true)  ## head socket
 	## The blade: a broad wedge sweeping down-forward, edge proud of the haft.
 	_box(axe_vm, Vector3(0.045, 0.34, 0.16), iron, Vector3(0, -0.14, -0.66), Vector3(-8, 0, 0), true)
@@ -2480,12 +2480,12 @@ func _exposure_env() -> Dictionary:
 	if dn != null:
 		hour = float(dn.get("hour"))
 		day = float(dn.get("day"))
-	var level := 0
+	var wx_level := 0
 	var intensity := 0.0
 	var snowing := false
 	var wind := 0.0
 	if wx != null:
-		level = int(wx.get("level"))
+		wx_level = int(wx.get("level"))
 		intensity = clampf(float(wx.get("intensity")), 0.0, 1.0)
 		if wx.has_method("is_snowing"):
 			snowing = bool(wx.call("is_snowing"))
@@ -2496,7 +2496,7 @@ func _exposure_env() -> Dictionary:
 		"season": Exposure.season_for_day(day),
 		"hour": hour,
 		"y": global_position.y,
-		"level": level,
+		"level": wx_level,
 		"intensity": intensity,
 		"snowing": snowing,
 		"wind": wind,
@@ -4432,13 +4432,13 @@ func _pose_keys(keys: Array, p: float) -> Array:
 	var fol_r: Vector3 = keys[2][0]
 	var fol_p: Vector3 = keys[2][1]
 	if p < 0.24:
-		var u := p / 0.24
-		u = 1.0 - (1.0 - u) * (1.0 - u)             ## ease OUT into the chamber
-		return [Vector3.ZERO.lerp(cham_r, u), Vector3.ZERO.lerp(cham_p, u)]
+		var u0 := p / 0.24
+		u0 = 1.0 - (1.0 - u0) * (1.0 - u0)             ## ease OUT into the chamber
+		return [Vector3.ZERO.lerp(cham_r, u0), Vector3.ZERO.lerp(cham_p, u0)]
 	elif p < 0.52:
-		var u := (p - 0.24) / 0.28
-		u = u * u                                    ## the whip — screaming at impact
-		return [cham_r.lerp(imp_r, u), cham_p.lerp(imp_p, u)]
+		var u1 := (p - 0.24) / 0.28
+		u1 = u1 * u1                                    ## the whip — screaming at impact
+		return [cham_r.lerp(imp_r, u1), cham_p.lerp(imp_p, u1)]
 	var u := (p - 0.52) / 0.48
 	u = 1.0 - pow(1.0 - u, 3.0)                      ## weight carries past, settles
 	return [imp_r.lerp(fol_r, u), imp_p.lerp(fol_p, u)]
@@ -4454,9 +4454,9 @@ func _draw_pose(p: float) -> Array:
 	var fol_r := Vector3(-24.0, -48.0, -12.0)
 	var fol_p := Vector3(-0.06, 0.04, -0.04)
 	if p < 0.52:
-		var u := p / 0.52
-		u = u * u                                    ## accelerating out of the sheath
-		return [start_r.lerp(imp_r, u), start_p.lerp(imp_p, u)]
+		var u0 := p / 0.52
+		u0 = u0 * u0                                    ## accelerating out of the sheath
+		return [start_r.lerp(imp_r, u0), start_p.lerp(imp_p, u0)]
 	var u := (p - 0.52) / 0.48
 	u = 1.0 - pow(1.0 - u, 3.0)
 	return [imp_r.lerp(fol_r, u), imp_p.lerp(fol_p, u)]
@@ -8463,7 +8463,7 @@ func _butcher_cut() -> void:
 	if _cut_cd > 0.0:
 		return
 	var rec := _carc_target
-	var mass := float(rec.get("mass", 0.0))
+	var carcass_mass := float(rec.get("mass", 0.0))
 	var before := float(rec.get("left", 0.0))
 	var species0 := String(rec.get("species", ""))
 	var harv0: Dictionary = (CritterDex.get_profile(species0) as Dictionary).get("harv", {})
@@ -8512,7 +8512,7 @@ func _butcher_cut() -> void:
 
 	## And the parts, out of the dex's own `harv` row -- its first reader in
 	## the life of the project.
-	var due: Dictionary = Butchery.parts_due(harv, mass, mass - before, mass - after)
+	var due: Dictionary = Butchery.parts_due(harv, carcass_mass, carcass_mass - before, carcass_mass - after)
 	for k in due.keys():
 		var part := String(k)
 		var cnt := int(due[k])
@@ -8525,9 +8525,9 @@ func _butcher_cut() -> void:
 	if warmth_survival():
 		exposure.wet = minf(1.0, exposure.wet + Butchery.CUT_WET)
 
-	if Carcasses.open_mult(mass, before) == 1.0 and Carcasses.open_mult(mass, after) > 1.0:
+	if Carcasses.open_mult(carcass_mass, before) == 1.0 and Carcasses.open_mult(carcass_mass, after) > 1.0:
 		_add_log_msg("It is open now, and the woods can smell it", Color(0.95, 0.78, 0.55))
-	for id in Butchery.crossed(mass, before, after):
+	for id in Butchery.crossed(carcass_mass, before, after):
 		var line := Butchery.denied_line(String(id))
 		if line != "":
 			_add_log_msg(line, Color(0.72, 0.88, 0.72))
@@ -9131,19 +9131,19 @@ func _refresh_progression_page() -> void:
 		var earned := int(stats.tiers_earned[id])
 		var stat_name := String(PlayerStats.STAT_NAMES[String(t.stat)])
 
-		var head := Label.new()
-		head.add_theme_font_size_override("font_size", 19)
-		prog_box.add_child(head)
+		var head_lbl := Label.new()
+		head_lbl.add_theme_font_size_override("font_size", 19)
+		prog_box.add_child(head_lbl)
 		if bool(t.locked):
-			head.text = "???  —  %s" % stat_name
-			head.modulate = Color(1, 1, 1, 0.45)
+			head_lbl.text = "???  —  %s" % stat_name
+			head_lbl.modulate = Color(1, 1, 1, 0.45)
 			var why := _prog_line("     %s" % String(t.desc), Color(1, 1, 1, 0.35))
 			prog_box.add_child(why)
 			prog_box.add_child(_prog_gap())
 			continue
 		var suffix := "   (%d earned)" % earned if earned > 0 else ""
-		head.text = "%s  —  %s%s" % [String(t.name), stat_name, suffix]
-		head.modulate = Color(1.0, 0.85, 0.45) if earned > 0 else Color(1, 1, 1, 0.9)
+		head_lbl.text = "%s  —  %s%s" % [String(t.name), stat_name, suffix]
+		head_lbl.modulate = Color(1.0, 0.85, 0.45) if earned > 0 else Color(1, 1, 1, 0.9)
 		prog_box.add_child(_prog_line("     %s" % String(t.desc), Color(1, 1, 1, 0.5)))
 
 		## Earned tiers in gold — long histories collapse to the last few.
@@ -9194,19 +9194,19 @@ func _tree_amount(id: String, n: int) -> String:
 
 
 func _mini_bar(ratio: float) -> Control:
-	var wrap := Control.new()
-	wrap.custom_minimum_size = Vector2(300, 10)
+	var wrap_ctl := Control.new()
+	wrap_ctl.custom_minimum_size = Vector2(300, 10)
 	var bg := ColorRect.new()
 	bg.color = Color(0, 0, 0, 0.5)
 	bg.size = Vector2(260, 6)
 	bg.position = Vector2(40, 2)
-	wrap.add_child(bg)
+	wrap_ctl.add_child(bg)
 	var fill := ColorRect.new()
 	fill.color = Color(0.45, 0.70, 1.0)
 	fill.size = Vector2(260.0 * clampf(ratio, 0.0, 1.0), 6)
 	fill.position = Vector2(40, 2)
-	wrap.add_child(fill)
-	return wrap
+	wrap_ctl.add_child(fill)
+	return wrap_ctl
 
 
 func _refresh_inventory_ui() -> void:

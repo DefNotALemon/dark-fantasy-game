@@ -133,10 +133,10 @@ func _build_body() -> void:
 	_add_collision(Vector3(1.2, 2.6, 1.0), Vector3(0, 1.3, 0))
 
 	## Palette swapped with the Orc: the brute now wears the deep green hide.
-	var skin := Color(0.28, 0.40, 0.22)
+	var skin_col := Color(0.28, 0.40, 0.22)
 	var skin_dark := Color(0.20, 0.30, 0.16)
 	var loin := Color(0.26, 0.18, 0.11)
-	base_body_color = skin
+	base_body_color = skin_col
 
 	rig = Node3D.new()
 	add_child(rig)
@@ -145,12 +145,12 @@ func _build_body() -> void:
 	## Massive torso + gut. NOTE: the belly and the shoulder slab are deliberately
 	## INSET on Z (or clearly proud of the chest) rather than sharing the torso's
 	## 0.7 depth — coplanar faces z-fight and made the chest flicker.
-	var body := _box_in(rig, Vector3(1.0, 1.1, 0.7), skin, Vector3(0, 1.5, 0))
+	var body := _box_in(rig, Vector3(1.0, 1.1, 0.7), skin_col, Vector3(0, 1.5, 0))
 	body_mat = body.material_override as StandardMaterial3D
 	_box_in(rig, Vector3(0.88, 0.5, 0.58), skin_dark, Vector3(0, 0.95, 0.06))    ## belly (inset)
 	_box_in(rig, Vector3(1.22, 0.28, 0.60), skin_dark, Vector3(0, 2.11, 0))      ## shoulders (inset, riding above)
 	## Head sunk between the shoulders, with a hinged jaw.
-	_box_in(rig, Vector3(0.5, 0.42, 0.46), skin, Vector3(0, 2.32, -0.04))
+	_box_in(rig, Vector3(0.5, 0.42, 0.46), skin_col, Vector3(0, 2.32, -0.04))
 	jaw = Node3D.new()
 	rig.add_child(jaw)
 	jaw.position = Vector3(0, 2.18, -0.10)
@@ -161,13 +161,13 @@ func _build_body() -> void:
 	var larm := Node3D.new()
 	rig.add_child(larm)
 	larm.position = Vector3(-0.66, 1.95, 0)
-	_box_in(larm, Vector3(0.28, 1.0, 0.28), skin, Vector3(0, -0.50, 0))
+	_box_in(larm, Vector3(0.28, 1.0, 0.28), skin_col, Vector3(0, -0.50, 0))
 	_box_in(larm, Vector3(0.30, 0.30, 0.30), skin_dark, Vector3(0, -1.03, 0))   ## left fist
 	walk_arms.append(larm)
 	arm = Node3D.new()
 	rig.add_child(arm)
 	arm.position = Vector3(0.66, 1.95, 0)
-	_box_in(arm, Vector3(0.30, 1.0, 0.30), skin, Vector3(0, -0.5, 0))
+	_box_in(arm, Vector3(0.30, 1.0, 0.30), skin_col, Vector3(0, -0.5, 0))
 	_box_in(arm, Vector3(0.34, 0.34, 0.34), skin_dark, Vector3(0, -1.02, 0))      ## right fist
 	## Legs + loincloth: tree-trunk hip pivots for the waddling stomp.
 	_box_in(rig, Vector3(0.9, 0.3, 0.6), loin, Vector3(0, 0.72, 0))
@@ -175,7 +175,7 @@ func _build_body() -> void:
 		var leg := Node3D.new()
 		rig.add_child(leg)
 		leg.position = Vector3(lx, 0.76, 0)
-		_box_in(leg, Vector3(0.34, 0.75, 0.34), skin, Vector3(0, -0.38, 0))
+		_box_in(leg, Vector3(0.34, 0.75, 0.34), skin_col, Vector3(0, -0.38, 0))
 		walk_legs.append(leg)
 
 	_add_eye(Vector3(-0.11, 2.40, -0.26), Vector3(0.06, 0.05, 0.05), rig)

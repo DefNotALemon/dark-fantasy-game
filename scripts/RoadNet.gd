@@ -516,6 +516,7 @@ func _carve(a: Vector2, b: Vector2) -> PackedVector2Array:
 	## for the entire span, which sees the real trade and bows the whole road
 	## out at once -- then the offsets between control points are filled in and
 	## the next finer level tidies the shape the coarse one chose.
+	@warning_ignore("integer_division")
 	var st := maxi(1, segs / 2)
 	while true:
 		## How far ONE level may push, and the second half of why a lake is
@@ -554,6 +555,7 @@ func _carve(a: Vector2, b: Vector2) -> PackedVector2Array:
 		if st == 1:
 			break
 		off = _fill_between(off, st, segs)
+		@warning_ignore("integer_division")
 		st = maxi(1, st / 2)
 	for i in range(segs + 1):
 		poly.append(_pt(a, dir, nrm, d, segs, float(off[i]), i))
@@ -833,20 +835,20 @@ func point_on_edge(e: int, t: float) -> Vector2:
 	return poly[poly.size() - 1]
 
 
-func edges_from(name: String) -> PackedInt32Array:
-	if not _by_name.has(name):
+func edges_from(nm: String) -> PackedInt32Array:
+	if not _by_name.has(nm):
 		return PackedInt32Array()
-	return _at_node[int(_by_name[name])]
+	return _at_node[int(_by_name[nm])]
 
 
-func has_place(name: String) -> bool:
-	return _by_name.has(name)
+func has_place(nm: String) -> bool:
+	return _by_name.has(nm)
 
 
-func place_pos(name: String) -> Vector2:
-	if not _by_name.has(name):
+func place_pos(nm: String) -> Vector2:
+	if not _by_name.has(nm):
 		return Vector2.ZERO
-	return _pos(int(_by_name[name]))
+	return _pos(int(_by_name[nm]))
 
 
 func edge(e: int) -> Dictionary:

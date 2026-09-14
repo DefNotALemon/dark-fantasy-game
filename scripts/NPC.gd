@@ -585,10 +585,10 @@ static func default_schedule(for_job: String) -> Array:
 			]
 
 
-static func slot_for(sched: Array, hour: float) -> Dictionary:
+static func slot_for(slots: Array, hour: float) -> Dictionary:
 	## The slot that owns `hour` (wrapping midnight). Empty = no slot.
 	var h := fposmod(hour, 24.0)
-	for s in sched:
+	for s in slots:
 		var a := float(s.get("from", 0.0))
 		var b := float(s.get("to", 24.0))
 		if a <= b:

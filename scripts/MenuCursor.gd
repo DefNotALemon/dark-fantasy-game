@@ -192,19 +192,19 @@ func _rescale() -> void:
 	_sprite.texture = arrow(s)
 
 
-func arrow(scale: int) -> ImageTexture:
-	if _art.has(scale):
-		return _art[scale]
-	var tex := ImageTexture.create_from_image(arrow_image(scale))
-	_art[scale] = tex
+func arrow(sc: int) -> ImageTexture:
+	if _art.has(sc):
+		return _art[sc]
+	var tex := ImageTexture.create_from_image(arrow_image(sc))
+	_art[sc] = tex
 	return tex
 
 
-static func arrow_image(scale: int) -> Image:
-	scale = maxi(1, scale)
+static func arrow_image(sc: int) -> Image:
+	sc = maxi(1, sc)
 	var w: int = (ARROW[0] as String).length()
 	var h: int = ARROW.size()
-	var img := Image.create(w * scale, h * scale, false, Image.FORMAT_RGBA8)
+	var img := Image.create(w * sc, h * sc, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	for y in range(h):
 		var line: String = ARROW[y]
@@ -212,7 +212,7 @@ static func arrow_image(scale: int) -> Image:
 			var ch := line[x]
 			if ch == ".":
 				continue
-			img.fill_rect(Rect2i(x * scale, y * scale, scale, scale), INK if ch == "#" else BONE)
+			img.fill_rect(Rect2i(x * sc, y * sc, sc, sc), INK if ch == "#" else BONE)
 	return img
 
 

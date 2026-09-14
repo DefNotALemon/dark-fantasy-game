@@ -44,20 +44,20 @@ func _physics_process(delta: float) -> void:
 
 	## Stuck: rest where we landed and wait to be picked back up.
 	if stuck:
-		var pl := get_tree().get_first_node_in_group("player")
-		if pl == null or not (pl is Node3D):
+		var who := get_tree().get_first_node_in_group("player")
+		if who == null or not (who is Node3D):
 			return
-		var p3 := pl as Node3D
+		var p3 := who as Node3D
 		if not _magnet and p3.global_position.distance_to(global_position) <= 1.8:
 			_magnet = true
 		if _magnet:
 			var target: Vector3 = p3.global_position
-			if pl.has_method("get_waist_point"):
-				target = pl.get_waist_point()
+			if who.has_method("get_waist_point"):
+				target = who.get_waist_point()
 			var to := target - global_position
 			if to.length() < 0.35:
-				if pl.has_method("collect_pickup"):
-					pl.collect_pickup("arrow", 1)
+				if who.has_method("collect_pickup"):
+					who.collect_pickup("arrow", 1)
 				queue_free()
 				return
 			_accel += delta * 18.0

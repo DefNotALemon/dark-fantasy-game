@@ -106,11 +106,11 @@ func _build() -> void:
 		while not t.felled:
 			t.chop_hit(Vector3(0, 0, 1))
 
-		var tr: FallenTrunk = null
+		var xf: FallenTrunk = null
 		for c in w.get_children():
 			if c is FallenTrunk:
-				tr = c
-		_cases.append({"tr": tr, "world": w, "ox": ox, "len": length,
+				xf = c
+		_cases.append({"tr": xf, "world": w, "ox": ox, "len": length,
 			"label": "%s/%d" % [spec[0], spec[1]],
 			"peak": 0.0, "far": 0.0, "settle_t": -1.0, "victim": null})
 
@@ -120,13 +120,13 @@ func _physics_process(delta: float) -> bool:
 		return _done
 	_t += delta
 	for c in _cases:
-		var tr: FallenTrunk = c["tr"]
-		if tr == null or not is_instance_valid(tr):
+		var xf: FallenTrunk = c["tr"]
+		if xf == null or not is_instance_valid(xf):
 			continue
-		c["peak"] = maxf(float(c["peak"]), tr.linear_velocity.length())
+		c["peak"] = maxf(float(c["peak"]), xf.linear_velocity.length())
 		c["far"] = maxf(float(c["far"]),
-			Vector2(tr.position.x - float(c["ox"]), tr.position.z).length())
-		if tr.settled and float(c["settle_t"]) < 0.0:
+			Vector2(xf.position.x - float(c["ox"]), xf.position.z).length())
+		if xf.settled and float(c["settle_t"]) < 0.0:
 			c["settle_t"] = _t
 			# the moment it is down, walk something into the base of it
 			var v := Victim.new()
@@ -153,20 +153,21 @@ func _physics_process(delta: float) -> bool:
 	return true
 
 
-func _trunk_tris(tr: FallenTrunk) -> int:
-	if tr._trunk_mi == null or not is_instance_valid(tr._trunk_mi):
-		tr._cache_trunk_mesh()
-	if tr._trunk_mi == null or tr._trunk_mi.mesh == null:
+func _trunk_tris(xf: FallenTrunk) -> int:
+	if xf._trunk_mi == null or not is_instance_valid(xf._trunk_mi):
+		xf._cache_trunk_mesh()
+	if xf._trunk_mi == null or xf._trunk_mi.mesh == null:
 		return 0
 	var n := 0
-	for i in range(tr._trunk_mi.mesh.get_surface_count()):
-		n += (tr._trunk_mi.mesh.surface_get_arrays(i)[Mesh.ARRAY_INDEX]
+	for i in range(xf._trunk_mi.mesh.get_surface_count()):
+		@warning_ignore("integer_division")
+		n += (xf._trunk_mi.mesh.surface_get_arrays(i)[Mesh.ARRAY_INDEX]
 			as PackedInt32Array).size() / 3
 	return n
 
 
-func _trunk_cyl(tr: FallenTrunk) -> CollisionShape3D:
-	for c in tr.get_children():
+func _trunk_cyl(xf: FallenTrunk) -> CollisionShape3D:
+	for c in xf.get_children():
 		var cs := c as CollisionShape3D
 		if cs != null and cs.shape is CylinderShape3D:
 			return cs
@@ -194,13 +195,13 @@ func _last_log(world: Node3D) -> DroppedItem:
 func _assert() -> void:
 	print("-- a felled trunk stays where it fell")
 	for c in _cases:
-		var tr: FallenTrunk = c["tr"]
+		var xf: FallenTrunk = c["tr"]
 		var label := String(c["label"])
 		var length := float(c["len"])
 		var far := float(c["far"])
 		var peak := float(c["peak"])
-		ok(tr != null and is_instance_valid(tr), "%s: the trunk still exists" % label)
-		if tr == null or not is_instance_valid(tr):
+		ok(xf != null and is_instance_valid(xf), "%s: the trunk still exists" % label)
+		if xf == null or not is_instance_valid(xf):
 			continue
 
 		ok(far <= length * MAX_TRAVEL_PER_LENGTH and far <= HARD_TRAVEL_CAP,
@@ -209,22 +210,22 @@ func _assert() -> void:
 		ok(peak <= FallenTrunk.MAX_FALL_SPEED + 2.0,
 			"%s: peak speed %.1f m/s stayed under the cap (%.0f)"
 			% [label, peak, FallenTrunk.MAX_FALL_SPEED])
-		ok(tr.settled, "%s: settled inside %.0f s" % [label, SIM_SECONDS])
-		ok(tr.freeze, "%s: a settled log stops simulating" % label)
+		ok(xf.settled, "%s: settled inside %.0f s" % [label, SIM_SECONDS])
+		ok(xf.freeze, "%s: a settled log stops simulating" % label)
 
 		# ---- BUCKING (Lemon 2026-08-30: "fix the chopping trees into logs") --
 		# chop_hit refuses to buck a trunk that has not settled, so a log that
 		# never settles is also a log you can never turn into firewood
-		var before := tr.logs_left
-		var len_before := tr.trunk_len
-		var tris_before := _trunk_tris(tr)
+		var before := xf.logs_left
+		var len_before := xf.trunk_len
+		var tris_before := _trunk_tris(xf)
 		var world: Node3D = c["world"]
 		var logs_before := _count_logs(world)
 
-		tr.chop_hit(Vector3(0, 0, 1))
-		ok(tr.logs_left < before, "%s: a settled log bucks when you chop it" % label)
-		ok(tr.trunk_len < len_before - 0.5,
-			"%s: and the trunk gets SHORTER (%.1f -> %.1f m)" % [label, len_before, tr.trunk_len])
+		xf.chop_hit(Vector3(0, 0, 1))
+		ok(xf.logs_left < before, "%s: a settled log bucks when you chop it" % label)
+		ok(xf.trunk_len < len_before - 0.5,
+			"%s: and the trunk gets SHORTER (%.1f -> %.1f m)" % [label, len_before, xf.trunk_len])
 		ok(_count_logs(world) == logs_before + 1,
 			"%s: exactly one Log item comes off per bite" % label)
 		var lg := _last_log(world)
@@ -237,30 +238,30 @@ func _assert() -> void:
 			ok(lg.display_name() == "Log", "%s: and the prompt calls it a log" % label)
 
 		# the whole reported bug: the tree on the ground never changed
-		var tris_after := _trunk_tris(tr)
+		var tris_after := _trunk_tris(xf)
 		ok(tris_after < tris_before,
 			"%s: the trunk MESH shrinks too (%d -> %d tris) -- it used to spit out logs and not change at all"
 			% [label, tris_before, tris_after])
 
 		# the collider has to follow the mesh, and eat from the top so the butt
 		# stays where the tree fell
-		var cyl := _trunk_cyl(tr)
+		var cyl := _trunk_cyl(xf)
 		ok(cyl != null, "%s: still has its trunk collider" % label)
 		if cyl != null:
-			ok(absf((cyl.shape as CylinderShape3D).height - tr.trunk_len) < 0.01,
+			ok(absf((cyl.shape as CylinderShape3D).height - xf.trunk_len) < 0.01,
 				"%s: the collider matches the wood that is left" % label)
-			ok(absf(cyl.position.y - (tr._base + tr.trunk_len * 0.5)) < 0.01,
+			ok(absf(cyl.position.y - (xf._base + xf.trunk_len * 0.5)) < 0.01,
 				"%s: it shrank from the TOP, not around its middle" % label)
 
 		# and it bucks all the way down without getting stuck
 		var guard := 0
-		while is_instance_valid(tr) and not tr.chop_hit(Vector3(0, 0, 1)) and guard < 30:
+		while is_instance_valid(xf) and not xf.chop_hit(Vector3(0, 0, 1)) and guard < 30:
 			guard += 1
 		ok(guard < 30, "%s: bucks all the way down (%d more bites)" % [label, guard])
 		ok(_count_logs(world) >= 2, "%s: a whole trunk yields real timber (%d logs)"
 			% [label, _count_logs(world)])
 
-		var tilt := rad_to_deg(acos(clampf(absf(tr.global_transform.basis.y.dot(Vector3.UP)),
+		var tilt := rad_to_deg(acos(clampf(absf(xf.global_transform.basis.y.dot(Vector3.UP)),
 			0.0, 1.0)))
 		ok(tilt > 20.0, "%s: it actually went over (%.0f deg off vertical)" % [label, tilt])
 

@@ -45,6 +45,7 @@ func _init() -> void:
 	## every tile has both painted and clear texels
 	for t in range(GrowthTypes.COLS * GrowthTypes.ROWS):
 		var ox := (t % GrowthTypes.COLS) * GrowthTypes.TILE
+		@warning_ignore("integer_division")
 		var oy := (t / GrowthTypes.COLS) * GrowthTypes.TILE
 		var solid := 0
 		var clear := 0
@@ -204,15 +205,16 @@ func _check() -> void:
 				nan += 1
 			var pm := pv / 1.5          ## host -> model space (scale 1.5)
 			var t := clampf(pm.y / 3.0, 0.0, 1.0)
-			var r := lerpf(0.30, 0.22, t)
+			var r0 := lerpf(0.30, 0.22, t)
 			var rad := Vector2(pm.x, pm.z).length()
-			if rad < r * 0.90 or rad > r * 1.12 + 0.05:
+			if rad < r0 * 0.90 or rad > r0 * 1.12 + 0.05:
 				bad += 1
 			if birth < 0.0 or birth > 1.0:
 				births_ok = false
 			maxb = maxf(maxb, birth)
 			minb = minf(minb, birth)
 		ok(nan == 0, "no NaNs")
+		@warning_ignore("integer_division")
 		ok(bad <= v.size() / 4 / 10, "cards hug the bark (%d off of %d)" % [bad, v.size() / 4])
 		ok(births_ok and minb < 0.15 and maxb > 0.5, "births span heart -> fringe (%.2f..%.2f)" % [minb, maxb])
 		## base cards come first in the buffer, accents after (draw order)
@@ -258,6 +260,7 @@ func _check() -> void:
 			n += 1
 			if absf(c0[i + 2] - (-1.0)) < 0.03:
 				on_box += 1
+		@warning_ignore("integer_division")
 		ok(n > 0 and on_box < n / 2, "rock cards follow the mesh, not the box (%d/%d on box)" % [on_box, n])
 
 	## --- the world probe (mask 1) finds the rock's collider; fungi cut shelves

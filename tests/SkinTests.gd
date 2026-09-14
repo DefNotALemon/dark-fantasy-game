@@ -41,14 +41,14 @@ func _init() -> void:
 	_world = Node3D.new()
 	root.add_child(_world)
 	_world.add_to_group("world")
-	var floor := StaticBody3D.new()
+	var flr := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = Vector3(400, 1, 400)
 	cs.shape = bs
-	floor.add_child(cs)
-	floor.position.y = -0.5
-	_world.add_child(floor)
+	flr.add_child(cs)
+	flr.position.y = -0.5
+	_world.add_child(flr)
 	_player = LabPlayer.new()
 	_world.add_child(_player)
 	_player.position = Vector3(60, 0, 60)   ## far: nothing notices it
@@ -97,6 +97,7 @@ func t_atlas() -> void:
 	for k in PsxTex.TILES.keys():
 		var t: int = PsxTex.TILES[k]
 		var ox := (t % 4) * 64
+		@warning_ignore("integer_division")
 		var oy := (t / 4) * 64
 		var lo := 2.0
 		var hi := -1.0

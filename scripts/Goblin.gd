@@ -117,31 +117,31 @@ func _build_body() -> void:
 	stride_deg = 34.0
 	bob_h = 0.05
 
-	var skin := Color(0.30, 0.45, 0.18)
+	var skin_col := Color(0.30, 0.45, 0.18)
 	var rag := Color(0.32, 0.24, 0.16)
 	var wood := Color(0.35, 0.24, 0.13)
-	base_body_color = skin
+	base_body_color = skin_col
 
 	## Torso (ragged tunic).
-	var body := _box_in(rig, Vector3(0.36, 0.40, 0.24), skin, Vector3(0, 0.72, 0))
+	var body := _box_in(rig, Vector3(0.36, 0.40, 0.24), skin_col, Vector3(0, 0.72, 0))
 	body_mat = body.material_override as StandardMaterial3D
 	_box_in(rig, Vector3(0.38, 0.18, 0.26), rag, Vector3(0, 0.52, 0))
 	## Big head with a long nose and huge ears.
-	_box_in(rig, Vector3(0.28, 0.24, 0.26), skin, Vector3(0, 1.06, 0))
-	_box_in(rig, Vector3(0.07, 0.06, 0.16), skin, Vector3(0, 1.02, -0.20))
-	_box_in(rig, Vector3(0.05, 0.18, 0.12), skin, Vector3(-0.19, 1.10, 0.02), Vector3(0, 0, 18))
-	_box_in(rig, Vector3(0.05, 0.18, 0.12), skin, Vector3(0.19, 1.10, 0.02), Vector3(0, 0, -18))
+	_box_in(rig, Vector3(0.28, 0.24, 0.26), skin_col, Vector3(0, 1.06, 0))
+	_box_in(rig, Vector3(0.07, 0.06, 0.16), skin_col, Vector3(0, 1.02, -0.20))
+	_box_in(rig, Vector3(0.05, 0.18, 0.12), skin_col, Vector3(-0.19, 1.10, 0.02), Vector3(0, 0, 18))
+	_box_in(rig, Vector3(0.05, 0.18, 0.12), skin_col, Vector3(0.19, 1.10, 0.02), Vector3(0, 0, -18))
 	## Left arm hangs loose — pivoted so it pumps with the scurry.
 	var larm := Node3D.new()
 	rig.add_child(larm)
 	larm.position = Vector3(-0.24, 0.87, 0)
-	_box_in(larm, Vector3(0.08, 0.38, 0.08), skin, Vector3(0, -0.19, 0))
+	_box_in(larm, Vector3(0.08, 0.38, 0.08), skin_col, Vector3(0, -0.19, 0))
 	walk_arms.append(larm)
 	## Right arm: a pivot at the shoulder so the club-arm can swing.
 	arm = Node3D.new()
 	rig.add_child(arm)
 	arm.position = Vector3(0.24, 0.87, 0)
-	_box_in(arm, Vector3(0.08, 0.38, 0.08), skin, Vector3(0, -0.19, 0))
+	_box_in(arm, Vector3(0.08, 0.38, 0.08), skin_col, Vector3(0, -0.19, 0))
 	## Crude wooden club in the hand.
 	_box_in(arm, Vector3(0.09, 0.09, 0.42), wood, Vector3(0.02, -0.37, -0.14), Vector3(12, 0, 0))
 	_box_in(arm, Vector3(0.13, 0.13, 0.16), wood, Vector3(0.02, -0.34, -0.36))

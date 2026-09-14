@@ -31,6 +31,7 @@ func _init() -> void:
 	var edges := 0
 	for a in land:
 		edges += (adj[String(a)] as Array).size()
+	@warning_ignore("integer_division")
 	print("adjacency edges: %d" % (edges / 2))
 	print("table_problems: %s" % str(Factions.table_problems(land, seats, adj)))
 	print("")
@@ -53,7 +54,7 @@ func _init() -> void:
 	quit(0)
 
 
-func _run(proto: Chronicle, seats: Dictionary, land: Array, adj: Dictionary,
+func _run(_proto: Chronicle, seats: Dictionary, land: Array, adj: Dictionary,
 		anch: Dictionary, years: int) -> void:
 	var c := Chronicle.new()
 	c.world_seed = SEED

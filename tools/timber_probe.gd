@@ -37,9 +37,9 @@ func _obj(path: String, mesh: Mesh, xf: Transform3D) -> void:
 func _process(_d: float) -> bool:
 	_frames += 1
 	if _frames == 1:
-		var mi := WoodCut.log_instance("oak", 0.25, 2.0, Color(0.3, 0.2, 0.1), 3)
-		_obj("/tmp/timber_log.obj", mi.mesh, Transform3D.IDENTITY)
-		mi.free()
+		var mi0 := WoodCut.log_instance("oak", 0.25, 2.0, Color(0.3, 0.2, 0.1), 3)
+		_obj("/tmp/timber_log.obj", mi0.mesh, Transform3D.IDENTITY)
+		mi0.free()
 		_world = Node3D.new()
 		root.add_child(_world)
 		var t := TreeV2.new()

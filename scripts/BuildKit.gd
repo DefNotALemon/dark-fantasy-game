@@ -540,6 +540,7 @@ static func _house(w: int, d: int, storeys: int, roof_mat: String, wall_mat: Str
 			var x := -hw + MODULE * (ix + 0.5)
 			var north := "wall"
 			var south := "wall"
+			@warning_ignore("integer_division")
 			if s == 0 and ix == w / 2:
 				south = "wall_door"
 			elif ix % 2 == 1:

@@ -1567,23 +1567,23 @@ static func _fox_curl(rig: Dictionary, t: float, u: float) -> void:
 	## a snowbank at minus twenty doing exactly this, and it is the only time
 	## the tail earns its length.
 	var down := _ease_io(_seg(t, 0.0, 0.30))
-	var wrap := _ease_io(_seg(t, 0.25, 0.55))
+	var wrapt := _ease_io(_seg(t, 0.25, 0.55))
 	_pk(rig, "root", Vector3(0, -0.16 * u * down, 0))
 	_rk(rig, "root", 0.0, 0.0, 0.30 * down)
 	_rk(rig, "body", 0.0, 0.55 * down, 0.20 * down)
 	_sk(rig, "body", Vector3(1.0, 1.0 - 0.12 * down, 1.0 - 0.08 * down))
 	## Nose tucks toward the flank; the tail comes round the other way to meet
 	## it. Between them the fox becomes a circle.
-	_rk(rig, "neck", -0.50 * wrap, -0.85 * wrap)
-	_rk(rig, "head", -0.30 * wrap, -0.60 * wrap, 0.35 * wrap)
-	_rk(rig, "tail", -0.55 * wrap, -1.35 * wrap)
-	_rk(rig, "tail2", -0.20 * wrap, -0.80 * wrap)
+	_rk(rig, "neck", -0.50 * wrapt, -0.85 * wrapt)
+	_rk(rig, "head", -0.30 * wrapt, -0.60 * wrapt, 0.35 * wrapt)
+	_rk(rig, "tail", -0.55 * wrapt, -1.35 * wrapt)
+	_rk(rig, "tail2", -0.20 * wrapt, -0.80 * wrapt)
 	for i in 4:
 		_ri(rig, "legs", i, (0.85 if i < 2 else -0.70) * down)
 		_ri(rig, "knees", i, -1.20 * down)
-	_ears(rig, 0.65 * wrap)
+	_ears(rig, 0.65 * wrapt)
 	## Asleep, not dead: one slow breath every three seconds.
-	_pk(rig, "body", Vector3(0, 0.012 * u * sin(t * TAU * 1.3) * wrap, 0))
+	_pk(rig, "body", Vector3(0, 0.012 * u * sin(t * TAU * 1.3) * wrapt, 0))
 
 
 static func _scream(rig: Dictionary, t: float, u: float) -> void:
@@ -2624,18 +2624,18 @@ static func _hop(rig: Dictionary, t: float, u: float) -> void:
 	## One hop. Hind legs do everything, the front pair land first and take the
 	## weight for a moment, and the whole thing is over in seven tenths of a
 	## second. Hares do not run, they punctuate.
-	var load := _ease_io(_seg(t, 0.0, 0.18))
+	var loadp := _ease_io(_seg(t, 0.0, 0.18))
 	var push := _snap(_seg(t, 0.18, 0.28))
 	var air := _arc(_seg(t, 0.22, 0.88))
 	var land := _seg(t, 0.84, 1.0)
-	_pk(rig, "root", Vector3(0, 0.55 * u * air - 0.08 * u * load, 0))
+	_pk(rig, "root", Vector3(0, 0.55 * u * air - 0.08 * u * loadp, 0))
 	_rk(rig, "body", 0.30 * push - 0.45 * _ease_in(_seg(t, 0.5, 0.9)) + 0.30 * land)
 	for i in 2:
-		_ri(rig, "legs", i, -0.30 * load + 0.90 * air + 0.70 * land)
-		_ri(rig, "knees", i, -0.70 * load - 0.30 * air + 0.40 * land)
+		_ri(rig, "legs", i, -0.30 * loadp + 0.90 * air + 0.70 * land)
+		_ri(rig, "knees", i, -0.70 * loadp - 0.30 * air + 0.40 * land)
 	for i in range(2, 4):
-		_ri(rig, "legs", i, 0.95 * load - 1.15 * push - 0.55 * air + 0.80 * land)
-		_ri(rig, "knees", i, -1.30 * load + 1.10 * push - 0.30 * air - 0.90 * land)
+		_ri(rig, "legs", i, 0.95 * loadp - 1.15 * push - 0.55 * air + 0.80 * land)
+		_ri(rig, "knees", i, -1.30 * loadp + 1.10 * push - 0.30 * air - 0.90 * land)
 	_rk(rig, "neck", 0.20 * air)
 	## Ears stream back in the air and come up again on the landing.
 	_ears(rig, 0.55 * air)
@@ -3780,7 +3780,7 @@ static func _fake_hawk(rig: Dictionary, t: float, _u: float) -> void:
 	## comedy is entirely in the recovery: full menace, and then instantly a
 	## small blue bird again with no transition at all.
 	var wind := _ease_io(_seg(t, 0.0, 0.22))
-	var call := _seg(t, 0.25, 0.62)
+	var cry := _seg(t, 0.25, 0.62)
 	var innocent := _seg(t, 0.66, 0.74)
 	var on := wind * (1.0 - innocent)
 	_rk(rig, "crest", -0.75 * on)
@@ -3789,9 +3789,9 @@ static func _fake_hawk(rig: Dictionary, t: float, _u: float) -> void:
 		_si(rig, "wings", i, Vector3(1.0 - 0.35 * (1.0 - on), 1.0, 1.0))
 		_ri(rig, "wings", i, 0.0, -0.25 * side, (0.45 * on) * side)
 	_rk(rig, "body", -0.30 * on)
-	_rk(rig, "neck", -0.30 * on, 0.55 * sin(call * PI) * on)
-	_rk(rig, "head", -0.25 * on, 0.85 * sin(call * PI) * on)
-	_jaw_open(rig, 0.70 * on * (0.4 + 0.6 * _tri(call)))
+	_rk(rig, "neck", -0.30 * on, 0.55 * sin(cry * PI) * on)
+	_rk(rig, "head", -0.25 * on, 0.85 * sin(cry * PI) * on)
+	_jaw_open(rig, 0.70 * on * (0.4 + 0.6 * _tri(cry)))
 	_rk(rig, "tail", -0.45 * on)
 	## And then nothing ever happened.
 	_wings_fold(rig, 0.92 * innocent)

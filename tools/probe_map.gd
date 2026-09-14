@@ -31,7 +31,7 @@ func _init() -> void:
 
 	var adj: Dictionary = c._fadj
 	print("=== ADJACENCY GEOMETRY (px at zoom 1) ===")
-	var seen := {}
+	var _seen := {}
 	var gaps: Array[float] = []
 	var overlaps := 0
 	var pairs := 0
@@ -52,13 +52,14 @@ func _init() -> void:
 			print("  %-22s %-22s  centres %6.1f px   ra %5.1f  rb %5.1f   GAP %7.1f   minr %5.1f" % [
 				an, bn, dpx, rapx, rbpx, gap, minf(rapx, rbpx)])
 	gaps.sort()
+	@warning_ignore("integer_division")
 	print("  pairs=%d  overlapping=%d  gap median=%.1f px  min=%.1f  max=%.1f" % [
 		pairs, overlaps, gaps[gaps.size() / 2], gaps[0], gaps[-1]])
 
 	print("=== MARGIN DISTRIBUTION over a simulated year ===")
 	var samples: Array[float] = []
 	var front_counts: Array[int] = []
-	var contested_days := 0
+	var _contested_days := 0
 	var holders := {}
 	for dayi in range(96):
 		c.advance(24.0, 4000)
@@ -69,9 +70,10 @@ func _init() -> void:
 			samples.append(Factions.margin_of(c.factions, rn))
 			var h := Factions.holder_of(c.factions, rn)
 			holders[h] = int(holders.get(h, 0)) + 1
-			if h == Factions.CONTESTED: contested_days += 1
+			if h == Factions.CONTESTED: _contested_days += 1
 	samples.sort()
 	var n2 := samples.size()
+	@warning_ignore("integer_division")
 	print("  margin samples=%d  p05=%.4f p25=%.4f p50=%.4f p75=%.4f p95=%.4f max=%.4f" % [
 		n2, samples[int(n2*0.05)], samples[int(n2*0.25)], samples[n2/2],
 		samples[int(n2*0.75)], samples[int(n2*0.95)], samples[-1]])

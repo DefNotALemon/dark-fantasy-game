@@ -638,7 +638,6 @@ func _run_steps(budget: int) -> void:
 func _step(n: int) -> void:
 	var t := float(n) * STEP_HOURS / 24.0
 	var hour := fposmod(float(n) * STEP_HOURS, 24.0)
-	var season := season_at(t)
 	var sky := sky_at(t)
 	var dead: Array = []
 	for r in records:

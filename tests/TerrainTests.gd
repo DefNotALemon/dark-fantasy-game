@@ -409,6 +409,7 @@ func _t_forest(T: Node3D) -> void:
 		probes += 1
 		if T._plantable(float(q[0]) + 300.0, float(q[1]) + 300.0) > 0.05:
 			forested += 1
+	@warning_ignore("integer_division")
 	ok(forested > probes / 5, "the land around towns is plantable (%d of %d)" % [forested, probes])
 
 	# --- every region picks real species
@@ -508,9 +509,13 @@ func _t_hole(T: Node3D) -> void:
 		var qs := 4.0
 		var w := hm.map_width
 		# sample (i, j) sits at world (i*qs, j*qs) for tile (0,0)
+		@warning_ignore("integer_division")
 		var at_100: float = hm.map_data[(100 / 4) * w + (100 / 4)]
+		@warning_ignore("integer_division")
 		var at_104: float = hm.map_data[(4 / 4) * w + (104 / 4)]
+		@warning_ignore("integer_division")
 		var at_108: float = hm.map_data[(4 / 4) * w + (108 / 4)]
+		@warning_ignore("integer_division")
 		var mouth: float = hm.map_data[(4 / 4) * w + (48 / 4)]
 		near(at_100, T.HOLE_SINK, 0.001, "a collider sample inside the square is sunk")
 		near(mouth, T.HOLE_SINK, 0.001, "...including over the cave mouths (x = 48)")
@@ -742,6 +747,7 @@ func _t_crowns(T: Node3D) -> void:
 						base_down += 1
 			ok(tip_n > 0 and tip_up == tip_n, "%s %s: the crown tips face up (%d of %d)" % [sp, lod, tip_up, tip_n])
 			ok(base_n > 0 and base_down == base_n, "%s %s: the crown bases face down (%d of %d)" % [sp, lod, base_down, base_n])
+			@warning_ignore("integer_division")
 			ok(verts.size() / 3 >= 12, "%s %s: the crown has volume (%d tris)" % [sp, lod, verts.size() / 3])
 			# it fills the crown, not the trunk: the lowest crown vertex is off the ground
 			ok(lo > 0.2 and hi > lo + 1.0, "%s %s: the crown spans %.1f..%.1f m" % [sp, lod, lo, hi])
@@ -759,7 +765,7 @@ func _t_water_mesh(T: Node3D) -> void:
 		# no quad floats more than SKY_WATER_MAX over its bed, and none is sea
 		var sky := 0
 		var sea := 0
-		var under := 0
+		var _under := 0
 		var i := 0
 		while i < verts.size():
 			var v: Vector3 = verts[i]
@@ -888,7 +894,7 @@ func _t_depth(T: Node3D) -> void:
 	ok(T.depth_below_surface(Vector3(portland.x, g + 30.0, portland.z)) < 0.0, "up in the air is negative")
 
 
-func _t_name_collision(T: Node3D) -> void:
+func _t_name_collision(_tname: Node3D) -> void:
 	sec("the class name is not shadowed")
 	# TerraBrush registers a NATIVE, non-instantiable `Terrain` (Node3D). A
 	# native ClassDB name beats a script class_name, so `class_name Terrain`

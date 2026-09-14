@@ -212,7 +212,7 @@ func paint_disc(at: Vector3, radius_m: float, value: int) -> int:
 	var cc := cell_of(at.x, at.z)
 	var r := maxf(radius_m, step * 0.5) / step
 	var ri := int(ceil(r))
-	var changed := 0
+	var n_changed := 0
 	for dz in range(-ri, ri + 1):
 		for dx in range(-ri, ri + 1):
 			if float(dx * dx + dz * dz) > r * r:
@@ -224,7 +224,7 @@ func paint_disc(at: Vector3, radius_m: float, value: int) -> int:
 			if old == value:
 				continue
 			paint.set_pixel(c.x, c.y, v)
-			changed += 1
+			n_changed += 1
 			if old == AUTO:
 				painted_cells += 1
 			elif value == AUTO:
@@ -233,10 +233,10 @@ func paint_disc(at: Vector3, radius_m: float, value: int) -> int:
 				bare_cells -= 1
 			if value == BARE:
 				bare_cells += 1
-	if changed > 0:
+	if n_changed > 0:
 		_touch(Rect2(at.x - radius_m - step, at.z - radius_m - step,
 			(radius_m + step) * 2.0, (radius_m + step) * 2.0))
-	return changed
+	return n_changed
 
 
 func fill_all(value: int) -> void:

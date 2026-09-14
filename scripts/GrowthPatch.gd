@@ -263,7 +263,7 @@ func _cast_set(space: PhysicsDirectSpaceState3D, mask: int, rng: RandomNumberGen
 		count: int) -> Array:
 	var out: Array = []
 	var to_world := global_transform
-	var to_local := to_world.affine_inverse()
+	var from_world := to_world.affine_inverse()
 	for i in range(count):
 		## bunched toward the heart: a sum of three uniforms
 		var u := (rng.randf() + rng.randf() + rng.randf()) / 1.5 - 1.0
@@ -279,10 +279,10 @@ func _cast_set(space: PhysicsDirectSpaceState3D, mask: int, rng: RandomNumberGen
 			a = axis + dir * reach
 			b = axis
 		else:
-			var basis := _facing_basis()
+			var bas := _facing_basis()
 			var pitch := u * span.x
 			var yaw := v * span.y
-			var dir := basis * Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch))
+			var dir := bas * Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch))
 			if inward:
 				a = centre + dir * reach
 				b = centre
@@ -295,12 +295,12 @@ func _cast_set(space: PhysicsDirectSpaceState3D, mask: int, rng: RandomNumberGen
 		var hit := space.intersect_ray(q)
 		if hit.is_empty():
 			continue
-		var n: Vector3 = (to_local.basis * (hit["normal"] as Vector3)).normalized()
+		var n: Vector3 = (from_world.basis * (hit["normal"] as Vector3)).normalized()
 		## an outward-facing card wants a normal pointing back at the ray
 		var ray_dir: Vector3 = (b - a).normalized()
 		if n.dot(ray_dir) > 0.0:
 			n = -n
-		out.append({"pos": to_local * (hit["position"] as Vector3), "normal": n, "d": d})
+		out.append({"pos": from_world * (hit["position"] as Vector3), "normal": n, "d": d})
 	return out
 
 
@@ -434,8 +434,8 @@ func _card(buf: Buf, pos: Vector3, n: Vector3, size: float, style: String, birth
 			var right := UP.cross(out).normalized()
 			## a shelf grows a little downhill and flares as it goes
 			var w := size * 0.9
-			var len := size * rng.randf_range(0.7, 1.0)
-			var tip := pos + out * len - UP * len * 0.18
+			var ln := size * rng.randf_range(0.7, 1.0)
+			var tip := pos + out * ln - UP * ln * 0.18
 			var root := pos + out * 0.005
 			var pivot := root
 			_quad(buf,
@@ -490,7 +490,7 @@ static func _tangent(n: Vector3, ang: float) -> Vector3:
 ## not care). `hang`: uv2.x runs 0 on a-b .. 1 on c-d, which the shader sways.
 func _quad(buf: Buf, a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3,
 		uvr: Rect2, uv2a: Vector2, uv2b: Vector2, col: Color, pivot: Vector3, birth: float,
-		root_v1: bool, hang: bool) -> void:
+		root_v1: bool, _hang: bool) -> void:
 	var base := buf.v.size()
 	var u0 := uvr.position.x
 	var u1 := uvr.end.x

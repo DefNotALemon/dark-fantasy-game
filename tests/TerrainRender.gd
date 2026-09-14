@@ -53,6 +53,7 @@ func _init() -> void:
 
 func _process(_d: float) -> bool:
 	_frame += 1
+	@warning_ignore("integer_division")
 	var idx := (_frame - 1) / 12
 	if idx >= _shots.size():
 		quit()

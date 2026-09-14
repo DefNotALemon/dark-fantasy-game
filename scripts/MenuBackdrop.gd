@@ -135,7 +135,7 @@ static func _sky(img: Image) -> void:
             _px(img, x, y, _dither(c, x, y, 13.0))
 
 
-static func _clouds(img: Image, rng: RandomNumberGenerator) -> void:
+static func _clouds(img: Image, _rng: RandomNumberGenerator) -> void:
     ## Five ragged bands, each thinner and warmer as it nears the horizon.
     for b in range(5):
         var cy := 26.0 + float(b) * 15.0
@@ -324,6 +324,7 @@ static func _fort(img: Image) -> void:
         _arch(img, a, base - 15, 7, 15)
         a += 14
     ## the sally port, taller, dead centre
+    @warning_ignore("integer_division")
     _arch(img, (cx0 + cx1) / 2 - 5, base - 20, 11, 20)
 
     ## upper-tier gun embrasures
@@ -390,6 +391,7 @@ static func _wall(img: Image, x0: int, y0: int, x1: int, y1: int, rim_right := f
             ## coursed stone: a seam every four rows, a joint every eight
             if ((y - y0) % 4) == 0:
                 c = c.lightened(0.13)
+            @warning_ignore("integer_division")
             if ((x - x0 + ((y - y0) / 4) * 4) % 8) == 0:
                 c = c.darkened(0.16)
             _px(img, x, y, c)

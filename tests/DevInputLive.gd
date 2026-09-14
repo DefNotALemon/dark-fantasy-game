@@ -109,7 +109,7 @@ static func _probeable() -> Array:
 
 static func _post(code: int, down: bool) -> void:
 	var ev := InputEventKey.new()
-	ev.keycode = code
+	ev.keycode = code as Key
 	ev.pressed = down
 	ev.echo = false
 	Input.parse_input_event(ev)

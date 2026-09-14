@@ -164,11 +164,11 @@ func _build_body() -> void:
 
 	## Palette swapped with the Ogre: the raider is now the grey-tan brute-hide,
 	## while the ogre wears the deep green.
-	var skin := Color(0.46, 0.42, 0.30)
+	var skin_col := Color(0.46, 0.42, 0.30)
 	var skin_dark := Color(0.34, 0.31, 0.22)
 	var leather := Color(0.24, 0.16, 0.10)
 	var steel := Color(0.58, 0.60, 0.66)
-	base_body_color = skin
+	base_body_color = skin_col
 
 	rig = Node3D.new()
 	add_child(rig)
@@ -179,14 +179,14 @@ func _build_body() -> void:
 	body_mat = body.material_override as StandardMaterial3D
 	_box_in(rig, Vector3(0.72, 0.20, 0.44), skin_dark, Vector3(0, 1.42, 0.02))   ## shoulders
 	## Head with a heavy jaw + tusks.
-	_box_in(rig, Vector3(0.30, 0.30, 0.30), skin, Vector3(0, 1.66, -0.02))
+	_box_in(rig, Vector3(0.30, 0.30, 0.30), skin_col, Vector3(0, 1.66, -0.02))
 	_box_in(rig, Vector3(0.05, 0.08, 0.05), Color(0.85, 0.82, 0.7), Vector3(-0.08, 1.55, -0.17), Vector3(-14, 0, 0))
 	_box_in(rig, Vector3(0.05, 0.08, 0.05), Color(0.85, 0.82, 0.7), Vector3(0.08, 1.55, -0.17), Vector3(-14, 0, 0))
 	## Left arm — shoulder pivot, swings with the stride.
 	var larm := Node3D.new()
 	rig.add_child(larm)
 	larm.position = Vector3(-0.40, 1.41, 0)
-	_box_in(larm, Vector3(0.16, 0.62, 0.16), skin, Vector3(0, -0.31, 0))
+	_box_in(larm, Vector3(0.16, 0.62, 0.16), skin_col, Vector3(0, -0.31, 0))
 	walk_arms.append(larm)
 	## Right arm: a SHOULDER pivot carrying the upper arm, and an elbow pivot
 	## (`hand`) carrying the sword. Two joints, so he can hold the blade down at
@@ -194,7 +194,7 @@ func _build_body() -> void:
 	arm = Node3D.new()
 	rig.add_child(arm)
 	arm.position = Vector3(0.40, 1.38, 0)
-	_box_in(arm, Vector3(0.17, 0.60, 0.17), skin, Vector3(0, -0.28, 0))
+	_box_in(arm, Vector3(0.17, 0.60, 0.17), skin_col, Vector3(0, -0.28, 0))
 	hand = Node3D.new()
 	arm.add_child(hand)
 	hand.position = Vector3(0, -0.56, 0)

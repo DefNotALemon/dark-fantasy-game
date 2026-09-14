@@ -348,8 +348,8 @@ static func _dilate(img: Image) -> void:
 						n += 1
 				if n == 0:
 					continue
-				dst[o] = r / n
-				dst[o + 1] = g / n
-				dst[o + 2] = b / n
+				dst[o] = int(round(float(r) / float(n)))
+				dst[o + 1] = int(round(float(g) / float(n)))
+				dst[o + 2] = int(round(float(b) / float(n)))
 		var mips := img.has_mipmaps()
 		img.set_data(w, h, mips, Image.FORMAT_RGBA8, dst)

@@ -732,13 +732,13 @@ func _t_wiring() -> void:
 	ok(pl.contains("if Butchery.edge_tier(m) >= 0:\n\t\t\treturn m"),
 		"_edge_mat proves the material IS one before calling it an edge")
 	ok(pl.contains("Butchery.meat_count(got)"), "the pack takes meat_count of what the LEDGER gave")
-	ok(pl.contains("Butchery.parts_due(harv, mass, mass - before, mass - after)"),
+	ok(pl.contains("Butchery.parts_due(harv, carcass_mass, carcass_mass - before, carcass_mass - after)"),
 		"and the parts come off the two ledger readings, not off what we asked for")
 	ok(pl.contains("exposure.wet = minf(1.0, exposure.wet + Butchery.CUT_WET)"),
 		"a cut is wet work")
 	ok(pl.contains("if warmth_survival():\n\t\texposure.wet"),
 		"...and it is gated on the survival mode, like every other exposure write")
-	ok(pl.contains("Butchery.crossed(mass, before, after)"),
+	ok(pl.contains("Butchery.crossed(carcass_mass, before, after)"),
 		"the shut-out lines are driven off the two ledger readings")
 	ok(pl.contains("Butchery.prompt_for(_carc_target, chv, _edge_mat()"),
 		"the HUD reads the prompt off the same file")

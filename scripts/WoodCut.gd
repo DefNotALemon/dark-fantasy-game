@@ -159,11 +159,19 @@ static func _to_arrays(m: Dictionary) -> Array:
 ## the dictionary never changes. Arrays are references; they are packed once
 ## at the end in _finish().
 static func _empty_like(m: Dictionary) -> Dictionary:
-	return {"v": [], "idx": [],
-		"n": [] if not (m["n"] as PackedVector3Array).is_empty() else null,
-		"t": [] if not (m["t"] as PackedFloat32Array).is_empty() else null,
-		"uv": [] if not (m["uv"] as PackedVector2Array).is_empty() else null,
-		"col": [] if not (m["col"] as PackedColorArray).is_empty() else null}
+	## an attribute the source does not carry stays null, so _finish() leaves it
+	## out of the surface arrays entirely. Written as ifs, not ternaries: `[] if c
+	## else null` has no common type and GDScript flags it as an incompatible one.
+	var out: Dictionary = {"v": [], "idx": [], "n": null, "t": null, "uv": null, "col": null}
+	if not (m["n"] as PackedVector3Array).is_empty():
+		out["n"] = []
+	if not (m["t"] as PackedFloat32Array).is_empty():
+		out["t"] = []
+	if not (m["uv"] as PackedVector2Array).is_empty():
+		out["uv"] = []
+	if not (m["col"] as PackedColorArray).is_empty():
+		out["col"] = []
+	return out
 
 
 static func _finish(o: Dictionary) -> Dictionary:
@@ -225,9 +233,9 @@ static func _half(m: Dictionary, y: float, keep_above: bool) -> Dictionary:
 	var idx: PackedInt32Array = m["idx"]
 	var side := 1.0 if keep_above else -1.0
 	var o := _empty_like(m)
-	var remap := PackedInt32Array()
-	remap.resize(v.size())
-	remap.fill(-1)
+	var rmap := PackedInt32Array()
+	rmap.resize(v.size())
+	rmap.fill(-1)
 	var cache := {}
 	var segs := PackedInt32Array()
 	var t := 0
@@ -242,9 +250,9 @@ static func _half(m: Dictionary, y: float, keep_above: bool) -> Dictionary:
 		if n_in == 3:
 			for k in range(3):
 				var i: int = tri[k]
-				if remap[i] < 0:
-					remap[i] = _copy_vertex(m, o, i)
-			(o["idx"] as Array).append_array([remap[tri[0]], remap[tri[1]], remap[tri[2]]])
+				if rmap[i] < 0:
+					rmap[i] = _copy_vertex(m, o, i)
+			(o["idx"] as Array).append_array([rmap[tri[0]], rmap[tri[1]], rmap[tri[2]]])
 			continue
 		## rotate (cyclic, so the winding is untouched) until the odd one out
 		## is where the cases below expect it: the lone IN vertex first, or
@@ -260,18 +268,18 @@ static func _half(m: Dictionary, y: float, keep_above: bool) -> Dictionary:
 		if n_in == 1:
 			var ab := _split(m, o, cache, a, b, y)
 			var ac := _split(m, o, cache, a, c, y)
-			if remap[a] < 0:
-				remap[a] = _copy_vertex(m, o, a)
-			(o["idx"] as Array).append_array([remap[a], ab, ac])
+			if rmap[a] < 0:
+				rmap[a] = _copy_vertex(m, o, a)
+			(o["idx"] as Array).append_array([rmap[a], ab, ac])
 			segs.append_array(PackedInt32Array([ab, ac]))
 		else:
 			var bc := _split(m, o, cache, b, c, y)
 			var ac := _split(m, o, cache, a, c, y)
-			if remap[a] < 0:
-				remap[a] = _copy_vertex(m, o, a)
-			if remap[b] < 0:
-				remap[b] = _copy_vertex(m, o, b)
-			(o["idx"] as Array).append_array([remap[a], remap[b], bc, remap[a], bc, ac])
+			if rmap[a] < 0:
+				rmap[a] = _copy_vertex(m, o, a)
+			if rmap[b] < 0:
+				rmap[b] = _copy_vertex(m, o, b)
+			(o["idx"] as Array).append_array([rmap[a], rmap[b], bc, rmap[a], bc, ac])
 			segs.append_array(PackedInt32Array([bc, ac]))
 	return {"m": _finish(o), "segs": segs}
 
@@ -387,6 +395,7 @@ static func fit_circle(loop: PackedVector3Array) -> Array:
 			miss.append(absf(float(fit[2]) - di))
 		var sorted := PackedFloat32Array(miss)
 		sorted.sort()
+		@warning_ignore("integer_division")
 		var tol: float = maxf(sorted[n / 2] * 1.5, float(fit[2]) * 0.04)
 		var kept := 0
 		var changed := false
@@ -519,11 +528,11 @@ static func _cap(loop: PackedVector3Array, y: float, up: bool) -> Array:
 ## A bark tube standing along +Y from 0 to `length`, radius r0 at the foot
 ## and r1 at the top, UVs in metres (u around, v up) so the bark shader's
 ## default tiling is right. Slightly knobbly so it never reads as a pipe.
-static func tube(r0: float, r1: float, length: float, sides := BILLET_SIDES, seed := 0) -> Array:
+static func tube(r0: float, r1: float, length: float, sides := BILLET_SIDES, sd := 0) -> Array:
 	sides = clampi(sides, 5, 32)
 	var rings := maxi(2, int(ceil(length / 0.35)) + 1)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = seed if seed != 0 else 7
+	rng.seed = sd if sd != 0 else 7
 	var v := PackedVector3Array()
 	var n := PackedVector3Array()
 	var t := PackedFloat32Array()
@@ -624,8 +633,8 @@ static func lay_down(src: Array, cx: float, ymid: float, cz: float, s: float,
 ## bark tube with end grain on both faces, lying along +X with its underside
 ## on y = 0. `species` "" means a generic billet in `bark` colour.
 static func log_instance(species: String, r: float, length: float,
-		bark: Color = BARK_DEFAULT, seed := 0) -> MeshInstance3D:
-	var arrays := tube(r, r * 0.93, length, BILLET_SIDES, seed)
+		bark: Color = BARK_DEFAULT, sd := 0) -> MeshInstance3D:
+	var arrays := tube(r, r * 0.93, length, BILLET_SIDES, sd)
 	## a hair inside both ends, so the tube is split there and the loops it
 	## leaves become the faces -- a plane exactly on the end ring cuts nothing
 	var cut := slab(arrays, 0.002, length - 0.002, true, true)
@@ -693,10 +702,10 @@ static func grain_texture() -> ImageTexture:
 
 ## The rings themselves. Deterministic on `seed`; greys-and-creams, meant to
 ## be tinted. Exposed so a test can look at it without a renderer.
-static func grain_image(px: int, seed: int) -> Image:
+static func grain_image(px: int, sd: int) -> Image:
 	var img := Image.create_empty(px, px, true, Image.FORMAT_RGB8)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = seed
+	rng.seed = sd
 	var checks: Array = []
 	for i in range(rng.randi_range(3, 5)):
 		checks.append([rng.randf_range(0.0, TAU), rng.randf_range(0.35, 1.0)])   ## angle, reach

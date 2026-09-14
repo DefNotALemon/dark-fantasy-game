@@ -263,8 +263,8 @@ func _potion() -> void:
 
 func _key(code: int, pressed: bool) -> void:
 	var e := InputEventKey.new()
-	e.keycode = code
-	e.physical_keycode = code
+	e.keycode = code as Key
+	e.physical_keycode = code as Key
 	e.pressed = pressed
 	e.echo = false
 	Input.parse_input_event(e)
@@ -282,7 +282,7 @@ func _hold_mouse(btn: int, down: bool) -> void:
 		return
 	_mouse[btn] = down
 	var e := InputEventMouseButton.new()
-	e.button_index = btn
+	e.button_index = btn as MouseButton
 	e.pressed = down
 	## The click lands where the ARROW is when a menu is up -- the cursor's
 	## own position, not the viewport's idea of the mouse, which can be a
@@ -325,7 +325,7 @@ func _release_mouse() -> void:
 		if bool(_mouse[btn]):
 			_mouse[btn] = false
 			var e := InputEventMouseButton.new()
-			e.button_index = int(btn)
+			e.button_index = int(btn) as MouseButton
 			e.pressed = false
 			Input.parse_input_event(e)
 	_trig_l = false

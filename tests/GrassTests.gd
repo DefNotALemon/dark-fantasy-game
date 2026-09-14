@@ -41,7 +41,9 @@ func _uv2s(m: ArrayMesh) -> PackedVector2Array:
 func _tris(m: ArrayMesh) -> int:
 	var idx = m.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
 	if idx != null and (idx as PackedInt32Array).size() > 0:
+		@warning_ignore("integer_division")
 		return (idx as PackedInt32Array).size() / 3
+	@warning_ignore("integer_division")
 	return _verts(m).size() / 3
 
 
@@ -56,6 +58,7 @@ func _pairs(m: ArrayMesh) -> Array:
 	var uv := _uvs(m)
 	var nn := _norms(m)
 	var out: Array = []
+	@warning_ignore("integer_division")
 	for t in range(v.size() / 3):
 		var i := t * 3
 		if uv[i].x > 0.01 or uv[i + 2].x < 0.99:
@@ -401,16 +404,16 @@ func _run() -> void:
 		_ok(gs.is_tall_at(spot.x, spot.z), "that patch hides you while it stands")
 		gs._cut_cells[gs._cut_cell(spot.x, spot.z)] = true
 		_ok(not gs.is_tall_at(spot.x, spot.z), "and stops hiding you once it is mown")
-		var after: Dictionary = gs._place_chunk(key)
+		var after0: Dictionary = gs._place_chunk(key)
 		var found := false
-		for t in (_of(after, "stub") as Array):
+		for t in (_of(after0, "stub") as Array):
 			if (t as Transform3D).origin.distance_to(spot) < 0.0001:
 				found = true
 				break
 		_ok(found, "a flat-topped stump now stands exactly where the blades did")
-		_ok((_of(after, "tall") as Array).size() < tall_before.size(),
+		_ok((_of(after0, "tall") as Array).size() < tall_before.size(),
 			"and the standing count went down (%d -> %d)"
-				% [tall_before.size(), (_of(after, "tall") as Array).size()])
+				% [tall_before.size(), (_of(after0, "tall") as Array).size()])
 		gs._cut_cells.clear()
 
 	print("\n-- 12. the cost of the RING, measured --")
@@ -791,6 +794,7 @@ func _run() -> void:
 			n_part += 1
 			if Vector2(t.origin.x - (pc2.x - GrassSystem.CHUNK_M * 0.5), t.origin.z - pc2.z).length() < 1.0:
 				in_dab += 1
+	@warning_ignore("integer_division")
 	_ok(in_dab == 0 and n_part > n_auto / 2,
 		"a 4 m dab on the chunk's edge bares the dab and nothing else (%d -> %d, %d in the dab)"
 			% [n_auto, n_part, in_dab])

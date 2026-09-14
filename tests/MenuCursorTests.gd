@@ -203,7 +203,7 @@ func _settle(n: int = 2) -> void:
 		await process_frame
 
 
-func _drive(cursor: CanvasLayer, fake: FakePad, dir: Vector2, until: Callable, cap: int = 900) -> int:
+func _drive(_cursor: CanvasLayer, fake: FakePad, dir: Vector2, until: Callable, cap: int = 900) -> int:
 	## Push the stick until `until` says stop (or `cap` frames), then let go.
 	## Headless frames are ~7 ms, so a corner-to-corner run is ~200 of them.
 	fake.vec = dir

@@ -546,7 +546,9 @@ static func _assemble(species: String, stage: int, variant: int, is_dead: bool) 
 			# rings spaced by internodes that shorten as the leader slows.
 			var per: int = int(s.get("per_whorl", 5))
 			var rings: int = maxi(int(ceil(float(n) / float(per))), 1)
+			@warning_ignore("integer_division")
 			t = _geom_place(i / per, rings, float(s.get("whorl_gap", 0.92)))
+			@warning_ignore("integer_division")
 			az = TAU * float(i % per) / float(per) + float(i / per) * 0.62
 		else:
 			# Golden angle. 137.5077 deg between successive limbs is the single
@@ -914,15 +916,15 @@ static func _hash2(x: int, y: int) -> float:
 
 ## Value noise that WRAPS in x at `wrap` cells. The wrap is the whole point:
 ## sample bark by arc length instead and the trunk shows a seam up one side.
-static func _vnoise(x: float, y: float, wrap: int) -> float:
+static func _vnoise(x: float, y: float, wrap_n: int) -> float:
 	var x0 := int(floor(x))
 	var y0 := int(floor(y))
 	var fx := x - float(x0)
 	var fy := y - float(y0)
 	fx = fx * fx * (3.0 - 2.0 * fx)
 	fy = fy * fy * (3.0 - 2.0 * fy)
-	var xa := posmod(x0, wrap)
-	var xb := posmod(x0 + 1, wrap)
+	var xa := posmod(x0, wrap_n)
+	var xb := posmod(x0 + 1, wrap_n)
 	var a := lerpf(_hash2(xa, y0), _hash2(xb, y0), fx)
 	var b := lerpf(_hash2(xa, y0 + 1), _hash2(xb, y0 + 1), fx)
 	return lerpf(a, b, fy)
@@ -934,48 +936,53 @@ static func _vnoise(x: float, y: float, wrap: int) -> float:
 ## closes. Scaling ai by anything else (ai * 0.85 for wider plates, say) puts a
 ## visible seam up one side of every trunk in the forest, which is exactly the
 ## bug that sampling by arc length would have caused.
-static func _oct(ai: float, cells: int, sub: int, v: float, seed: int) -> float:
+static func _oct(ai: float, cells: int, sub: int, v: float, sd: int) -> float:
 	sub = maxi(sub, 2)
-	return _vnoise(ai * float(sub) / float(cells) + float(posmod(seed, sub)),
-		v + float(posmod(seed * 37, 719)), sub)
+	return _vnoise(ai * float(sub) / float(cells) + float(posmod(sd, sub)),
+		v + float(posmod(sd * 37, 719)), sub)
 
 
 ## Metres of radial displacement at (angular cell ai, height v metres).
 static func _bark_offset(kind: String, ai: float, v: float, cells: int,
-		vk: float, amp: float, seed := 0) -> float:
+		vk: float, amp: float, sd := 0) -> float:
 	if amp <= 0.0001:
 		return 0.0
 	match kind:
 		"fissure":
 			# oak: long deep vertical grooves, with a finer set inside them
-			var a := _oct(ai, cells, cells, v * vk, seed)
+			var a := _oct(ai, cells, cells, v * vk, sd)
 			var ridge: float = 1.0 - absf(a * 2.0 - 1.0)
-			var fine := _oct(ai, cells, cells * 2, v * vk * 2.6, seed)
+			var fine := _oct(ai, cells, cells * 2, v * vk * 2.6, sd)
 			return -amp * (pow(ridge, 2.2) * 0.85 + fine * 0.15)
 		"plate":
 			# maple: shaggy plates lifting off, recessed gaps between them
-			var p := _oct(ai, cells, maxi(cells * 3 / 4, 3), v * vk, seed)
+			@warning_ignore("integer_division")
+			var p := _oct(ai, cells, maxi(cells * 3 / 4, 3), v * vk, sd)
 			return amp * (smoothstep(0.42, 0.62, p) * 0.9 - smoothstep(0.40, 0.24, p))
 		"paper":
 			# birch: nearly smooth, horizontal lenticel dashes, the odd peel curl
-			var d := _oct(ai, cells, cells * 2, v * vk, seed)
-			var curl := _oct(ai + 11.0, cells, maxi(cells / 2, 3), v * vk * 0.35, seed)
+			var d := _oct(ai, cells, cells * 2, v * vk, sd)
+			@warning_ignore("integer_division")
+			var curl := _oct(ai + 11.0, cells, maxi(cells / 2, 3), v * vk * 0.35, sd)
 			return amp * (smoothstep(0.62, 0.80, d) * 0.35
 				+ smoothstep(0.88, 0.99, curl) * 1.6 - 0.12)
 		"jigsaw":
 			# pine: big irregular plates with narrow deep seams
-			var j := _oct(ai, cells, maxi(cells / 2, 3), v * vk, seed)
+			@warning_ignore("integer_division")
+			var j := _oct(ai, cells, maxi(cells / 2, 3), v * vk, sd)
 			var seam: float = 1.0 - absf(j * 2.0 - 1.0)
 			return amp * (0.55 - pow(seam, 3.0) * 1.5)
 		"smooth":
 			# fir: near-smooth grey with sparse resin blisters
-			var bl := _oct(ai, cells, cells * 2, v * vk, seed)
+			var bl := _oct(ai, cells, cells * 2, v * vk, sd)
 			return amp * (smoothstep(0.66, 0.93, bl) * 1.9 - 0.14)
 		"split":
 			# deadwood: silvered, split wide open, bark gone in patches
-			var sp := _oct(ai, cells, maxi(cells * 2 / 3, 3), v * vk, seed)
+			@warning_ignore("integer_division")
+			var sp := _oct(ai, cells, maxi(cells * 2 / 3, 3), v * vk, sd)
 			var sr: float = 1.0 - absf(sp * 2.0 - 1.0)
-			var peel := _oct(ai + 7.0, cells, maxi(cells / 3, 3), v * vk * 0.4, seed)
+			@warning_ignore("integer_division")
+			var peel := _oct(ai + 7.0, cells, maxi(cells / 3, 3), v * vk * 0.4, sd)
 			return amp * (smoothstep(0.55, 0.85, peel) * 0.35 - pow(sr, 3.0) * 1.4)
 	return 0.0
 
@@ -1002,6 +1009,7 @@ static func _tube(chain: Dictionary, sides: int, relief: Dictionary,
 	sides = clampi(sides, 3, 32)
 	# angular cells: half the ring count, so every plate is sampled by at least
 	# two vertices and the relief never aliases into noise
+	@warning_ignore("integer_division")
 	var cells := clampi(sides / 2, 3, 16)
 	var amp: float = float(relief["amp"]) if (is_trunk or radii[0] > 0.05) else 0.0
 	var kind := String(relief["kind"])
@@ -1047,7 +1055,7 @@ static func _tube(chain: Dictionary, sides: int, relief: Dictionary,
 			var rr := r
 			if amp > 0.0:
 				rr += clampf(_bark_offset(kind, float(k) * float(cells) / float(sides),
-					vlen, cells, vk, amp * fade), -r * 0.30, r * 0.42)
+					vlen, cells, vk, amp * fade, bseed), -r * 0.30, r * 0.42)
 			if lobe.size() == 3:
 				# buttress / rib swell: authored lobes fading up the chunk
 				rr += r * float(lobe[1]) * maxf(cos(a * float(lobe[0])), 0.0) \
@@ -1153,7 +1161,7 @@ static func _mesh_of(species: String, pack: Dictionary, s: Dictionary,
 static func _card_arrays(cards: Array, cross: bool) -> Array:
 	var v := PackedVector3Array()
 	var nrm := PackedVector3Array()
-	var tan := PackedFloat32Array()
+	var tans := PackedFloat32Array()
 	var uv := PackedVector2Array()
 	var idx := PackedInt32Array()
 	for c in cards:
@@ -1170,6 +1178,7 @@ static func _card_arrays(cards: Array, cross: bool) -> Array:
 		var centre: Vector3 = (c["p"] as Vector3) + grow * size * 0.92
 		var cell: int = int(c["cell"]) % 8
 		var c0 := float(cell % 4) * 0.25
+		@warning_ignore("integer_division")
 		var r0 := 1.0 - float(cell / 4 + 1) * 0.25
 		for pl in range(2 if cross else 1):
 			var uax := side * size if pl == 0 else grow.cross(side).normalized() * size
@@ -1184,7 +1193,7 @@ static func _card_arrays(cards: Array, cross: bool) -> Array:
 			for k in range(4):
 				v.append(corners[k])
 				nrm.append(nn)
-				tan.append_array(PackedFloat32Array([un.x, un.y, un.z, 1.0]))
+				tans.append_array(PackedFloat32Array([un.x, un.y, un.z, 1.0]))
 				uv.append(cuv[k])
 			idx.append_array(PackedInt32Array([base, base + 1, base + 2,
 				base, base + 2, base + 3]))
@@ -1192,7 +1201,7 @@ static func _card_arrays(cards: Array, cross: bool) -> Array:
 	arr.resize(Mesh.ARRAY_MAX)
 	arr[Mesh.ARRAY_VERTEX] = v
 	arr[Mesh.ARRAY_NORMAL] = nrm
-	arr[Mesh.ARRAY_TANGENT] = tan
+	arr[Mesh.ARRAY_TANGENT] = tans
 	arr[Mesh.ARRAY_TEX_UV] = uv
 	arr[Mesh.ARRAY_INDEX] = idx
 	return arr

@@ -526,7 +526,7 @@ func _t_split() -> void:
 	claim("split", 6)
 
 	var split := 0
-	var worst_pair := ""
+	var _worst_pair := ""
 	for k in range(1920):
 		var d := float(k) * 0.05
 		var seen := {}

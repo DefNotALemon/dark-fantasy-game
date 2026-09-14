@@ -35,7 +35,6 @@ var _pass := 0
 var _fail := 0
 var _t := 0.0
 var _step := 0
-var _wait := 0.0
 var _boot_t := 0.0
 var _player: Node3D = null
 var _ow: Node = null

@@ -303,6 +303,7 @@ func _size_grid(pm: ShaderMaterial, cell: float, r0: float, r1: float) -> int:
 		si = s - 2
 	pm.set_shader_parameter("grid_S", s)
 	pm.set_shader_parameter("grid_Si", si)
+	@warning_ignore("integer_division")
 	pm.set_shader_parameter("grid_t", (s - si) / 2)
 	pm.set_shader_parameter("r0", r0)
 	pm.set_shader_parameter("r1", r1)

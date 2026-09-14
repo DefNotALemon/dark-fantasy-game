@@ -794,12 +794,14 @@ func _t_year() -> void:
 	var lowest := 1e9
 	var went_cold := false
 	for d in 96:
+		@warning_ignore("integer_division")
 		sky.season = int(d / 24) % 4
 		cr.advance(24.0)
 		var s := float(cst["stores"])
 		lowest = minf(lowest, s)
 		if s <= 0.0:
 			went_cold = true
+		@warning_ignore("integer_division")
 		at_season[int(d / 24) % 4] = s
 	ok(not went_cold, "a household that keeps its autumn sees the far side of winter")
 	ok(lowest > 10.0, "and never runs the pile down to nothing (lowest %.0f)" % lowest)
@@ -814,6 +816,7 @@ func _t_year() -> void:
 	_set_clock(cr, 0.0)
 	var cold_days := 0
 	for d in 96:
+		@warning_ignore("integer_division")
 		sky.season = int(d / 24) % 4
 		## Twelve autumn days barred indoors -- a scare that lasted a fortnight.
 		if d >= 48 and d < 60:

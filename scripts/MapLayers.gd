@@ -355,8 +355,8 @@ static func chains(segs: Array, nx: int) -> Array:
 	var seeds: Array = starts.duplicate()
 	for si2 in range(segs.size()):
 		seeds.append(int((segs[si2] as Vector2i).x))
-	for seed in seeds:
-		var c0 := int(seed)
+	for sd in seeds:
+		var c0 := int(sd)
 		while true:
 			var nxt := -1
 			for si3 in (at.get(c0, []) as Array):
@@ -384,6 +384,7 @@ static func chains(segs: Array, nx: int) -> Array:
 
 
 static func _corner(c: int, w: int) -> Vector2:
+	@warning_ignore("integer_division")
 	return Vector2(float(c % w), float(c / w))
 
 

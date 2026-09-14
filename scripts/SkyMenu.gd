@@ -320,10 +320,10 @@ func _set_hour(h: float) -> void:
 	refresh()
 
 
-func _set_speed(scale: float) -> void:
+func _set_speed(sc: float) -> void:
 	if _find():
-		_dn.time_scale = scale
-	_light("speed", scale)
+		_dn.time_scale = sc
+	_light("speed", sc)
 
 
 func _add_days(n: float) -> void:
@@ -409,6 +409,7 @@ func refresh() -> void:
 	## Round to the minute, don't truncate: 19.7 hours is 41.999... minutes in
 	## float, and int() would print 19:41 for an hour that is exactly 19:42.
 	var total := int(roundf(h * 60.0))
+	@warning_ignore("integer_division")
 	var hh := (total / 60) % 24
 	var mm := total % 60
 	var season: String = SEASONS[int(Wind.phase_for_day(_dn.day) * 4.0) % 4]

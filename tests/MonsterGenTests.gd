@@ -44,6 +44,7 @@ class LabFloor:
 class FakeWorld:
 	extends Node3D
 	var _player: Node3D = null
+	@warning_ignore("unused_private_class_variable")
 	var _daynight: Node = null
 	var world_seed := 777
 
@@ -333,8 +334,8 @@ func t_names_and_json() -> void:
 	rng.seed = 7
 	var names := {}
 	for _i in range(200):
-		var g := MonsterGen.roll_species(rng, 2)
-		var nm := String(g["name"])
+		var g0 := MonsterGen.roll_species(rng, 2)
+		var nm := String(g0["name"])
 		ok(nm.length() >= 5 and nm.contains(" "), "a name is a word and an epithet (%s)" % nm)
 		ok(nm.substr(0, 1) == nm.substr(0, 1).to_upper(), "the name is capitalised")
 		names[nm] = true
@@ -944,7 +945,7 @@ func _src(path: String) -> String:
 
 func t_wiring() -> void:
 	var enemy := _src("res://scripts/Enemy.gd")
-	ok(enemy.contains("func _on_hit_landed(_target: Node) -> void:"), "Enemy has the hit hook")
+	ok(enemy.contains("func _on_hit_landed(_who: Node) -> void:"), "Enemy has the hit hook")
 	eq(enemy.count("_on_hit_landed("), 3, "Enemy calls the hook from melee and the strong attack")
 	var skin := _src("res://scripts/CreatureSkin.gd")
 	ok(skin.contains("func set_outline("), "CreatureSkin has set_outline")

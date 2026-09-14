@@ -172,9 +172,9 @@ func player_noise(pos: Vector3, loudness: float) -> void:
 	## radius; from drizzle onward it no longer reaches one, so you can run in
 	## wet woods without emptying them ahead of you. The price is paid in the
 	## same coin two functions down, where the relay is cut by the same rain.
-	var ring := lerpf(NOISE_NEAR, NOISE_FAR, clampf(loudness, 0.0, 1.0))
-	ring *= Weatherwise.noise_mult(weather)
-	_ring(pos, ring, Threat.WARY if loudness < 0.7 else Threat.ALARM, "you", 1)
+	var heard_r := lerpf(NOISE_NEAR, NOISE_FAR, clampf(loudness, 0.0, 1.0))
+	heard_r *= Weatherwise.noise_mult(weather)
+	_ring(pos, heard_r, Threat.WARY if loudness < 0.7 else Threat.ALARM, "you", 1)
 
 
 func heard_by_player(player_pos: Vector3) -> Array[Dictionary]:

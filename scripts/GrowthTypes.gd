@@ -173,6 +173,7 @@ static func tile_rect(tile: int) -> Rect2:
 	## UV rect of a tile, inset half a texel so filtering never bleeds a
 	## neighbour's edge in
 	var cx := tile % COLS
+	@warning_ignore("integer_division")
 	var cy := tile / COLS
 	var inset := 0.5 / float(TILE)
 	var w := 1.0 / float(COLS)
@@ -225,6 +226,7 @@ static func _noise(seed_v: int, freq: float) -> FastNoiseLite:
 
 static func _paint_tile(img: Image, tile: int) -> void:
 	var ox := (tile % COLS) * TILE
+	@warning_ignore("integer_division")
 	var oy := (tile / COLS) * TILE
 	var na := _noise(100 + tile, 4.0 / float(TILE))
 	var nb := _noise(200 + tile, 11.0 / float(TILE))
@@ -255,7 +257,7 @@ static func _texel(tile: int, u: float, v: float, a: float, b: float, c: float) 
 	return px
 
 
-static func _texel_raw(tile: int, u: float, v: float, du: float, dv: float, r: float,
+static func _texel_raw(tile: int, u: float, v: float, du: float, _dv: float, r: float,
 		grain: float, a: float, b: float, c: float) -> Color:
 	match tile:
 		T_CUSHION:

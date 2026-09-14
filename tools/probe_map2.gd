@@ -43,7 +43,7 @@ func _init() -> void:
 	for nx: int in [64, 96, 130, 192, 260]:
 		var nz := int(round(float(nx) * SIZE.y / SIZE.x))
 		var t0 := Time.get_ticks_usec()
-		var p := _part(roster, nx, nz)
+		var _p := _part(roster, nx, nz)
 		var ms := float(Time.get_ticks_usec() - t0) / 1000.0
 		print("  %dx%d = %6d cells  %7.1f ms   world cell %5.1f m   view px at zoom1 %.2f" % [
 			nx, nz, nx * nz, ms, SIZE.x / float(nx), 520.0 / float(nx)])

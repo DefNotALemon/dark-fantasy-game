@@ -80,6 +80,7 @@ func _build(src: MeshInstance3D, count: int) -> bool:
 		return false
 	if si.is_empty():
 		si = PackedInt32Array(range(sv.size()))
+	@warning_ignore("integer_division")
 	var tri_count := si.size() / 3
 	if tri_count <= 0:
 		return false
@@ -103,14 +104,14 @@ func _build(src: MeshInstance3D, count: int) -> bool:
 		var centre := (a + b + c) / 3.0
 		var jitter := Vector3(rng.randf_range(-0.9, 0.9), rng.randf_range(-0.5, 0.5),
 			rng.randf_range(-0.9, 0.9))
-		var seed := rng.randf()
+		var sd := rng.randf()
 		var shrink := CARD_SCALE * rng.randf_range(0.75, 1.35)
 		var base := verts.size()
 		for v in [a, b, c]:
 			verts.append(centre + (v - centre) * shrink + jitter)
 			norms.append(Vector3.UP)
 			custom.append_array([centre.x + jitter.x, centre.y + jitter.y,
-				centre.z + jitter.z, seed])
+				centre.z + jitter.z, sd])
 		uvs.append(su[si[t]])
 		uvs.append(su[si[t + 1]])
 		uvs.append(su[si[t + 2]])

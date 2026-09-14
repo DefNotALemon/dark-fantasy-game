@@ -152,7 +152,7 @@ func _process(delta: float) -> void:
 			pass
 
 
-func _sway(delta: float, rate: float) -> void:
+func _sway(_delta: float, rate: float) -> void:
 	var s := sin(_t * 2.1 * rate)
 	for i in range(_arms.size()):
 		var a := _arms[i]

@@ -808,6 +808,7 @@ static func _bird_common(rig: Dictionary, p: Dictionary, leg_frac: float,
 	if bool(f.get("checker", false)):
 		## The loon's white piano-key back. Unmistakable, four boxes.
 		for i in range(6):
+			@warning_ignore("integer_division")
 			box(body, Vector3(w * 0.14, body_h * 0.08, L * 0.07), col2,
 				Vector3((-1.0 if i % 2 == 0 else 1.0) * w * 0.24, body_h * 0.44,
 					-L * 0.18 + float(i / 2) * L * 0.15), Vector3.ZERO, rig)
@@ -1001,11 +1002,11 @@ static func _herp(rig: Dictionary, p: Dictionary) -> void:
 			segs.append(sg)
 			prev = sg
 		rig["segments"] = segs
-		var head := pivot(body, Vector3(0, 0, -L * 0.06))
-		rig["head"] = head
-		box(head, Vector3(w * 1.1, w * 0.7, L * 0.09), col, Vector3(0, 0, -L * 0.04), Vector3.ZERO, rig)
-		eye(head, Vector3(-w * 0.4, w * 0.2, -L * 0.07), L * 0.018, rig)
-		eye(head, Vector3(w * 0.4, w * 0.2, -L * 0.07), L * 0.018, rig)
+		var hd := pivot(body, Vector3(0, 0, -L * 0.06))
+		rig["head"] = hd
+		box(hd, Vector3(w * 1.1, w * 0.7, L * 0.09), col, Vector3(0, 0, -L * 0.04), Vector3.ZERO, rig)
+		eye(hd, Vector3(-w * 0.4, w * 0.2, -L * 0.07), L * 0.018, rig)
+		eye(hd, Vector3(w * 0.4, w * 0.2, -L * 0.07), L * 0.018, rig)
 		rig["ground_y"] = 0.0
 		return
 

@@ -1,6 +1,7 @@
 extends Node
 ## Minimal stand-in for World.gd so SkyMenu has something to find.
 var _sky: SkyRig
+@warning_ignore("unused_private_class_variable")
 var _daynight: DayNight
 var _weather: Weather
 var cloud_calls: Array[int] = []

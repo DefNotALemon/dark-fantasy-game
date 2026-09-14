@@ -961,11 +961,11 @@ func _update_ring_visibility() -> void:
 		(_far[k] as Node3D).visible = not _children_complete(k, _far_to_mid(k), _mid)
 
 
-func _mid_to_near(k: Vector2i) -> int:
+func _mid_to_near(_k: Vector2i) -> int:
 	return int(MID_SPAN / NEAR_SPAN)
 
 
-func _far_to_mid(k: Vector2i) -> int:
+func _far_to_mid(_k: Vector2i) -> int:
 	return int(FAR_SPAN / MID_SPAN)
 
 
@@ -1305,12 +1305,12 @@ func _build_water_all() -> void:
 	_water_root.add_child(sea)
 
 	var t0 := Time.get_ticks_msec()
-	var lakes := _build_inland_water()
-	if lakes != null:
-		lakes.material_override = wmat
-		lakes.name = "Lakes"
-		lakes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_water_root.add_child(lakes)
+	var lake_mesh := _build_inland_water()
+	if lake_mesh != null:
+		lake_mesh.material_override = wmat
+		lake_mesh.name = "Lakes"
+		lake_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_water_root.add_child(lake_mesh)
 	print("Overworld: inland water = %d quads of %.0f m in %d ms"
 		% [_inland_water_quads, WATER_QUAD, Time.get_ticks_msec() - t0])
 
@@ -1458,6 +1458,7 @@ func _cell_index(wx: float, wz: float, k: Vector2i) -> int:
 func _cell_centre(k: Vector2i, cell: int) -> Vector2:
 	var n := _cells_per_tile()
 	var ci := cell % n
+	@warning_ignore("integer_division")
 	var cj := cell / n
 	return Vector2(float(k.x) * NEAR_SPAN + (float(ci) + 0.5) * CELL,
 		float(k.y) * NEAR_SPAN + (float(cj) + 0.5) * CELL)
@@ -1635,12 +1636,6 @@ func _demote_cell(k: Vector2i, cell: int) -> void:
 	if state[cell] != 1:
 		return
 	var nodes: Array = (plan["nodes"] as Array)[cell]
-	var alive := 0
-	for n in nodes:
-		var t := n as Node
-		if t == null or not is_instance_valid(t) or bool(t.get("felled")):
-			continue
-		alive += 1
 	# felled = every slot in the cell that no longer has a standing tree
 	var cells: PackedInt32Array = plan["cell"]
 	var standing: Dictionary = {}

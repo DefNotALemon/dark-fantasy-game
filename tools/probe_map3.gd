@@ -54,6 +54,7 @@ func _init() -> void:
 		for e2 in b:
 			lens.append(((e2 as Dictionary)["pts"] as PackedVector2Array).size())
 		lens.sort()
+		@warning_ignore("integer_division")
 		print("    chain point counts: min %d median %d max %d" % [lens[0], lens[lens.size()/2], lens[-1]])
 		for e3 in b:
 			var e3d := e3 as Dictionary

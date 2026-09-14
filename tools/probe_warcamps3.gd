@@ -192,7 +192,7 @@ func _bounds() -> Vector4:
 	return Vector4(minx, minz, maxx, maxz)
 
 
-func _areas(land: Array) -> Dictionary:
+func _areas(_land: Array) -> Dictionary:
 	var b := _bounds()
 	var cw := (b.z - b.x) / 130.0
 	var ch := (b.w - b.y) / 195.0

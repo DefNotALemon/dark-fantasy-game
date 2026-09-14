@@ -17,7 +17,6 @@ extends SceneTree
 var passed := 0
 var failed := 0
 var failures: Array[String] = []
-var _species_needing_limbs := {}
 
 
 func ok(cond: bool, label: String) -> void:

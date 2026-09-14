@@ -215,6 +215,7 @@ func _draw_path(p: Dictionary) -> void:
 		if crest != null:
 			holder.add_child(crest)
 	if show_labels:
+		@warning_ignore("integer_division")
 		var mid := line[line.size() / 2]
 		holder.add_child(_label("%s\n%s" % [str(p.get("name", "")), WorldPlan.kind_label(p)],
 			Vector3(mid.x, _g(mid.x, mid.y) + 5.0, mid.y), col, 0.7))

@@ -885,7 +885,6 @@ func _run_steps(budget: int) -> void:
 
 func _step(n: int) -> void:
 	var t := float(n) * STEP_HOURS / 24.0
-	var season := season_at(t)
 	var sky := sky_at(t)
 	for c in crofts:
 		_step_croft(c as Dictionary, t, sky, season_here(t, c as Dictionary))
@@ -1168,7 +1167,7 @@ func _drive_bodies() -> void:
 		_apply(body as Node3D, c, routine_at(c, days, sky, season, state_of(String(id))))
 
 
-func _apply(body: Node3D, c: Dictionary, r: Dictionary) -> void:
+func _apply(body: Node3D, _c: Dictionary, r: Dictionary) -> void:
 	## One reader, one dictionary. Everything the yard shows is here, and
 	## nothing here decides anything.
 	var lamp := body.get_node_or_null("Lamp") as OmniLight3D
@@ -1447,6 +1446,7 @@ func _build_woodpile(root: Node3D, wall: float) -> Vector3:
 	pile.position = at
 	root.add_child(pile)
 	for i in WOOD_MAX:
+		@warning_ignore("integer_division")
 		var row := i / 3
 		var col := i % 3
 		var log_node: Node3D = IncidentKit.build_prop({"kind": "log", "arg": "wood"}, i, float(i) / float(WOOD_MAX))
@@ -1472,6 +1472,7 @@ func _build_plot(root: Node3D, wall: float, has_plot: bool, h: int) -> Vector3:
 	## raided sheepfold's boundary are visibly the same carpentry.
 	var span := wall * 1.25
 	for i in 8:
+		@warning_ignore("integer_division")
 		var side := i / 2
 		var k := i % 2
 		var hu: Node3D = IncidentKit.build_prop({"kind": "hurdle", "arg": ""}, i, _unit(h, 10 + i))
@@ -1503,6 +1504,7 @@ func _build_plot(root: Node3D, wall: float, has_plot: bool, h: int) -> Vector3:
 	crop.position = at
 	var mc := IncidentKit._mat(Color(0.42, 0.47, 0.20))
 	for i in 18:
+		@warning_ignore("integer_division")
 		var rr := i / 6
 		var cc := i % 6
 		IncidentKit._add(crop, IncidentKit._box(0.9, 0.85, 0.22), mc,

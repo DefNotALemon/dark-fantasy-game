@@ -22,8 +22,10 @@ func _count(n: Node, out: Dictionary) -> void:
 					var idx = arr[Mesh.ARRAY_INDEX]
 					var t := 0
 					if idx != null and (idx as PackedInt32Array).size() > 0:
+						@warning_ignore("integer_division")
 						t = (idx as PackedInt32Array).size() / 3
 					else:
+						@warning_ignore("integer_division")
 						t = (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() / 3
 					out["tris"] = int(out.get("tris", 0)) + t
 	if n is MultiMeshInstance3D:
@@ -83,7 +85,7 @@ func _run() -> void:
 	cost["Horse"] = _measure("Horse", func(): return Horse.new())
 	cost["SaddledHorse"] = _measure("SaddledHorse", func(): return SaddledHorse.new())
 	var tree_cost := _measure("TreeV2", func(): return TreeV2.make(_rng), 6)
-	var critter_cost := _measure("Critter(deer)", func(): return Critter.make("whitetail"), 2)
+	var _critter_cost := _measure("Critter(deer)", func(): return Critter.make("whitetail"), 2)
 
 	print("\n-- 2. how many mobs the caves ACTUALLY spawn --")
 	## Replays _spawn_dwellers' exact roll tables 20,000 times. Pocket COUNT is
@@ -149,14 +151,14 @@ func _run() -> void:
 	print("  cave dwellers per world:  min %d   mean %.1f   max %d" % [tot_min, mean, tot_max])
 	var mob_nodes := 0.0
 	var mob_mats := 0.0
-	var mob_meshes := 0.0
+	var _mob_meshes := 0.0
 	var mob_ms := 0.0
 	for k in by_kind:
 		var avg := float(by_kind[k]) / float(runs)
 		print("    %-11s %6.1f" % [k, avg])
 		mob_nodes += avg * float((cost[k] as Dictionary)["nodes"])
 		mob_mats += avg * float((cost[k] as Dictionary)["mats"])
-		mob_meshes += avg * float((cost[k] as Dictionary)["meshes"])
+		_mob_meshes += avg * float((cost[k] as Dictionary)["meshes"])
 		mob_ms += avg * float((cost[k] as Dictionary)["ms"])
 
 	print("\n-- 3. the surface, as World._ready builds it --")
@@ -227,7 +229,7 @@ func _run() -> void:
 		% [WildlifeDirector.BUDGET, str(WildlifeDirector.SPAWN_RING), int(WildlifeDirector.DESPAWN_AT)])
 	var streamed := 24
 	print("  Hostiles on the same contract: ~%d live instead of %d." % [streamed, int(mean)])
-	var save_nodes := all_nodes - (float(streamed) / mean) * mob_nodes - surf_nodes * 0.4 \
+	var _save_nodes := all_nodes - (float(streamed) / mean) * mob_nodes - surf_nodes * 0.4 \
 		- trees * float(tree_cost["nodes"])
 	print("  That alone is %d fewer nodes and %d fewer materials at boot."
 		% [int(mob_nodes * (1.0 - float(streamed) / mean)),

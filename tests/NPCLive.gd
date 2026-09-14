@@ -29,8 +29,8 @@ func _initialize() -> void:
 
 func key(code: int, pressed := true) -> void:
 	var ev := InputEventKey.new()
-	ev.keycode = code
-	ev.physical_keycode = code
+	ev.keycode = code as Key
+	ev.physical_keycode = code as Key
 	ev.pressed = pressed
 	root.push_input(ev)
 

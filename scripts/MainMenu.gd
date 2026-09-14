@@ -193,10 +193,12 @@ func _relayout() -> void:
 
     _rule.color = Color(0.545, 0.475, 0.361, 0.75)
     _rule.position = Vector2(x0, y)
+    @warning_ignore("integer_division")
     _rule.size = Vector2(PF.text_width(TITLE) * ts, maxi(1, _s / 2))
     y += int(_rule.size.y) + _s * 2
     _rule2.color = Color(0.545, 0.475, 0.361, 0.30)
     _rule2.position = Vector2(x0, y)
+    @warning_ignore("integer_division")
     _rule2.size = Vector2(PF.text_width(TITLE) * ts * 0.55, maxi(1, _s / 2))
     y += int(_rule2.size.y) + _s * 3
 
@@ -229,12 +231,12 @@ func _relayout() -> void:
     _refresh_selection()
 
 
-func _paint(t: TextureRect, text: String, col: Color, scale: int, x: int, y: int) -> void:
-    t.texture = PF.render(text, Color(1, 1, 1), INK, scale)
+func _paint(t: TextureRect, text: String, col: Color, sc: int, x: int, y: int) -> void:
+    t.texture = PF.render(text, Color(1, 1, 1), INK, sc)
     t.modulate = col
     ## render() carries a 1 px margin for the outline; back it out so the
     ## glyphs land exactly where the layout asked for.
-    t.position = Vector2(x - scale, y - scale)
+    t.position = Vector2(x - sc, y - sc)
     t.size = t.texture.get_size()
 
 

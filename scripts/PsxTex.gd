@@ -43,6 +43,7 @@ static func image() -> Image:
 	var img := Image.create(SIZE, SIZE, false, Image.FORMAT_RGB8)
 	for t in 16:
 		var ox := (t % 4) * TILE
+		@warning_ignore("integer_division")
 		var oy := (t / 4) * TILE
 		for y in TILE:
 			for x in TILE:
@@ -59,14 +60,14 @@ static func _fr(x: float) -> float:
 	return x - floor(x)
 
 
-static func _hash(i: int, j: int, seed: int) -> float:
-	var n := i * 374761393 + j * 668265263 + seed * 1274126177
+static func _hash(i: int, j: int, sd: int) -> float:
+	var n := i * 374761393 + j * 668265263 + sd * 1274126177
 	n = (n ^ (n >> 13)) * 1274126177
 	n = n ^ (n >> 16)
 	return float(n & 0xFFFFFF) / float(0xFFFFFF)
 
 
-static func _vnoise(u: float, v: float, cells: int, seed: int) -> float:
+static func _vnoise(u: float, v: float, cells: int, sd: int) -> float:
 	## Value noise that TILES at u,v = 1 (lattice wraps at `cells`).
 	var fx := u * cells
 	var fy := v * cells
@@ -76,20 +77,20 @@ static func _vnoise(u: float, v: float, cells: int, seed: int) -> float:
 	var ty := fy - iy
 	tx = tx * tx * (3.0 - 2.0 * tx)
 	ty = ty * ty * (3.0 - 2.0 * ty)
-	var a := _hash(ix % cells, iy % cells, seed)
-	var b := _hash((ix + 1) % cells, iy % cells, seed)
-	var c := _hash(ix % cells, (iy + 1) % cells, seed)
-	var d := _hash((ix + 1) % cells, (iy + 1) % cells, seed)
+	var a := _hash(ix % cells, iy % cells, sd)
+	var b := _hash((ix + 1) % cells, iy % cells, sd)
+	var c := _hash(ix % cells, (iy + 1) % cells, sd)
+	var d := _hash((ix + 1) % cells, (iy + 1) % cells, sd)
 	return lerpf(lerpf(a, b, tx), lerpf(c, d, tx), ty)
 
 
-static func _fbm(u: float, v: float, cells: int, seed: int, oct := 3) -> float:
+static func _fbm(u: float, v: float, cells: int, sd: int, oct := 3) -> float:
 	var s := 0.0
 	var amp := 0.5
 	var tot := 0.0
 	var c := cells
 	for i in oct:
-		s += _vnoise(u, v, c, seed + i * 7) * amp
+		s += _vnoise(u, v, c, sd + i * 7) * amp
 		tot += amp
 		amp *= 0.5
 		c *= 2
