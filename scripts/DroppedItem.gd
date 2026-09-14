@@ -22,6 +22,13 @@ var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9
 var _resting := false
 var _life := LIFE
 var _refoot := randf_range(0.3, 0.6)  ## staggered footing re-checks while resting
+## A bucked log is the actual piece of trunk it was cut from (FallenTrunk
+## hands it over with adopt_log). It does not tumble like a tossed potion,
+## and when it comes to rest it keeps lying along the line of the trunk
+## instead of spinning to a random heading.
+var keep_yaw := false
+var tumble := true
+var log_r := 0.0             ## radius of a log, for the thud's pitch; 0 = not a log
 
 
 static func make(d: Dictionary) -> DroppedItem:
@@ -37,6 +44,18 @@ func _ready() -> void:
 
 func display_name() -> String:
 	return String(item.get("name", "item"))
+
+
+## Wear a piece of real trunk instead of the built billet: FallenTrunk cuts
+## the section out of its own mesh and hands it over lying along +X.
+func adopt_log(mi: MeshInstance3D, r: float) -> void:
+	for c in get_children():
+		if c is MeshInstance3D:
+			c.queue_free()
+	add_child(mi)
+	keep_yaw = true
+	tumble = false
+	log_r = maxf(r, 0.03)
 
 
 func _keeps() -> bool:
@@ -68,7 +87,8 @@ func _physics_process(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, 0.0, delta * 0.8)
 	velocity.z = move_toward(velocity.z, 0.0, delta * 0.8)
 	global_position += velocity * delta
-	rotate_y(TOSS_SPIN * delta)
+	if tumble:
+		rotate_y(TOSS_SPIN * delta)
 	if velocity.y >= 0.0:
 		return
 	## Falling: look for the ground under us and settle onto it. BODIES are
@@ -87,7 +107,20 @@ func _physics_process(delta: float) -> void:
 	if global_position.y <= float(hit.position.y) + REST_HEIGHT:
 		_resting = true
 		global_position.y = float(hit.position.y) + REST_HEIGHT
-		rotation = Vector3(0.0, randf() * TAU, 0.0)  ## settle flat, any old way
+		if keep_yaw:
+			## flat, but along the line it was lying on: the log's +X is the
+			## trunk's axis, so its heading is that axis on the ground
+			var ax := global_transform.basis.x
+			var yaw := atan2(-ax.z, ax.x) if Vector2(ax.x, ax.z).length() > 0.05 else rotation.y
+			var from := global_transform.basis.orthonormalized()
+			var to := Basis(Vector3.UP, yaw)
+			var tw := create_tween()
+			tw.tween_method(func(t: float): basis = from.slerp(to, t), 0.0, 1.0, 0.22)
+		else:
+			rotation = Vector3(0.0, randf() * TAU, 0.0)  ## settle flat, any old way
+		if log_r > 0.0 or String(item.get("name", "")) == "Log":
+			WoodAudio.thud(self, global_position,
+				log_r if log_r > 0.0 else float(item.get("log_r", 0.22)))
 
 
 func _glance_off(who: Node3D) -> void:
@@ -281,17 +314,28 @@ func _build_rucksack() -> void:
 
 
 func _build_billet() -> void:
-	## A split of firewood: a stubby round with sawn faces, lying on its side.
-	## A LOG is the same thing at timber scale — it came off a trunk you felled,
-	## and it has to read as a piece of that trunk from across a clearing, not
-	## as another handful of kindling. One number, and no second mesh to keep
-	## in step. The bark colour follows the species when the trunk sent one.
+	## A split of firewood: a round of bark with end grain on both faces,
+	## lying on its side. A LOG is the same thing at timber scale -- it came
+	## off a trunk you felled, and it has to read as a piece of that trunk
+	## from across a clearing. One builder (WoodCut.log_instance), so the
+	## bark is the species' own shader and the faces are growth rings.
+	##
+	## The old one was three CylinderMeshes: a shaft tapered to 55% at one
+	## end and two full-radius heart discs -- so the discs stood proud of the
+	## thin end like a cap on a stalk. That is the "logs look like mushrooms"
+	## report (Lemon 2026-09-14). A log bucked off a trunk carries its size
+	## (log_r / log_len) and species in its dict, so it comes back out of the
+	## pack the size it went in.
 	var log_sized := String(item.get("name", "")) == "Log"
-	var k := 2.6 if log_sized else 1.0
+	var species := String(item.get("species", ""))
 	var wood: Color = item.get("bark", Color(0.28, 0.19, 0.12).lerp(Color(0.34, 0.23, 0.14), randf()))
-	var heart := Color(0.52, 0.39, 0.21)
-	_add_branch(0.40 * k, 0.085 * k, wood, Vector3(0, 0.085 * k, 0), Vector3(90, 0, 0))
-	_add_branch(0.02, 0.085 * k, heart, Vector3(0, 0.085 * k, -0.20 * k), Vector3(90, 0, 0))
-	_add_branch(0.02, 0.085 * k, heart, Vector3(0, 0.085 * k, 0.20 * k), Vector3(90, 0, 0))
+	var r := float(item.get("log_r", 0.22 if log_sized else 0.085))
+	var length := float(item.get("log_len", 1.05 if log_sized else 0.40))
+	var seed_v := hash(str(item.get("name", ""), item.get("bark", ""), randi()))
+	add_child(WoodCut.log_instance(species, r, length, wood, seed_v))
 	if not log_sized:
-		_add_branch(0.30, 0.055, wood, Vector3(0.11, 0.055, 0.03), Vector3(90, 12, 0))
+		## kindling comes as a pair: a second, thinner split leaning on the first
+		var b := WoodCut.log_instance(species, 0.055, 0.30, wood, seed_v + 1)
+		b.position = Vector3(0.03, 0.0, 0.12)
+		b.rotation_degrees = Vector3(0, 12, 0)
+		add_child(b)

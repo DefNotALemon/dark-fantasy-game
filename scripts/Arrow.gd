@@ -102,6 +102,8 @@ func _physics_process(delta: float) -> void:
 			sp = String(timber.get("species"))
 		_leave_fx(HitFX.wood(hit.position as Vector3,
 			((hit.normal as Vector3) + Vector3.UP * 0.4).normalized(), sp, 0.45))
+		## the thock, and the shaft quivering -- pitched to the trunk
+		WoodAudio.strike(self, hit.position as Vector3, "arrow", 0.7, timber)
 	global_position = hit.position - dir * 0.14
 	stuck = true
 	life = 120.0

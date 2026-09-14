@@ -838,6 +838,8 @@ func chop_hit(toward_chopper: Vector3, aim := Vector3.INF) -> bool:
 	var limb := nearest_branch(global_position, aim)
 	if limb != null:
 		last_result = "limb_off" if limb.take_hit(1) else "limb"
+		if last_result == "limb_off":
+			WoodAudio.limb(self, aim if aim != Vector3.INF else global_position + Vector3.UP * 2.0)
 		return false
 
 	## Otherwise the wedge goes into the trunk ON THE LINE THE BLADE HIT.

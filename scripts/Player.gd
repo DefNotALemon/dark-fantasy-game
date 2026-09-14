@@ -4435,10 +4435,14 @@ func _wood_strike_point(wood: Node3D, reach: float) -> Array:
 	return [wood.global_position + toward * 0.35 + Vector3.UP * ChopTree.NOTCH_Y, toward]
 
 
-func _wood_impact(wood: Node3D, mat_id := "", power := 1.0) -> Array:
+func _wood_impact(wood: Node3D, mat_id := "", power := 1.0, tool := "") -> Array:
 	## Chips out of the cut, tinted to the species, plus real tumbling
 	## splinters you can watch land. Returns [point, normal] so the caller can
 	## reuse the strike point it just paid a raycast for.
+	## AND THE SOUND OF IT: every tool that meets wood comes through here, so
+	## this is where the trunk answers -- with the tool's own voice (an axe
+	## bites, a sword slaps, a pick thuds) pitched to the size of the wood.
+	## See WoodAudio.gd. `tool` defaults to what is in your hand.
 	var pn := _wood_strike_point(wood, AXE_RANGE + 0.6)
 	var at: Vector3 = pn[0]
 	var normal: Vector3 = pn[1]
@@ -4447,6 +4451,7 @@ func _wood_impact(wood: Node3D, mat_id := "", power := 1.0) -> Array:
 	if "species" in wood:
 		species = String(wood.get("species"))
 	_fx(HitFX.wood(at, dir, species, power))
+	WoodAudio.strike(self, at, tool if tool != "" else current_weapon, power, wood)
 	if mat_id != "":
 		_fx(HitFX.element(at, dir, Materials.blade_fx(mat_id), power * 0.7))
 	## The heavy chips are physics, not particles — they bounce and lie there.
@@ -5001,6 +5006,19 @@ func _do_pick_hit() -> void:
 	var fwd_flat := forward
 	fwd_flat.y = 0.0
 	fwd_flat = fwd_flat.normalized()
+	## Timber in the arc: the point goes in with a dull thud, a few chips
+	## come out, and not one bit of the felling job gets done. Bring an axe.
+	## (Every tool sounds like itself on a trunk -- WoodAudio.gd.)
+	var wood_hit := _nearest_wood(fwd_flat, PICK_RANGE)
+	if wood_hit != null:
+		_wood_impact(wood_hit, "", 0.5, "pickaxe")
+		cam_punch = maxf(cam_punch, 0.6)
+		if wood_hit.has_method("shiver_from"):
+			wood_hit.call("shiver_from", global_position)
+		if axe_hint_cd <= 0.0:
+			axe_hint_cd = 8.0
+			_add_log_msg("The pick thuds in, but this is an axe's work (2)", Color(0.8, 0.8, 0.8))
+		return
 	for e in get_tree().get_nodes_in_group("enemies"):
 		if not (e is Node3D):
 			continue

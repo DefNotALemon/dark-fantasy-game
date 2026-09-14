@@ -1,0 +1,109 @@
+{
+ "generator": "tools/woodsounds.py",
+ "version": 1,
+ "seed": 20260914,
+ "sample_rate": 44100,
+ "tools": {
+  "axe": 3,
+  "sword": 3,
+  "pick": 3,
+  "arrow": 2
+ },
+ "sounds": {
+  "axe_1": {
+   "file": "axe_1.wav",
+   "seconds": 0.42,
+   "loop": false
+  },
+  "sword_1": {
+   "file": "sword_1.wav",
+   "seconds": 0.34,
+   "loop": false
+  },
+  "pick_1": {
+   "file": "pick_1.wav",
+   "seconds": 0.4,
+   "loop": false
+  },
+  "axe_2": {
+   "file": "axe_2.wav",
+   "seconds": 0.42,
+   "loop": false
+  },
+  "sword_2": {
+   "file": "sword_2.wav",
+   "seconds": 0.34,
+   "loop": false
+  },
+  "pick_2": {
+   "file": "pick_2.wav",
+   "seconds": 0.4,
+   "loop": false
+  },
+  "axe_3": {
+   "file": "axe_3.wav",
+   "seconds": 0.42,
+   "loop": false
+  },
+  "sword_3": {
+   "file": "sword_3.wav",
+   "seconds": 0.34,
+   "loop": false
+  },
+  "pick_3": {
+   "file": "pick_3.wav",
+   "seconds": 0.4,
+   "loop": false
+  },
+  "arrow_1": {
+   "file": "arrow_1.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "creak_1": {
+   "file": "creak_1.wav",
+   "seconds": 2.1,
+   "loop": false
+  },
+  "crash_1": {
+   "file": "crash_1.wav",
+   "seconds": 1.6,
+   "loop": false
+  },
+  "thud_1": {
+   "file": "thud_1.wav",
+   "seconds": 0.36,
+   "loop": false
+  },
+  "limb_1": {
+   "file": "limb_1.wav",
+   "seconds": 0.32,
+   "loop": false
+  },
+  "arrow_2": {
+   "file": "arrow_2.wav",
+   "seconds": 0.3,
+   "loop": false
+  },
+  "creak_2": {
+   "file": "creak_2.wav",
+   "seconds": 2.1,
+   "loop": false
+  },
+  "crash_2": {
+   "file": "crash_2.wav",
+   "seconds": 1.6,
+   "loop": false
+  },
+  "thud_2": {
+   "file": "thud_2.wav",
+   "seconds": 0.36,
+   "loop": false
+  },
+  "limb_2": {
+   "file": "limb_2.wav",
+   "seconds": 0.32,
+   "loop": false
+  }
+ }
+}

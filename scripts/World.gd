@@ -1727,6 +1727,11 @@ func _build_water_audio() -> void:
 	_step_audio = StepAudio.new()
 	_step_audio.name = "StepAudio"
 	add_child(_step_audio)
+	## [wood] iron on timber and trees coming down -- see scripts/WoodAudio.gd.
+	## Static entry points like StepAudio; nothing else needs a handle on it.
+	var wood_audio := WoodAudio.new()
+	wood_audio.name = "WoodAudio"
+	add_child(wood_audio)
 	## [fire] the fire bus. Twenty-five croft hearths and every camp you build
 	## share three beds between them, ranked by distance four times a second,
 	## and that same ranking is what decides which single fire in the world
