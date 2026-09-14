@@ -23,8 +23,11 @@ should have different sounds"):
 
 and the felling itself:
 
-  creak_1..2   the hinge letting go: 2 s of stick-slip groan, rising, torn
-               through by fibre-cracks that pile up toward the end
+  crack_1..2   THE FINAL SWING: the hinge breaking -- one loud splintering
+               report with a low body, the sound of the tree letting go
+  creak_1..2   then the fall: 2 s of stick-slip groan, rising, torn through
+               by fibre-cracks that pile up as it goes over (no snap of its
+               own any more -- the crack already happened)
   crash_1..2   the crown meeting the ground: a 50 Hz body slam, a mess of
                branch snaps, and a wash of leaves that hangs a second after
   thud_1..2    a bucked log rolling onto the dirt: the same 180/430/900 wood
@@ -221,13 +224,25 @@ def creak(k):
         ln = int(RNG.uniform(0.004, 0.018) * SR)
         g = band(RNG.standard_normal(ln), 600.0, 5000.0) * env_ad(ln, 0.0005, 0.004)
         pops[at:at + ln] += g * RNG.uniform(0.25, 1.0) * (0.4 + 0.6 * u)
-    # the hinge finally SNAPS at the end
-    snap_at = int((d - 0.22) * SR)
-    snap = np.zeros(len(tt))
-    s = mix(click(0.20, 400.0, 6000.0, 0.030, 1.0), thump(0.20, 120.0, 0.08, 0.5, 0.9),
-            cracks(0.20, 10, 800.0, 6000.0, 0.02, amp=0.6))
-    snap[snap_at:snap_at + len(s)] += s[:len(tt) - snap_at]
-    return norm(mix(groan * 0.9, pops * 0.6, snap), 0.86)
+    # no snap on the tail any more: the crack is its own sound, played on the
+    # final swing, and this is what follows it
+    return norm(mix(groan * 0.9, pops * 0.7), 0.84)
+
+
+def crack(k):
+    """The final swing: the hinge breaking. One loud report -- a hard
+    broadband snap, a burst of fibres tearing right behind it, and a low
+    body so it is felt as much as heard."""
+    d = 0.7
+    report = click(d, 180.0, 5000.0, 0.040, 1.0)
+    tear = cracks(d, 26 + 6 * k, 400.0, 5000.0, 0.06, glen=(0.004, 0.018), amp=0.6, start=0.008)
+    body = thump(d, 66.0 + 6.0 * k, 0.18, 0.5, 1.8) + wood_modes(d, 110.0, 0.16, 0.8)
+    # a second, smaller give a beat later, as the last fibres let go
+    second = np.zeros(int(d * SR))
+    at = int((0.16 + 0.05 * k) * SR)
+    s2 = mix(click(0.25, 300.0, 5000.0, 0.02, 0.55), cracks(0.25, 8, 600.0, 5000.0, 0.03, amp=0.5))
+    second[at:at + len(s2)] += s2
+    return norm(mix(report, tear, body, second), 0.92)
 
 
 def crash(k):
@@ -269,6 +284,7 @@ def main():
         write("pick_%d" % (k + 1), pick(k), manifest)
     for k in range(2):
         write("arrow_%d" % (k + 1), arrow(k), manifest)
+        write("crack_%d" % (k + 1), crack(k), manifest)
         write("creak_%d" % (k + 1), creak(k), manifest)
         write("crash_%d" % (k + 1), crash(k), manifest)
         write("thud_%d" % (k + 1), thud(k), manifest)

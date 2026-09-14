@@ -37,6 +37,7 @@ const TOOL_KEY := {"axe": "axe", "sword": "sword", "pickaxe": "pick",
 
 const STRIKE_DB := {"axe": -3.0, "sword": -7.0, "pick": -4.0, "arrow": -8.0}
 const CREAK_DB := -2.0
+const CRACK_DB := 2.0           ## the final swing: loud, and felt
 const CRASH_DB := 1.0
 const THUD_DB := -5.0
 const LIMB_DB := -6.0
@@ -198,9 +199,24 @@ func _strike(at: Vector3, tool: String, power: float, wood: Node) -> void:
 ## =============================== Felling ===================================
 
 
-## The hinge letting go. Played the moment the trunk starts over; the groan
-## runs two seconds and ends on the snap, which is about how long a tree takes
-## to reach the ground.
+## THE FINAL SWING (Lemon 2026-09-14: "make the final hit of a tree have a
+## crack sound"): the hinge breaking -- one loud splintering report with a low
+## body. Played by TreeV2._fell the instant the tree goes, before the trunk
+## even exists; the creak follows it, the crash ends it.
+static func crack(from: Node, at: Vector3, height := 8.0) -> void:
+	var bus := get_bus(from)
+	if bus == null:
+		return
+	## a big tree breaks lower and louder
+	var big := clampf((height - 3.0) / 14.0, 0.0, 1.0)
+	var pitch := lerpf(1.15, 0.82, big) * randf_range(0.97, 1.03)
+	bus._last_key = "crack"
+	bus._shot_in(bus._big, "crack_%d" % randi_range(1, 2), at, CRACK_DB + lerpf(-5.0, 0.0, big), pitch)
+
+
+## The fall after the break. Played the moment the trunk starts over; the
+## groan runs two seconds, about how long a tree takes to reach the ground.
+## (The snap it used to end on is crack() now, on the swing that broke it.)
 static func creak(from: Node, at: Vector3, length := 8.0) -> void:
 	var bus := get_bus(from)
 	if bus == null:

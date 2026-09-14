@@ -70,9 +70,12 @@ const BREAK_AT := 1.02       ## wedge depth / trunk radius that drops the tree
 ## off around each strike, dished into the wood, whether or not it landed in
 ## the felling notch. Sizes are WORLD metres, divided by the model scale when
 ## carved (with a floor so a great tree's mark still catches a ring or two).
-const BITE_H := 0.22         ## half-height of a bite mark
-const BITE_W := 0.17         ## half-width across the bark
-const BITE_DENT := 0.10      ## its depth, as a fraction of the radius there
+## Bigger and deeper (Lemon 2026-09-14: "make the indents with each hit
+## greater"): a patch the size of the whole axe head, sunk a fifth of the way
+## in, flat-bottomed rather than a shallow dish.
+const BITE_H := 0.30         ## half-height of a bite mark
+const BITE_W := 0.24         ## half-width across the bark
+const BITE_DENT := 0.22      ## its depth, as a fraction of the radius there
 const HEART := Color(0.52, 0.39, 0.21)   ## fresh-cut heartwood
 
 const LIMB_AIM := 1.6        ## aim this close to a limb and the axe takes it
@@ -796,8 +799,10 @@ func _carve_notch() -> void:
 			var dx: float = absf(wrapf(a - bv.y, -PI, PI)) * r    ## arc metres across
 			if dx > bw:
 				continue
-			## a shallow dish: full depth under the edge, nothing at the rim
-			var f := 1.0 - maxf(dy / bh, dx / bw)
+			## a flat-bottomed bite: full depth over most of the patch, falling
+			## to nothing only in the last stretch before the rim
+			var e := maxf(dy / bh, dx / bw)
+			var f := clampf((1.0 - e) / 0.45, 0.0, 1.0)
 			cut = maxf(cut, r * BITE_DENT * f)
 		if cut <= 0.0005:
 			continue
@@ -1055,6 +1060,8 @@ func _fell(dir: Vector3, leave_stump := true) -> void:
 	## roots still leaves something to stand on and one up in the crown still
 	## leaves something worth felling.
 	var cut := clampf(notch_line() * scale_class, 0.22, maxf(h - 0.6, 0.3))
+	## THE CRACK: the hinge breaking on the swing that broke it, at the break
+	WoodAudio.crack(self, global_position + Vector3.UP * cut, h)
 	## The falling piece is as thick as the tree was AT THE BREAK, not at the
 	## butt — a 20 m pine snapped at the shoulder is not a 0.58 m log.
 	var cut_r := trunk_radius()

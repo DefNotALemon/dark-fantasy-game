@@ -60,6 +60,11 @@
    "seconds": 0.3,
    "loop": false
   },
+  "crack_1": {
+   "file": "crack_1.wav",
+   "seconds": 0.7,
+   "loop": false
+  },
   "creak_1": {
    "file": "creak_1.wav",
    "seconds": 2.1,
@@ -83,6 +88,11 @@
   "arrow_2": {
    "file": "arrow_2.wav",
    "seconds": 0.3,
+   "loop": false
+  },
+  "crack_2": {
+   "file": "crack_2.wav",
+   "seconds": 0.7,
    "loop": false
   },
   "creak_2": {

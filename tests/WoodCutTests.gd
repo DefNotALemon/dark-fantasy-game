@@ -370,7 +370,7 @@ func _test_audio() -> void:
 	root.add_child(wa)
 	wa.boot()
 	wa.boot()
-	ok(wa.manifest.size() >= 19, "manifest parsed (%d sounds)" % wa.manifest.size())
+	ok(wa.manifest.size() >= 21, "manifest parsed (%d sounds)" % wa.manifest.size())
 	ok(wa._voices.size() == WoodAudio.VOICES and wa._big.size() == WoodAudio.BIG_VOICES, "boot() is idempotent")
 	var complete := true
 	for fam in WoodAudio.STRIKE_VARIANTS:
@@ -378,7 +378,7 @@ func _test_audio() -> void:
 			if not wa.has_sound("%s_%d" % [fam, i + 1]):
 				complete = false
 				print("    missing %s_%d" % [fam, i + 1])
-	for k in ["creak_1", "creak_2", "crash_1", "crash_2", "thud_1", "thud_2", "limb_1", "limb_2"]:
+	for k in ["crack_1", "crack_2", "creak_1", "creak_2", "crash_1", "crash_2", "thud_1", "thud_2", "limb_1", "limb_2"]:
 		if not wa.has_sound(k):
 			complete = false
 			print("    missing " + k)
@@ -401,6 +401,8 @@ func _test_audio() -> void:
 	var busy_before: int = int(wa.report()["busy"])
 	ok(int(busy_before) > 0 or wa._dropped == 0, "voices are actually playing or nothing was dropped (dropped %d, exists %s, stream %s)"
 		% [wa._dropped, str(ResourceLoader.exists("res://assets/audio/wood/axe_1.wav")), str(wa._stream("axe_1"))])
+	WoodAudio.crack(wa, Vector3.ZERO, 8.0)
+	ok(wa._last_key == "crack", "crack() is the final swing's report")
 	WoodAudio.creak(wa, Vector3.ZERO, 8.0)
 	ok(wa._last_key == "creak", "creak() is the big-voice groan")
 	WoodAudio.crash(wa, Vector3.ZERO, 4.0)
@@ -562,6 +564,18 @@ func _test_three_hits() -> void:
 		felled = t.chop_hit(Vector3(0, 0, 1))
 		swings += 1
 	ok(felled and swings == 3, "an ancient pine goes over on the third swing (%d)" % swings)
+	## the final swing: crack() from _fell, then the trunk's own creak -- both
+	## on the big voices at once
+	var bus := WoodAudio.get_bus(_world)
+	var big_busy := 0
+	if bus != null:
+		for p in bus._big:
+			if p.playing:
+				big_busy += 1
+	ok(bus != null and (bus._last_key == "creak" or bus._last_key == "crack"),
+		"the final swing cracked and the fall creaked (last: %s)" % (bus._last_key if bus else "-"))
+	ok(big_busy >= 2 or (bus != null and bus._stream("crack_1") == null),
+		"crack and creak play together on the big voices (%d busy)" % big_busy)
 	## a felled tree's bites travel with the trunk (the carved mesh is adopted)
 	ok(t.bites.size() >= 2, "bites stayed on the record to the end (%d)" % t.bites.size())
 
