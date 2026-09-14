@@ -597,11 +597,15 @@ func _make_bone(spec: Dictionary) -> DroppedItem:
 	var others := [sz.x, sz.y, sz.z]
 	others.remove_at(long_axis)
 	var thick := minf(float(others[0]), float(others[1]))
+	## A SKULL IS A HELM (Lemon, 2026-09-14): it carries the helmet slot, so
+	## a click in the pack wears it, and a few per cent of bone between you
+	## and a claw. The other bones are plain loot.
 	var item := {
 		"name": bone_item_name(kind, animal),
 		"weight": bone_weight(kind, len_m),
 		"count": 1,
-		"slot": "",
+		"slot": "helmet" if kind == "skull" else "",
+		"protect": 0.03 if kind == "skull" else 0.0,
 		"keep": true,
 		"bone": kind,
 		"bone_len": snappedf(len_m * 0.92, 0.01),

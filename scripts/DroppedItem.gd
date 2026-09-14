@@ -162,6 +162,11 @@ func _build_mesh() -> void:
 	var slot := String(item.get("slot", ""))
 	var mat_id := String(item.get("material", ""))
 	var nm := String(item.get("name", ""))
+	## A bone is a bone whatever berth it fits: a skull wears the helmet slot
+	## now, and must not come out of the pack as an iron cap.
+	if item.has("bone"):
+		_build_bone(String(item["bone"]))
+		return
 	var col := Color(0.42, 0.32, 0.20)   ## generic loot: worn leather brown
 	var metal := false
 	var glow := Color(0, 0, 0)
