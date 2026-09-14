@@ -39,8 +39,10 @@ extends PanelContainer
 ## FILE TAKES NO KEY and registers no action.
 ## ===========================================================================
 
-const CARD_W := 460.0
+const CARD_W := 500.0
 const MARGIN := 12.0
+const MENU_SCALE := 1.67            ## the other menus render 67% larger (Player.MENU_SCALE)
+const MAX_SHARE := 0.62             ## the card never covers more than this of the screen width
 const REBUILD_DELAY := 0.12
 const PRESET_DIR := "res://design/characters"
 const MONSTER_DIR := "res://design/monsters"
@@ -126,6 +128,7 @@ func _build() -> void:
 
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_tabs.add_theme_font_size_override("font_size", 13)
 	vb.add_child(_tabs)
 	_tabs.add_child(_wrap("Body", _build_body_tab()))
 	_tabs.add_child(_wrap("Face", _build_face_tab()))
@@ -389,12 +392,26 @@ func closed() -> void:
 
 
 func _dock() -> void:
-	## Full height, docked right; the world stays on the left for clicking.
+	## Full height, docked right, scaled like every other menu (the game
+	## renders at 2x on the Pro, so an unscaled card is a sliver); the world
+	## stays on the left for clicking. On the Settings tab the card widens to
+	## the Settings menu's own width so nothing is cut off.
 	var vp := get_viewport_rect().size
-	custom_minimum_size = Vector2(CARD_W, vp.y - 2.0 * MARGIN)
+	var want_w := CARD_W
+	if _settings_content != null and _tabs != null and _tabs.get_current_tab_control() != null \
+			and _tabs.get_current_tab_control().name == "Settings":
+		want_w = maxf(CARD_W, _settings_content.get_combined_minimum_size().x + 2.0 * MARGIN + 24.0)
+	var s := clampf(minf(MENU_SCALE, vp.x * MAX_SHARE / want_w), 0.5, MENU_SCALE)
+	scale = Vector2(s, s)
+	custom_minimum_size = Vector2(want_w, (vp.y - 2.0 * MARGIN) / s)
 	size = custom_minimum_size
-	position = Vector2(vp.x - CARD_W - MARGIN, MARGIN)
-	scale = Vector2.ONE
+	position = Vector2(vp.x - want_w * s - MARGIN, MARGIN).floor()
+
+
+func card_rect() -> Rect2:
+	## The card's footprint on screen, scale included (get_global_rect does
+	## not fold the scale in on every build).
+	return Rect2(global_position, size * scale)
 
 
 func _borrow_settings() -> void:
@@ -446,7 +463,7 @@ func _process(delta: float) -> void:
 		_sync_from_selected()
 	## Hover: a fainter rim on whatever the cursor rests on in the world.
 	var m := get_viewport().get_mouse_position()
-	if get_global_rect().has_point(m):
+	if card_rect().has_point(m):
 		_set_hover(null)
 	else:
 		_set_hover(_pick_at(m))
@@ -463,7 +480,7 @@ func eat_input(event: InputEvent) -> bool:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-			if get_global_rect().has_point(mb.position):
+			if card_rect().has_point(mb.position):
 				return false
 			var hit := _pick_at(mb.position)
 			if hit != null:
@@ -839,6 +856,7 @@ static func apply_preset(n: NPC, p: Dictionary) -> void:
 
 func _load_presets() -> void:
 	for c in _preset_list.get_children():
+		_preset_list.remove_child(c)
 		c.queue_free()
 	var dir := DirAccess.open(PRESET_DIR)
 	if dir == null:
@@ -914,6 +932,7 @@ func _refresh_roster() -> void:
 	if _roster_box == null:
 		return
 	for c in _roster_box.get_children():
+		_roster_box.remove_child(c)
 		c.queue_free()
 	var key := "wild:wild:0,0"
 	if player != null and player is Node3D:
@@ -1022,6 +1041,7 @@ func _load_saved_species() -> void:
 	if _saved_box == null:
 		return
 	for c in _saved_box.get_children():
+		_saved_box.remove_child(c)
 		c.queue_free()
 	var dir := DirAccess.open(MONSTER_DIR)
 	if dir == null:

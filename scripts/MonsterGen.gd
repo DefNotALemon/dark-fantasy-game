@@ -146,7 +146,10 @@ static func roster(world_seed: int, key: String, tier: int) -> Array:
 	for i in range(NATIVES):
 		var rng := RandomNumberGenerator.new()
 		rng.seed = _seed(world_seed, key, 100 + i)
-		var g := roll_species(rng, 0, {"native": true, "born_tier": 0})
+		var hints := {"native": true, "born_tier": 0}
+		if i > 0:
+			hints["avoid_plan"] = (out[i - 1] as Dictionary)["plan"]   ## two natives, two body plans
+		var g := roll_species(rng, 0, hints)
 		harden(g, tier, _seed(world_seed, key, 300 + i))
 		out.append(g)
 	for t in range(1, tier + 1):
@@ -247,7 +250,10 @@ static func roll_species(rng: RandomNumberGenerator, tier: int, hints: Dictionar
 	## One species. `hints` may pin a plan ("plan"), force a weapon
 	## ("armed"), or record the tier it was born at ("born_tier").
 	tier = clampi(tier, 0, MAX_TIER)
-	var plan := str(hints.get("plan", PLANS[rng.randi_range(0, PLANS.size() - 1)]))
+	var pool: Array = PLANS.duplicate()
+	if hints.has("avoid_plan"):
+		pool.erase(str(hints["avoid_plan"]))
+	var plan := str(hints.get("plan", pool[rng.randi_range(0, pool.size() - 1)]))
 	if not PLANS.has(plan):
 		plan = "quadruped"
 	var g := {}
@@ -283,11 +289,13 @@ static func roll_species(rng: RandomNumberGenerator, tier: int, hints: Dictionar
 		g["arms"] = "none"
 	## --- look
 	g["tile"] = _tile_for(rng, plan, g)
+	## Dark-fantasy palette: muted, dim hides; the banded PSX light lifts
+	## them plenty (the first pass came out pastel in the sun).
 	var hue := rng.randf()
-	var sat := rng.randf_range(0.18, 0.55)
-	var val := rng.randf_range(0.28, 0.62)
+	var sat := rng.randf_range(0.12, 0.48)
+	var val := rng.randf_range(0.14, 0.40)
 	g["col"] = Color.from_hsv(hue, sat, val)
-	g["accent"] = Color.from_hsv(fmod(hue + rng.randf_range(0.35, 0.65), 1.0), clampf(sat + 0.2, 0.0, 1.0), clampf(val + 0.2, 0.0, 1.0))
+	g["accent"] = Color.from_hsv(fmod(hue + rng.randf_range(0.35, 0.65), 1.0), clampf(sat + 0.2, 0.0, 1.0), clampf(val + 0.22, 0.0, 0.75))
 	g["eye_col"] = [Color(0.95, 0.85, 0.2), Color(0.9, 0.2, 0.15), Color(0.3, 0.9, 0.4), Color(0.6, 0.85, 1.0), Color(0.95, 0.95, 0.9)][rng.randi_range(0, 4)]
 	## --- fighting style
 	g["special"] = _special_for(rng, plan, g)

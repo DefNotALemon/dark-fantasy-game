@@ -334,20 +334,26 @@ func _build_hexapod() -> void:
 	var body := _part(rig, Vector3(0.5 * s * b, 0.26 * s, 1.0 * s), col, Vector3(0, h + 0.08 * s, 0))
 	body_mat = body.material_override as StandardMaterial3D
 	_part(rig, Vector3(0.42 * s * b, 0.22 * s, 0.4 * s), col.darkened(0.1), Vector3(0, h + 0.06 * s, 0.45 * s))
-	## Six legs, splayed. Registered FL, FR, MR, ML, BL, BR: even = one tripod,
-	## odd = the other, so the walk is the alternating-tripod skitter.
+	## Six legs, splayed: the upper leg points OUT and up at 45 deg, the
+	## lower leg turns back down at 20 deg off vertical and is cut to length
+	## so the foot lands on y = 0 (the first build had them pointing up like
+	## an overturned beetle). Registered FL, FR, MR, ML, BL, BR: even = one
+	## tripod, odd = the other, so the walk is the alternating-tripod skitter.
+	var upper := 0.34 * s
+	var knee_y := h + 0.05 * s + upper * sin(deg_to_rad(45.0))
+	var lower := knee_y / cos(deg_to_rad(20.0))
 	for leg in [[-1.0, -0.32], [1.0, -0.32], [1.0, 0.0], [-1.0, 0.0], [-1.0, 0.32], [1.0, 0.32]]:
 		var side := float(leg[0])
 		var hip := Node3D.new()
 		rig.add_child(hip)
 		hip.position = Vector3(side * 0.26 * s * b, h + 0.05 * s, float(leg[1]) * s)
-		hip.rotation_degrees = Vector3(0, 0, side * 55.0)   ## points out and up
-		_part(hip, Vector3(0.07 * s, 0.34 * s, 0.07 * s), col.darkened(0.05), Vector3(0, 0.17 * s, 0))
+		hip.rotation_degrees = Vector3(0, 0, -side * 45.0)   ## +Y of the pivot points out and up
+		_part(hip, Vector3(0.07 * s, upper, 0.07 * s), col.darkened(0.05), Vector3(0, upper * 0.5, 0))
 		var knee := Node3D.new()
 		hip.add_child(knee)
-		knee.position = Vector3(0, 0.34 * s, 0)
-		knee.rotation_degrees = Vector3(0, 0, -side * 125.0)   ## and back down to the ground
-		_part(knee, Vector3(0.055 * s, 0.42 * s, 0.055 * s), col.darkened(0.15), Vector3(0, 0.21 * s, 0))
+		knee.position = Vector3(0, upper, 0)
+		knee.rotation_degrees = Vector3(0, 0, -side * 115.0)   ## and back down to the ground
+		_part(knee, Vector3(0.055 * s, lower, 0.055 * s), col.darkened(0.15), Vector3(0, lower * 0.5, 0))
 		walk_legs.append(hip)
 	head_pivot = Node3D.new()
 	head_pivot.name = "Head"

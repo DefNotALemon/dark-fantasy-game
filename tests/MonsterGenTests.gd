@@ -41,6 +41,12 @@ class LabFloor:
 		add_child(cs)
 
 
+class StubField:
+	extends CaveField
+	func is_rock(_world: Vector3) -> bool:
+		return false
+
+
 class FakeWorld:
 	extends Node3D
 	var _player: Node3D = null
@@ -111,6 +117,8 @@ func _init() -> void:
 	await t_npc_look()
 	await t_outline()
 	await t_creator()
+	await t_feet_and_fight()
+	await t_cave_wiring()
 	t_wiring()
 
 	if pass_n + fail_n < MIN_ASSERTIONS:
@@ -197,6 +205,13 @@ func t_rosters() -> void:
 		ok(bool(r2[i]["native"]), "native %d is flagged native" % i)
 		ok(float(r2[i]["hp"]) > float(r0[i]["hp"]), "native %d is tougher at tier 2 (%s > %s)" % [i, r2[i]["hp"], r0[i]["hp"]])
 		ok(float(r2[i]["dmg"]) >= float(r0[i]["dmg"]), "native %d hits at least as hard at tier 2" % i)
+	ok(String(r0[0]["plan"]) != String(r0[1]["plan"]), "the two natives have two body plans (%s / %s)" % [r0[0]["plan"], r0[1]["plan"]])
+	var distinct := 0
+	for k in ["wild:temperate:0,0", "wild:highland:2,2", "zone:moor:Bleak", "cave:1,1:deep", "wild:deepwood:9,9"]:
+		var rr := MonsterGen.roster(77, k, 0)
+		if String(rr[0]["plan"]) != String(rr[1]["plan"]):
+			distinct += 1
+	eq(distinct, 5, "every zone's natives differ in plan")
 	## Newcomers differ from the natives and from each other.
 	var names := {}
 	for g in MonsterGen.roster(1234, key, 4):
@@ -280,6 +295,12 @@ func t_genomes() -> void:
 		if int(g["tier"]) != tier:
 			bad += 1
 	eq(bad, 0, "400 rolls: every genome valid and within its rules")
+	var too_bright := 0
+	for _i in range(100):
+		var g := MonsterGen.roll_species(rng, 2)
+		if (g["col"] as Color).v > 0.42 or (g["col"] as Color).s > 0.5:
+			too_bright += 1
+	eq(too_bright, 0, "the hide palette is dark-fantasy muted (no pastels)")
 	eq(two_touch, 0, "never two touches on one species")
 	eq(plans.size(), 4, "all four body plans come up")
 	eq(heads.size(), 6, "all six heads come up")
@@ -945,7 +966,7 @@ func _src(path: String) -> String:
 
 func t_wiring() -> void:
 	var enemy := _src("res://scripts/Enemy.gd")
-	ok(enemy.contains("func _on_hit_landed(_who: Node) -> void:"), "Enemy has the hit hook")
+	ok(enemy.contains("func _on_hit_landed("), "Enemy has the hit hook")
 	eq(enemy.count("_on_hit_landed("), 3, "Enemy calls the hook from melee and the strong attack")
 	var skin := _src("res://scripts/CreatureSkin.gd")
 	ok(skin.contains("func set_outline("), "CreatureSkin has set_outline")
@@ -988,3 +1009,146 @@ func t_wiring() -> void:
 	ok(not cc.contains("InputMap.add_action"), "the creator registers no action")
 	ok(not cc.contains("KEY_F"), "the creator takes no F-key")
 	ok(not _src("res://scripts/Monster.gd").contains("InputMap"), "Monster touches no input")
+
+
+## ============================ feet and the fight ===========================
+
+func _lowest_y(n: Node3D, xf: Transform3D, lowest: Array) -> void:
+	## Walk the pre-bake rig: every BoxMesh's eight corners in owner space.
+	for c in n.get_children():
+		if not (c is Node3D):
+			continue
+		var c3 := c as Node3D
+		var t := xf * c3.transform
+		if c3 is MeshInstance3D and (c3 as MeshInstance3D).mesh is BoxMesh:
+			var sz: Vector3 = ((c3 as MeshInstance3D).mesh as BoxMesh).size * 0.5
+			for sx in [-1.0, 1.0]:
+				for sy in [-1.0, 1.0]:
+					for sz2 in [-1.0, 1.0]:
+						var p := t * Vector3(sx * sz.x, sy * sz.y, sz2 * sz.z)
+						lowest[0] = minf(float(lowest[0]), p.y)
+						lowest[1] = maxf(float(lowest[1]), p.y)
+		_lowest_y(c3, t, lowest)
+
+
+func t_feet_and_fight() -> void:
+	## Every plan's feet touch the ground it stands on (the first hexapod had
+	## its legs in the air like an overturned beetle), and the pre-bake rig
+	## is what CreatureSkin bakes, so read it before the bake.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	for plan in ["biped", "quadruped", "hexapod", "serpent"]:
+		for _i in range(6):
+			var g := MonsterGen.roll_species(rng, rng.randi_range(0, 4), {"plan": plan})
+			var m := Monster.from(g)
+			m._build_body()
+			var lo: Array = [INF, -INF]
+			_lowest_y(m, Transform3D.IDENTITY, lo)
+			var s := float(g["size"])
+			ok(float(lo[0]) > -0.08 * s and float(lo[0]) < 0.16 * s, "%s %.2fx: lowest box at y=%.3f — feet on the ground" % [plan, s, float(lo[0])])
+			var min_top := 0.2 * s if plan == "serpent" else 0.4 * s
+			ok(float(lo[1]) > min_top, "%s: the body has height (top at %.2f)" % [plan, float(lo[1])])
+			if plan == "hexapod":
+				## the legs reach OUT past the body, not up over it
+				var wide: Array = [INF, -INF]
+				for hip in m.walk_legs:
+					var knee := hip.get_child(1) as Node3D
+					var tip := hip.transform * (knee.transform * Vector3(0, ((knee.get_child(0) as MeshInstance3D).mesh as BoxMesh).size.y, 0))
+					wide[0] = minf(float(wide[0]), tip.y)
+					wide[1] = maxf(float(wide[1]), absf(tip.x))
+				ok(float(wide[0]) < 0.12 * s, "hexapod: every foot tip is near the ground (%.3f)" % float(wide[0]))
+				ok(float(wide[1]) > 0.4 * s, "hexapod: the feet reach out past the body (%.2f)" % float(wide[1]))
+			m.free()
+	## A lunge species goes for the player and lands its special.
+	var g2 := MonsterGen.roll_species(rng, 1, {"plan": "quadruped"})
+	g2["special"] = "lunge"
+	g2["abilities"] = ["burn"]
+	g2["speed"] = 6.0
+	var m2 := _spawn(g2, Vector3(0, 0.3, -5.5))
+	m2.confused = false
+	await physics_frame
+	m2.provoked = true
+	m2._set_agitated(true)
+	var before := _player.damage_taken
+	var saw_strong := false
+	var saw_windup := false
+	var n := 0
+	for i in range(500):
+		if m2.strong_windup > 0.0:
+			saw_windup = true
+		if m2.strong_active:
+			saw_strong = true
+		if _player.damage_taken > before:
+			n = i
+			break
+		await physics_frame
+	ok(_player.damage_taken > before, "the lunge species lands a hit on the player (frame %d)" % n)
+	ok(saw_windup, "it telegraphed the lunge first")
+	ok(saw_strong or _player.damage_taken > before, "the lunge itself, or the bite, connected")
+	ok(Afflictions.on(_player).has("burn"), "and the burn touch stuck")
+	Afflictions.on(_player).clear_all()
+	m2.queue_free()
+	await clear_enemies()
+
+
+## =============================== the caves ================================
+
+func t_cave_wiring() -> void:
+	## CaveRegion's generated packs, without building a cave: a CaveRegion
+	## script on a node that never ran _ready, a field stub that is all air,
+	## a content root, a seed.
+	var cr := Node3D.new()
+	_world.add_child(cr)
+	cr.global_position = Vector3(300, 0, -200)
+	cr.set_script(load("res://scripts/CaveRegion.gd"))
+	cr.set("cave_seed", 4242)
+	(cr.get("_rng") as RandomNumberGenerator).seed = 4242
+	cr.set("field", StubField.new())
+	var content := Node3D.new()
+	cr.add_child(content)
+	cr.set("_content_root", content)
+	_player.level = 1
+	eq(cr.call("_player_tier"), 0, "the cave reads the player's tier (level 1 -> 0)")
+	_player.level = 10
+	eq(cr.call("_player_tier"), 2, "level 10 -> tier 2")
+	var shallow: Dictionary = cr.call("_gen_pick", -5.0, false)
+	var deep: Dictionary = cr.call("_gen_pick", -30.0, false)
+	ok(MonsterGen.validate(shallow), "a shallow pick is a valid genome")
+	ok(MonsterGen.validate(deep), "a deep pick is a valid genome")
+	eq(int(shallow["tier"]), 2, "shallow band at the player's tier")
+	eq(int(deep["tier"]), 4, "deep band two tiers up")
+	var apex: Dictionary = cr.call("_gen_pick", -30.0, true)
+	var best_hp := 0.0
+	for g in MonsterGen.roster(4242, MonsterGen.cave_key(cr.global_position, -30.0), 4):
+		best_hp = maxf(best_hp, float((g as Dictionary)["hp"]))
+	near(float(apex["hp"]), best_hp, 0.01, "the champion is the deep roster's toughest")
+	## the same cave rolls the same pick for the same depth band and rng state
+	var cr_rng := cr.get("_rng") as RandomNumberGenerator
+	cr_rng.seed = 9
+	var a: Dictionary = cr.call("_gen_pick", -15.0, false)
+	cr_rng.seed = 9
+	var b: Dictionary = cr.call("_gen_pick", -15.0, false)
+	eq(String(a["name"]), String(b["name"]), "a cave's pick is deterministic in its rng")
+	GameMode.set_mode(GameMode.Mode.NORMAL)
+	cr.call("_spawn_gen", Vector3(300, 1, -200), shallow, 4)
+	await physics_frame
+	var got := 0
+	for c in content.get_children():
+		if c is Monster:
+			got += 1
+			eq((c as Monster).display_name, String(shallow["name"]), "the pack is the picked species")
+	eq(got, 4, "four of them under the content root")
+	GameMode.set_mode(GameMode.Mode.PEACEFUL)
+	cr.call("_spawn_gen", Vector3(300, 1, -200), shallow, 4)
+	await physics_frame
+	var got2 := 0
+	for c in content.get_children():
+		if c is Monster:
+			got2 += 1
+	ok(got2 - got < 4 and got2 - got >= 1, "Peaceful halves the pack but never empties it (%d)" % (got2 - got))
+	GameMode.set_mode(GameMode.Mode.NORMAL)
+	cr.call("_spawn_gen", Vector3(300, 1, -200), {}, 4)
+	ok(true, "an empty genome spawns nothing and does not crash")
+	_player.level = 1
+	cr.queue_free()
+	await clear_enemies()

@@ -7016,7 +7016,7 @@ func _build_settings_menu() -> void:
 	_settings_option_row(vb, "Warmth", "warmth",
 		[["Survival", 0], ["Light", 1]])
 	var wa_note := Label.new()
-	wa_note.text = "Survival: the cold is real -- an autumn night is a slow problem and a\\nwinter one is not, being soaked doubles it, and a roof, a torch and a lit fire\\nare the three answers. Light: no meter, and no cold. Switches live, any time."
+	wa_note.text = "Survival: the cold is real -- an autumn night is a slow problem and a\nwinter one is not, being soaked doubles it, and a roof, a torch and a lit fire\nare the three answers. Light: no meter, and no cold. Switches live, any time."
 	wa_note.add_theme_font_size_override("font_size", 13)
 	wa_note.modulate = Color(1, 1, 1, 0.55)
 	vb.add_child(wa_note)

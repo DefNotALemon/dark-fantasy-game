@@ -552,6 +552,10 @@ hunk("scripts/Player.gd", "P8 generated spawn fn", "func _spawn_generated_monste
      "\t_add_log_msg(\"%s -- %s\" % [m.display_name, MonsterGen.describe(g)], Color(0.85, 0.80, 0.70))\n\n\n"
      "## ========================= The Item Wheel (Q) ==============================\n")
 
+hunk("scripts/Player.gd", "P9 warmth note newlines", "an autumn night is a slow problem and a\\nwinter one is not, being soaked doubles it, and a roof, a torch and a lit fire\\nare the three answers",
+     "wa_note.text = \"Survival: the cold is real -- an autumn night is a slow problem and a\\\\nwinter one is not, being soaked doubles it, and a roof, a torch and a lit fire\\\\nare the three answers. Light: no meter, and no cold. Switches live, any time.\"\n",
+     "wa_note.text = \"Survival: the cold is real -- an autumn night is a slow problem and a\\nwinter one is not, being soaked doubles it, and a roof, a torch and a lit fire\\nare the three answers. Light: no meter, and no cold. Switches live, any time.\"\n")
+
 # ============================================================================= World
 hunk("scripts/World.gd", "W1 director var", "var _monsters: MonsterDirector",
      "var _slimes: SlimeDirector           ## [slimes] the jellies on the surface (scripts/SlimeDirector.gd)\n",
