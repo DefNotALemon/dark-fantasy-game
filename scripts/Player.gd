@@ -94,13 +94,15 @@ const SHEATH_TIME := 0.40
 ## AND flying, so wheel-up is faster wherever you are and wheel-down comes back
 ## down to 1.0 = the ordinary walk.
 const GOD_FLY_SPEED := 12.0    ## m/s at god_speed 1.0
-const GOD_FLY_BOOST := 3.2     ## Shift, while flying
+const GOD_FLY_BOOST := 3.2     ## the SPACE toggle, while flying
 const GOD_SPEED_MIN := 0.35
 const GOD_SPEED_MAX := 24.0
 const GOD_DOUBLE_TAP_MS := 320
 var god := false
 var flying := false
 var god_speed := 1.0
+var god_boost := false         ## SPACE toggle in god mode -- sticky, not held
+var _space_boost_flip := false ## the first tap of a double tap flipped it
 var godmode: GodEditor = null
 var grass_lab: GrassLab = null   ## F3 -- the grass lab (scripts/GrassLab.gd)
 var claude_chat: ClaudeChat = null   ## F4 -- Claude, riding along (scripts/ClaudeChat.gd)
@@ -251,6 +253,45 @@ var climb_t := 0.0
 var climb_from := Vector3.ZERO
 var climb_to := Vector3.ZERO
 var climb_dur := CLIMB_TIME
+
+## --- THE RUNNING VAULT (2026-09-14) -----------------------------------------
+## A mantle you never press a button for. Sprint at a waist-high wall — a
+## fence, a windowsill, a boulder, the lip of a trench — and you go OVER it
+## without breaking stride, carrying most of your speed out the far side. It is
+## the same machinery as the Space mantle (_try_climb / _update_climb) with
+## tighter height bounds, a third of the duration, and an exit that is a stride
+## rather than a stop. Anything taller than VAULT_MAX_H is still a real climb
+## you have to ask for.
+const VAULT_MIN_H := 0.50        ## below this _step_up already walks you over it
+const VAULT_MAX_H := 1.35        ## about a hip — higher is a haul, not a hurdle
+const VAULT_TIME := 0.34
+const VAULT_STAMINA := 4.0       ## half a mantle: it is momentum doing the work
+const VAULT_MIN_SPEED := 6.0     ## you have to actually be RUNNING at it — and
+								 ## high enough that MIN_SPEED x KEEP still lands
+								 ## you above a walk, so a hurdle never costs you
+								 ## speed you would have had going round
+const VAULT_KEEP := 0.88         ## fraction of that run speed you land with
+var vaulting := false            ## this climb is a running vault, not a mantle
+var _vault_exit := 0.0           ## m/s to leave the lip with
+var _vault_cd := 0.0             ## no hurdling the same fence twice a frame
+
+## --- THE SLIDE (2026-09-14) -------------------------------------------------
+## Crouch at a sprint and you go down onto your hip and KEEP GOING, bleeding
+## speed to friction instead of to the brakes. Jumping out of it keeps what is
+## left, which is the whole point: sprint -> slide -> jump -> vault is meant to
+## read as one continuous move rather than four inputs.
+const SLIDE_MIN_SPEED := 6.0     ## a walk does not slide
+const SLIDE_TIME := 0.9
+const SLIDE_FRICTION := 5.5      ## m/s^2 the ground takes back
+const SLIDE_BOOST := 1.9         ## the kick as you drop
+const SLIDE_END_SPEED := 2.6     ## below this you are just crouching
+const SLIDE_CD := 0.55
+const SLIDE_STEER := 1.5         ## rad/s you can still aim it
+const SLIDE_STAMINA := 5.0
+const SLIDE_TILT := 4.0          ## degrees the lens lies over into it
+var sliding := false
+var slide_t := 0.0
+var slide_cd := 0.0
 var jump_queued := false         ## Space pressed — resolved next physics tick
 
 var blocking := false
@@ -418,6 +459,25 @@ var reach_held := false           ## true once the fist has closed on it
 var reach_redraw := false         ## the sword was drawn when you reached
 var reach_was_crouch := false     ## the stance to come back up to
 var reach_was_prone := false
+## ------------------ THE PILE SWEEP (hold E) -------------------------------
+## Tapping E takes the one thing you are looking at, exactly as before. KEEP
+## E DOWN and, a third of a second later, everything of the SAME KIND lying
+## around it starts coming in too, one every ninety milliseconds, until the
+## pile is gone or you let go. Same kind means the same item name AND the
+## same material, so a hold over a heap of iron ore does not sweep up the
+## silver lying beside it, and the gain counter merges the lot into one
+## "+9 Iron Ore" row. Nothing new is bound: the pad's Square already posts
+## E's press and release, so this is a hold on the pad for free.
+const GATHER_HOLD := 0.33        ## s of held E before the pile starts moving
+const GATHER_RADIUS := 4.0       ## m from the waist -- a pile, not a field
+const GATHER_STEP := 0.09        ## s between items, so it arrives as a stream
+var _e_held := false             ## E is down right now
+var _e_down_ms := 0              ## when it went down
+var _gather_name := ""           ## item name the sweep is collecting
+var _gather_mat := ""            ## ...and its material, so ores stay apart
+var _gather_kind := ""           ## "" | "item" | "debris"
+var _gather_t := 0.0             ## seconds until the next one comes in
+var _gather_n := 0               ## how many this hold has taken
 var reach_out := 0.0        ## 0..1 -- arm out at the ground
 var reach_stow := 0.0         ## 0..1 -- arm back over the shoulder
 
@@ -535,6 +595,19 @@ var _dark_manual := false                 ## player cycled by hand in the dark �
 
 var grass_hidden := false        ## standing in TALL grass (GrassSystem writes
 var hidden_label: Label          ## this) — calm mobs barely notice you
+
+## --- THE GROUND UNDER YOU (2026-09-14, scripts/Locomotion.gd) ---------------
+## Lemon: "make the movement more dynamic and flowy, I also want the movement
+## to slow in tall grass". The model itself is static functions in Locomotion;
+## these are the live numbers Player carries between frames.
+var wade := 0.0                  ## 0..1 how deep the meadow is at your shins
+var _bank := 0.0                 ## smoothed turn lean, -1 .. 1 (+ = turning left)
+var _fov_extra := 0.0            ## degrees of speed push on top of set_fov
+var _surface_mult := 1.0         ## what the ground family does to your speed
+var _footing_t := 0.0            ## 10 Hz poll clock — the ground does not change
+								 ## between two frames and both reads cost more
+								 ## than the lerp they feed
+var _grass_sys: Node = null      ## cached GrassSystem (group "grass_system")
 
 ## --- Mount hearts on the HUD: while riding, the horse's ♥♥♡ tally lives
 ## under your own bars — an enemy catching your mount shows up HERE (the
@@ -1534,6 +1607,8 @@ func _input(event: InputEvent) -> void:
 			elif _q_inv_idx >= 0 and Time.get_ticks_msec() - _q_down_ms < 350:
 				_wheel_quick_add(_q_inv_idx)
 			_q_inv_idx = -1
+	elif event is InputEventKey and not event.pressed and (event as InputEventKey).keycode == KEY_E:
+		_gather_stop()
 	elif event is InputEventKey and not event.pressed and (event as InputEventKey).keycode == KEY_V:
 		## V released: short press cycles (FP -> TP right; TP -> swap shoulder);
 		## the 1.5 s HOLD back to FP is consumed in _physics_process.
@@ -1555,7 +1630,11 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_CTRL:
-				if menu_open == "" and mount == null and kd_phase == "":  ## menus shouldn't leak dashes/jumps into the game
+				## GOD MODE ONLY (2026-09-12): Ctrl is DESCEND while flying, so
+				## it must not also spend a dash. Ordinary play is untouched.
+				if god and flying:
+					pass
+				elif menu_open == "" and mount == null and kd_phase == "":  ## menus shouldn't leak dashes/jumps into the game
 					_try_dash()
 			KEY_F1:
 				## F1 IS GOD MODE. Opens the editor panel and turns god on.
@@ -1576,10 +1655,16 @@ func _input(event: InputEvent) -> void:
 				_toggle_menu("claude")
 			KEY_SPACE:
 				## GOD: double-tap Space toggles flight, Minecraft-style. While
-				## flying, Space is "up" and never a jump.
+				## flying, a SINGLE tap toggles the speed boost (2026-09-12) --
+				## Shift is height now, so the boost had to become sticky. The
+				## first tap of a double tap flips it, so the second tap puts
+				## it back before flipping flight.
 				if god:
 					var tap := Time.get_ticks_msec()
 					if tap - _space_tap_ms < GOD_DOUBLE_TAP_MS:
+						if _space_boost_flip:
+							god_boost = not god_boost
+							_space_boost_flip = false
 						flying = not flying
 						if not flying:
 							velocity = Vector3.ZERO
@@ -1590,6 +1675,12 @@ func _input(event: InputEvent) -> void:
 							Color(0.62, 0.92, 1.0))
 					else:
 						_space_tap_ms = tap
+						_space_boost_flip = false
+						if flying:
+							god_boost = not god_boost
+							_space_boost_flip = true
+							_add_log_msg("Boost %s" % ("on" if god_boost
+								else "off"), Color(0.62, 0.92, 1.0))
 					if flying:
 						return
 				if menu_open == "" and kd_phase == "" and not climbing:
@@ -1636,6 +1727,9 @@ func _input(event: InputEvent) -> void:
 					elif menu_open == "tab" and tab_page == "inventory" and hovered_item_idx >= 0:
 						_q_inv_idx = hovered_item_idx
 			KEY_E:
+				## Arm the sweep BEFORE the tap is served -- the gaze targets are
+				## still live on this frame, and the tap is about to clear them.
+				_gather_arm()
 				if (menu_open == "" or menu_open == "talk") and kd_phase == "" and NPCFocus.take_e(self):
 					pass  ## a person: greet / talk / continue the talk (scripts/NPCFocus.gd)
 				elif menu_open == "" and kd_phase == "" and _try_grab(false):
@@ -1677,9 +1771,15 @@ func _input(event: InputEvent) -> void:
 					_v_consumed = false
 			KEY_C:
 				if menu_open == "" and kd_phase == "" and mount == null and not climbing and not swimming:
+					## AT A SPRINT, C IS A SLIDE. Same key, same pad button (O):
+					## going down while you are already moving fast is a slide in
+					## every game that has one, and it costs no new binding.
+					## Below SLIDE_MIN_SPEED it is the crouch toggle it always was.
+					if _try_slide():
+						pass
 					## C toggles CROUCH (per Lemon — the old C-cycle is gone).
 					## From prone, C lifts you one stance, to the crouch.
-					if prone:
+					elif prone:
 						prone = false
 						crouching = true
 						_stance_settle_pulse()
@@ -1740,7 +1840,13 @@ func _input(event: InputEvent) -> void:
 				## ' — the sky menu: time, season, weather, lightning, aurora.
 				_toggle_menu("sky")
 			KEY_ESCAPE:
-				if menu_open != "":
+				## DEV MODE (2026-09-12): with the editor up and nothing over
+				## it, Esc opens SETTINGS as an overlay rather than throwing
+				## you out -- F1, F2 and the panel's own button are the ways
+				## out of dev mode. An overlay closes back to the editor first.
+				if godmode != null and godmode.visible and god_overlay() == "":
+					_toggle_menu("settings")
+				elif menu_open != "":
 					_close_menu()
 				else:
 					_toggle_menu("settings")  ## Esc = the settings/pause menu
@@ -1844,6 +1950,10 @@ func _physics_process(delta: float) -> void:
 	## ledge ahead beats a jump — otherwise jump if the ground agrees.
 	if jump_queued:
 		jump_queued = false
+		## OUT OF THE SLIDE, NOT OUT OF THE SPEED. A jump ends the slide and
+		## keeps the velocity it had built — this is the join in the chain.
+		if sliding:
+			_end_slide(true)
 		if _try_climb():
 			_drop_carried_logs("both hands went to the ledge")
 		elif is_on_floor() and pressed_by == null:  ## no jumping out from under a bear
@@ -1865,6 +1975,23 @@ func _physics_process(delta: float) -> void:
 			press_t = 0.0
 		else:
 			cam_shake = maxf(cam_shake, 0.05)
+
+	## THE RUNNING VAULT. No button: if you are sprinting and there is a
+	## hip-high lip in front of you, you go over it. The probes are the mantle's
+	## own three raycasts and they only fire while you are ACTUALLY running, so
+	## the walking game pays nothing for this.
+	if _vault_cd > 0.0:
+		_vault_cd -= delta
+	if slide_cd > 0.0:
+		slide_cd -= delta
+	if sprinting and is_on_floor() and not sliding and _vault_cd <= 0.0 \
+			and kd_phase == "" and mount == null and not climbing and not input_locked \
+			and pressed_by == null and reach_phase == "" \
+			and Vector2(velocity.x, velocity.z).length() >= VAULT_MIN_SPEED:
+		if _try_climb(true):
+			_drop_carried_logs("you vaulted")
+			return
+		_vault_cd = maxf(_vault_cd, 0.08)   ## nothing there: do not re-probe next frame
 
 	## Movement direction from raw keys (relative to facing).
 	move_input = Vector3.ZERO
@@ -1913,11 +2040,27 @@ func _physics_process(delta: float) -> void:
 		speed *= 0.12   ## pinned under an animal's weight — struggling, not walking
 	speed *= pad_push   ## how far the left stick is actually pushed
 
+	## THE GROUND DECIDES (2026-09-14). Three opinions, composed and clamped in
+	## Locomotion.compose so a bog on a hillside under deep grass cannot stack
+	## into a standstill: what you are standing ON, how deep the meadow is at
+	## your shins, and whether you are climbing it or falling down it.
+	_update_footing(delta)
+	var slope := 1.0
+	if is_on_floor() and dir != Vector3.ZERO:
+		slope = Locomotion.slope_mult(get_floor_normal(), dir)
+	speed = Locomotion.compose(speed, _surface_mult, wade, slope)
+	## Shouldering through a meadow at a run costs more wind than the open road.
+	if sprinting and wade > 0.05:
+		stamina = maxf(0.0, stamina - SPRINT_DRAIN * (Locomotion.WADE_SPRINT_DRAIN - 1.0)
+			* wade * stats.stamina_cost_mult() * delta)
+
 	## Hit-stun (thrown out of an action) overrides input; otherwise dash; otherwise glide.
 	if hitstun_timer > 0.0:
 		hitstun_timer -= delta
 		velocity.x = move_toward(velocity.x, 0.0, 10.0 * delta)
 		velocity.z = move_toward(velocity.z, 0.0, 10.0 * delta)
+	elif sliding:
+		_update_slide(delta, dir)
 	elif dash_timer > 0.0:
 		dash_timer -= delta
 		var d := dir if dir != Vector3.ZERO else -transform.basis.z
@@ -1927,13 +2070,24 @@ func _physics_process(delta: float) -> void:
 		velocity.z = d.z * DASH_SPEED
 	else:
 		var rate := ACCEL if dir != Vector3.ZERO else DECEL
+		var brake := DECEL
 		if not is_on_floor():
 			rate = AIR_ACCEL
+			brake = AIR_ACCEL
 		var hv := Vector3(velocity.x, 0.0, velocity.z)
 		var target := dir * speed
-		hv = hv.move_toward(target, rate * delta)
+		## MOMENTUM (2026-09-14). This used to be one move_toward at 45 m/s^2,
+		## which reaches full sprint in a tenth of a second and turns a right
+		## angle in ONE FRAME — honest, and completely lifeless. Locomotion.steer
+		## keeps the standstill crisp (under a walk it IS that move_toward) and
+		## arcs everything above it, charging you speed for an angle you could
+		## not make. See scripts/Locomotion.gd; the feel is under test in
+		## tests/LocomotionTests.gd.
+		hv = Locomotion.steer(hv, target, rate, brake, delta, SPRINT_SPEED)
 		velocity.x = hv.x
 		velocity.z = hv.z
+		_bank = lerpf(_bank, Locomotion.bank(hv, target, SPRINT_SPEED),
+			clampf(delta * 5.0, 0.0, 1.0))
 
 	_frame_fx_and_regen(delta)
 
@@ -2070,9 +2224,12 @@ func _update_action_camera(delta: float) -> void:
 	## torso commit into cuts and chops and stoop to the pack (mirror-safe:
 	## rotation and scale live on separate channels).
 	## Not while you're on your back — _update_knockdown owns the rig then.
+	## ...and a turn leans the TORSO harder than it leans the eye — a watcher
+	## sees you drop a shoulder into the corner (2026-09-14, Locomotion.bank).
 	if body_rig and kd_phase == "":
 		body_rig.rotation_degrees = body_rig.rotation_degrees.lerp(
-			Vector3(clampf(rot.x, -8.0, 8.0) * 0.55, byaw, clampf(rot.z, -6.0, 6.0) * 0.6), k)
+			Vector3(clampf(rot.x, -8.0, 8.0) * 0.55, byaw,
+				clampf(rot.z, -6.0, 6.0) * 0.6 - _bank * Locomotion.BODY_BANK_DEG), k)
 
 
 func _frame_fx_and_regen(delta: float) -> void:
@@ -2089,6 +2246,7 @@ func _frame_fx_and_regen(delta: float) -> void:
 	## the dirt: camera shake, held-item animation, stamina/health regen, and
 	## the progression timers.
 	_update_grab(delta)          ## advance the reach BEFORE the camera reads it
+	_update_gather(delta)        ## hold E: the rest of the pile comes in
 	_update_action_camera(delta)
 	_update_wheel_hold(delta)
 	if bedroll_bundle:
@@ -3570,9 +3728,17 @@ func _update_gait(delta: float) -> void:
 		_step_idx = _si
 		if not _first and is_on_floor() and gait_amount > 0.12 \
 				and not swimming and kd_phase == "" and mount == null \
-				and not climbing:
+				and not climbing and not sliding:
 			StepAudio.footfall(self, global_position, gait_amount,
 				crouching, prone)
+			## AND THE GRASS ANSWERS. A second, quieter grass hit on the same beat
+			## whenever you are actually pushing through something — so the 15%
+			## you lost reads as a meadow round your knees rather than as the game
+			## hitching. No new pack: this is the footstep grass family, under the
+			## step that made it.
+			if wade > 0.25:
+				StepAudio.footfall(self, global_position, gait_amount * wade * 0.7,
+					true, prone, "grass")
 	## Landing: remember how hard we fell, dip the view, spring softly back.
 	if not is_on_floor():
 		_fall_speed = maxf(0.0, -velocity.y)
@@ -3591,10 +3757,63 @@ func _update_gait(delta: float) -> void:
 			_fall_grace = false
 	land_dip = lerpf(land_dip, 0.0, clampf(delta * 8.0, 0.0, 1.0))
 	## Head-bob target: a gentle side sway, plus a dip at each footfall.
+	## Wading widens the SWAY (you are shouldering side to side through it), not
+	## the footfall dip — a bigger dip would just read as a limp.
 	var bt := Vector2(
-		sin(gait_phase) * 0.016,
+		sin(gait_phase) * 0.016 * (1.0 + wade * Locomotion.WADE_SWAY),
 		(absf(sin(gait_phase)) - 0.5) * -0.022)
 	head_bob = head_bob.lerp(bt * gait_amount, clampf(delta * 10.0, 0.0, 1.0))
+	## SPEED IN THE LENS. The FOV push is the cheapest honest signal that you
+	## are moving fast; it rides on top of whatever FOV the player chose in
+	## Settings and is folded back to zero whenever a menu owns the screen.
+	if camera != null:
+		var want_fov := 0.0
+		if menu_open == "" and not god and kd_phase == "" and mount == null:
+			want_fov = Locomotion.fov_bonus(hspeed, SPEED, SPRINT_SPEED)
+		_fov_extra = lerpf(_fov_extra, want_fov, clampf(delta * 4.5, 0.0, 1.0))
+		camera.fov = set_fov + _fov_extra
+
+
+func _update_footing(delta: float) -> void:
+	## WHAT IS UNDER YOU, polled at 10 Hz and eased the rest of the way. Both
+	## reads here cost real work — GrassPaint.value_at is an Image fetch and
+	## StepAudio.family_at walks the ground paint — and neither answer can change
+	## meaningfully inside a tenth of a second at 8 m/s. The EASING is what makes
+	## it feel continuous; the poll is what makes it free.
+	_footing_t -= delta
+	var want_surf := _surface_mult
+	var want_wade := wade
+	if _footing_t <= 0.0:
+		_footing_t = 0.1
+		want_surf = 1.0
+		want_wade = 0.0
+		if not swimming and mount == null and not god and kd_phase == "":
+			var wet := 0.0
+			var bus := StepAudio.get_bus(self)
+			if bus != null:
+				wet = bus.wetness
+			want_surf = Locomotion.surface_mult(
+				StepAudio.family_at(global_position.x, global_position.z, wet))
+			## The meadow. `grass_hidden` is GrassSystem's OWN stealth read, so the
+			## grass that hides you and the grass that slows you are the same patch
+			## by construction — you can never be concealed by grass you are
+			## walking through at full speed.
+			var dens := 1.0
+			if GrassPaint.inst != null:
+				var d := GrassPaint.density_of(
+					GrassPaint.inst.value_at(global_position.x, global_position.z))
+				if d >= 0.0:
+					dens = d          ## negative = AUTO, i.e. the world's own rule
+			var blade := Locomotion.BASE_BLADE
+			if _grass_sys == null or not is_instance_valid(_grass_sys):
+				_grass_sys = get_tree().get_first_node_in_group("grass_system")
+			if _grass_sys != null and "style" in _grass_sys:
+				var st: Dictionary = _grass_sys.get("style")
+				blade = float(st.get("height", Locomotion.BASE_BLADE))
+			want_wade = Locomotion.wade_amount(grass_hidden, dens, blade)
+	var k := clampf(delta * 6.0, 0.0, 1.0)
+	_surface_mult = lerpf(_surface_mult, want_surf, k)
+	wade = lerpf(wade, want_wade, k)
 
 
 func _apply_fall_damage(spd: float) -> void:
@@ -3656,8 +3875,14 @@ func _apply_step_smooth(delta: float) -> void:
 		## and landing dips stack up, the lens never sinks into your own body.
 		var down := maxf(-_step_smooth - land_dip, -0.26)
 		camera.position.y = clampf(down + head_bob.y + _eye_smooth, -0.34, 0.55)
-		camera.rotation_degrees.z = lerpf(camera.rotation_degrees.z,
-			sin(gait_phase) * 0.4 * gait_amount, clampf(delta * 8.0, 0.0, 1.0))
+		## The stride's own roll, plus the BANK: cut across your own momentum and
+		## the horizon tips the way you are leaning. Subtracted, because a bank
+		## to the LEFT is a positive Y-up angle and a leftward roll is negative z.
+		var roll := sin(gait_phase) * 0.4 * gait_amount - _bank * Locomotion.BANK_ROLL_DEG
+		if sliding:
+			roll += SLIDE_TILT   ## hip down, shoulder over: the slide has a SIDE
+		camera.rotation_degrees.z = lerpf(camera.rotation_degrees.z, roll,
+			clampf(delta * 8.0, 0.0, 1.0))
 
 
 func _boxed_in() -> bool:
@@ -5250,15 +5475,24 @@ func _swing_reaches(e: Node3D) -> bool:
 ## ===================== Climbing (Space near a ledge) =======================
 
 
-func _try_climb() -> bool:
+func _try_climb(vault := false) -> bool:
 	## THE MANTLE: find a wall ahead with a standable top within reach, then
 	## haul up onto it. Returns false (so Space falls through to a jump) when
 	## there's nothing to grab. Works grounded OR mid-air (grab as you fall).
+	##
+	## `vault` is the same search run automatically at a sprint (2026-09-14):
+	## a tighter height window, a third of the duration, the RUN's direction
+	## instead of the camera's, and an exit that is a stride rather than a stop.
+	## One function, because a vault that read the world differently from a
+	## mantle would find ledges the mantle refuses and vice versa.
 	if climbing or mount != null or kd_phase != "" or hitstun_timer > 0.0:
 		return false
-	if stamina < 1.0:
+	if stamina < (VAULT_STAMINA if vault else 1.0):
 		return false  ## utterly winded — no grip left in the fingers
 	var fwd := -camera.global_transform.basis.z
+	if vault:
+		## You hurdle where your FEET are going, not where you are looking.
+		fwd = Vector3(velocity.x, 0.0, velocity.z)
 	fwd.y = 0.0
 	if fwd.length_squared() < 0.001:
 		return false  ## staring straight down a hole — no wall to read
@@ -5286,12 +5520,14 @@ func _try_climb() -> bool:
 	if top.is_empty():
 		return false
 	var rise := (top.position as Vector3).y - global_position.y
-	if rise < CLIMB_MIN_H or rise > CLIMB_MAX_H or (top.normal as Vector3).y < 0.5:
+	var lo := VAULT_MIN_H if vault else CLIMB_MIN_H
+	var hi := VAULT_MAX_H if vault else CLIMB_MAX_H
+	if rise < lo or rise > hi or (top.normal as Vector3).y < 0.5:
 		return false  ## too low to bother / too high to reach / not standable
-
-	## 3) The world has edges — no mantling toward a landing beyond them.
-	if absf((top.position as Vector3).x) > 101.0 or absf((top.position as Vector3).z) > 101.0:
-		return false
+	## A vault that finds nothing must not re-probe every single frame of the
+	## run — and one that finds something must not re-fire on the far side.
+	if vault:
+		_vault_cd = 0.25
 	## 3b) Headroom on the lip — never mantle your skull into a ceiling.
 	var land := (top.position as Vector3) + fwd * 0.22
 	var qh := PhysicsRayQueryParameters3D.create(land + Vector3.UP * 0.25, land + Vector3.UP * 1.75)
@@ -5300,16 +5536,18 @@ func _try_climb() -> bool:
 		return false
 
 	## Grab it.
-	stamina = maxf(0.0, stamina - CLIMB_STAMINA * stats.stamina_cost_mult())
+	stamina = maxf(0.0, stamina - (VAULT_STAMINA if vault else CLIMB_STAMINA) * stats.stamina_cost_mult())
 	stamina_delay = STAMINA_DELAY
 	climbing = true
+	vaulting = vault
+	_vault_exit = Vector2(velocity.x, velocity.z).length() * VAULT_KEEP if vault else 0.0
 	climb_t = 0.0
 	crouching = false  ## the grab stands you up — crouch/prone again at the top
 	prone = false
 	_fall_speed = 0.0  ## the grab kills the fall — no phantom fall damage on top-out
 	climb_from = global_position
 	climb_to = land + Vector3.UP * 0.02
-	climb_dur = CLIMB_TIME + clampf((rise - 1.0) * 0.16, 0.0, 0.35)
+	climb_dur = VAULT_TIME if vault else CLIMB_TIME + clampf((rise - 1.0) * 0.16, 0.0, 0.35)
 	velocity = Vector3.ZERO
 	blocking = false
 	drawing = false
@@ -5348,7 +5586,84 @@ func _update_climb(delta: float) -> void:
 		var push := (climb_to - climb_from)
 		push.y = 0.0
 		if push.length_squared() > 0.001:
-			velocity = push.normalized() * 1.6  ## a step onto the ledge, not a stop
+			## A MANTLE puts you on the ledge; a VAULT puts you back into your run
+			## with most of the speed you hit it carrying (VAULT_KEEP). Losing it
+			## all is what makes a hurdle feel like a wall you climbed.
+			velocity = push.normalized() * (maxf(_vault_exit, 1.6) if vaulting else 1.6)
+		vaulting = false
+		_vault_exit = 0.0
+
+
+## ======================= The slide (C at a sprint) ========================
+
+
+func _try_slide() -> bool:
+	## Returns true when C was spent on a slide, so the crouch toggle below it
+	## does not ALSO fire. Everything that could make going down a bad idea is
+	## checked here rather than at the key, so the pad's O button gets the same
+	## answer for free.
+	if sliding or slide_cd > 0.0 or not is_on_floor() or prone or climbing:
+		return false
+	if kd_phase != "" or mount != null or swimming or input_locked or pressed_by != null:
+		return false
+	if reach_phase != "" or god:
+		return false
+	var hv := Vector3(velocity.x, 0.0, velocity.z)
+	if hv.length() < SLIDE_MIN_SPEED or stamina < SLIDE_STAMINA:
+		return false
+	sliding = true
+	slide_t = SLIDE_TIME
+	crouching = true                ## the eye drops through _update_camera_arm
+	prone = false
+	stamina = maxf(0.0, stamina - SLIDE_STAMINA * stats.stamina_cost_mult())
+	stamina_delay = STAMINA_DELAY
+	## The kick: you do not slow down as you go down, you speed up for a beat.
+	var boosted := hv.normalized() * (hv.length() + SLIDE_BOOST)
+	velocity.x = boosted.x
+	velocity.z = boosted.z
+	_drop_carried_logs("you slid")
+	cam_shake = maxf(cam_shake, 0.06)
+	StepAudio.landing(self, global_position, 4.0)   ## the scrape as you go down
+	_add_log_msg("Slide", Color(0.8, 0.8, 0.8))
+	return true
+
+
+func _update_slide(delta: float, dir: Vector3) -> void:
+	## Owns the horizontal velocity while it lasts. You keep a little steering
+	## (SLIDE_STEER rad/s — enough to thread a gap, not enough to turn it into
+	## a crouch-walk) and the ground takes the rest back at SLIDE_FRICTION.
+	slide_t -= delta
+	var hv := Vector3(velocity.x, 0.0, velocity.z)
+	var spd := hv.length()
+	if spd > 0.01 and dir != Vector3.ZERO:
+		var ang := (hv / spd).signed_angle_to(dir, Vector3.UP)
+		var step := clampf(ang, -SLIDE_STEER * delta, SLIDE_STEER * delta)
+		hv = (hv / spd).rotated(Vector3.UP, step) * spd
+	## A slide runs DOWNHILL longer and dies going up one — the same grade term
+	## the walk reads, leaned on harder because there is nothing else pushing.
+	var fr := SLIDE_FRICTION
+	if is_on_floor():
+		fr *= 2.0 - Locomotion.slope_mult(get_floor_normal(), hv.normalized())
+	spd = maxf(0.0, spd - fr * delta)
+	hv = hv.normalized() * spd
+	velocity.x = hv.x
+	velocity.z = hv.z
+	if slide_t <= 0.0 or spd < SLIDE_END_SPEED or not is_on_floor() \
+			or kd_phase != "" or swimming or pressed_by != null:
+		_end_slide(false)
+
+
+func _end_slide(keep_speed: bool) -> void:
+	## You come up CROUCHED, because C is a toggle and you pressed it — standing
+	## back up on its own would leave the stance disagreeing with the key. A
+	## jump out of the slide (keep_speed) skips the friction tail entirely.
+	if not sliding:
+		return
+	sliding = false
+	slide_t = 0.0
+	slide_cd = SLIDE_CD
+	if not keep_speed:
+		_stance_settle_pulse()
 
 
 func _try_dash() -> void:
@@ -5571,10 +5886,16 @@ func _update_hud(delta: float) -> void:
 		pickup_prompt.visible = pickup_prompt.visible or not _carc_target.is_empty()  ## [butchery]
 		if _drop_target != null:
 			pickup_prompt.text = "[E] / [LMB]  Pick up %s" % _drop_target.display_name()
+			var pile := _pile_count()
+			if pile > 1:
+				pickup_prompt.text += "   ·   hold [E]  take all %d" % pile
 		elif _bed_target != null:
 			pickup_prompt.text = "[E]  Pack up the bedroll   ·   [F]  Sleep"
 		elif _debris_target != null:
 			pickup_prompt.text = "[E] / [LMB]  Gather rock"
+			var rpile := _pile_count()
+			if rpile > 1:
+				pickup_prompt.text += "   ·   hold [E]  take all %d" % rpile
 		elif _log_target != null:
 			pickup_prompt.text = "[E] / [LMB]  Take the log"
 		elif _fire_target != null:
@@ -5809,23 +6130,35 @@ func _toggle_menu(which: String) -> void:
 	if menu_open == which:
 		_close_menu()
 		return
-	## MAP OVER GOD MODE (tools/patch_ground.py). While the editor is up the
-	## map is an overlay, not a menu change: the editor stays visible and
-	## spectating underneath, and closing the map hands the cursor back to it.
-	if which == "map" and godmode != null and godmode.visible and map_panel:
-		if menu_open == "map":
-			_map_over_god(false)
-		else:
-			_map_over_god(true)
+	## EVERY MENU OVER GOD MODE (Lemon, 2026-09-12). While the editor is up a
+	## menu is an OVERLAY, not a menu change: the editor stays visible and
+	## spectating underneath, and closing the menu hands the cursor back to it.
+	## Until now only the map did this (tools/patch_ground.py) and every other
+	## menu dropped you out of the editor and back into your body.
+	if which != "god" and godmode != null and godmode.visible:
+		_menu_over_god(which, true)
 		return
-	## F1 with the map over the editor: just drop the map. Re-running
+	## F1 with a menu over the editor: just drop the menu. Re-running
 	## godmode.opened() here would snap the spectator camera back to the body.
-	if which == "god" and menu_open == "map" and godmode != null and godmode.visible:
-		_map_over_god(false)
+	if which == "god" and godmode != null and godmode.visible and god_overlay() != "":
+		_menu_over_god(god_overlay(), false)
 		return
 	menu_open = which
 	drawing = false  ## opening a menu eases the bowstring back down
 	bow_draw = 0.0
+	_show_menu_panels(which)
+	if godmode != null:
+		if which == "god":
+			godmode.opened()
+		elif godmode.visible:
+			godmode.closed()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _show_menu_panels(which: String) -> void:
+	## THE PANEL TABLE, in one place. _toggle_menu and the god-mode overlay
+	## both go through it, so a menu can never be wired into one of them and
+	## forgotten in the other. "" or "god" means every panel down.
 	spawn_panel.visible = which == "spawn"
 	tab_panel.visible = which == "tab"
 	settings_panel.visible = which == "settings"
@@ -5842,16 +6175,21 @@ func _toggle_menu(which: String) -> void:
 		sky_panel.refresh()
 	if which == "map" and map_panel:
 		map_panel.opened()
-	if godmode != null:
-		if which == "god":
-			godmode.opened()
-		elif godmode.visible:
-			godmode.closed()
 	if which == "tab":
 		_set_tab_page(tab_page)
 	elif which == "settings":
 		_refresh_settings_ui()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func god_overlay() -> String:
+	## The menu currently sitting ON TOP of the god editor, or "" if there is
+	## none (or the editor is not up). "god" itself is the editor, not an
+	## overlay. This is the one test for "a menu is over the editor".
+	if godmode == null or not godmode.visible:
+		return ""
+	if menu_open == "" or menu_open == "god":
+		return ""
+	return menu_open
 
 
 func _open_tab_menu(page: String) -> void:
@@ -5868,42 +6206,45 @@ func _open_tab_menu(page: String) -> void:
 
 
 func _close_menu() -> void:
-	if menu_open == "map" and godmode != null and godmode.visible:
-		_map_over_god(false)     ## map-over-god: close the map, keep the editor
+	## A menu over the god editor is an OVERLAY: closing it goes back to the
+	## editor, not out to the body. Esc twice is still the way out.
+	var over := god_overlay()
+	if over != "":
+		_menu_over_god(over, false)
 		return
 	menu_open = ""
 	if godmode != null and godmode.visible:
 		godmode.closed()
-	spawn_panel.visible = false
-	tab_panel.visible = false
-	settings_panel.visible = false
-	creative_panel.visible = false
-	if sky_panel:
-		sky_panel.visible = false
-	if map_panel:
-		map_panel.visible = false
-	if grass_lab:
-		grass_lab.visible = false
+	_show_menu_panels("")
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _map_over_god(on: bool) -> void:
-	## Show / hide the map on top of the god editor without touching the editor.
-	## (tools/patch_ground.py -- map_over_god helper)
+	## The map over the editor -- now just the general overlay with a name.
+	## (tools/patch_ground.py -- map_over_god helper; kept as the entry point
+	## GodEditor and the patcher already call.)
+	_menu_over_god("map", on)
+
+
+func _menu_over_god(which: String, on: bool) -> void:
+	## Show / hide ANY menu on top of the god editor without touching the
+	## editor: menu_open becomes that menu, its panel appears, the spectator
+	## camera stays out and the body stays parked. Off goes back to "god".
+	if godmode == null:
+		return
 	if on:
-		menu_open = "map"
+		menu_open = which
 		drawing = false
 		bow_draw = 0.0
-		map_panel.visible = true
-		map_panel.opened()
+		_show_menu_panels(which)
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		if godmode.has_method("map_opened"):
-			godmode.map_opened()
+		if godmode.has_method("overlay_opened"):
+			godmode.overlay_opened(which)
 	else:
 		menu_open = "god"
-		map_panel.visible = false
-		if godmode.has_method("map_closed"):
-			godmode.map_closed()
+		_show_menu_panels("god")    ## every panel down; the editor is not one
+		if godmode.has_method("overlay_closed"):
+			godmode.overlay_closed()
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -7693,6 +8034,16 @@ func _grab_abort() -> void:
 
 
 func _pickup_dropped(di: DroppedItem) -> void:
+	if _take_dropped_item(di):
+		di.queue_free()
+		_drop_target = null
+
+
+func _take_dropped_item(di: DroppedItem) -> bool:
+	## The PACK half of a pickup -- everything except making the node go away,
+	## so the hold-E sweep can count a thing in and then fly the node home
+	## instead of blinking it out. False means the rucksack refused it and it
+	## is still lying there.
 	var d: Dictionary = di.item
 	var nm := String(d.get("name", ""))
 	var mat := String(d.get("material", ""))
@@ -7701,14 +8052,13 @@ func _pickup_dropped(di: DroppedItem) -> void:
 		## forges that sword on the spot (collect_pickup handles it).
 		if not _has_room(nm) and _owns_sword_of(mat):
 			_add_log_msg("Backpack full", Color(0.9, 0.75, 0.4))
-			return  ## leave it lying
+			return false  ## leave it lying
 		collect_pickup("ore", int(d.get("count", 1)), mat)
-	else:
-		if not _give_item_dict(d):
-			return  ## backpack full — it stays on the ground
-		_push_gain(nm, int(d.count))
-	di.queue_free()
-	_drop_target = null
+		return true
+	if not _give_item_dict(d):
+		return false  ## backpack full — it stays on the ground
+	_push_gain(nm, int(d.count))
+	return true
 
 
 ## ===================== Logs on the shoulder (look + E) ====================
@@ -7755,6 +8105,145 @@ func _refresh_log_rig() -> void:
 	for c in log_rig.get_children():
 		log_rig.remove_child(c)
 		c.queue_free()
+
+
+## ===================== The pile sweep (hold E) ============================
+## Look at one thing and TAP E and you take that thing, exactly as before.
+## Look at one thing and HOLD E and the heap it is lying in comes in after it,
+## one every ninety milliseconds, nearest first. Same kind means the same item
+## name AND the same material, so a hold over a heap of iron ore leaves the
+## silver beside it alone. The hold only ever ADDS to the tap -- it never
+## delays it -- and it ends the moment you let go, the pack fills, the pile
+## runs out, or anything at all opens over the screen.
+
+
+func _gather_arm() -> void:
+	## E has just gone down. Remember WHAT is under the gaze now, because the
+	## tap being served on this same frame is about to take it and clear the
+	## target out from under us.
+	_e_held = true
+	_e_down_ms = Time.get_ticks_msec()
+	_gather_t = 0.0
+	_gather_n = 0
+	_gather_name = ""
+	_gather_mat = ""
+	_gather_kind = ""
+	if menu_open != "" or kd_phase != "":
+		return
+	if _drop_target != null and is_instance_valid(_drop_target):
+		_gather_name = _drop_target.display_name()
+		_gather_mat = String(_drop_target.item.get("material", ""))
+		_gather_kind = "item"
+	elif _debris_target != null and is_instance_valid(_debris_target):
+		_gather_name = "Rock"
+		_gather_kind = "debris"
+
+
+func _gather_stop() -> void:
+	_e_held = false
+	_gather_name = ""
+	_gather_mat = ""
+	_gather_kind = ""
+	_gather_n = 0
+
+
+func _update_gather(delta: float) -> void:
+	if not _e_held or _gather_kind == "":
+		return
+	## Anything that takes the world away from you ends the sweep.
+	if menu_open != "" or kd_phase != "" or input_locked or climbing \
+			or mount != null or grabbed_by != null or swimming or editing:
+		_gather_stop()
+		return
+	if Time.get_ticks_msec() - _e_down_ms < int(GATHER_HOLD * 1000.0):
+		return                       ## still inside the tap window
+	_gather_t -= delta
+	if _gather_t > 0.0:
+		return
+	_gather_t = GATHER_STEP
+	if not _gather_one():
+		_gather_stop()               ## pile empty, or the pack said no
+
+
+func _gather_one() -> bool:
+	## The nearest one left of the same kind, within a pile's width of the
+	## waist. ONE per call -- the stream is the point. The thing already in
+	## the reaching hand is skipped: the reach is going to deliver it itself,
+	## and taking it here as well would put two of it in the pack.
+	var from := get_waist_point()
+	var best: Node3D = null
+	var bd := GATHER_RADIUS * GATHER_RADIUS
+	if _gather_kind == "item":
+		for n in get_tree().get_nodes_in_group("dropped_items"):
+			var di := n as DroppedItem
+			if di == null or di == reach_node or di.gather_to != null:
+				continue
+			if di.is_queued_for_deletion():
+				continue
+			if di.display_name() != _gather_name:
+				continue
+			if String(di.item.get("material", "")) != _gather_mat:
+				continue
+			var d2 := di.global_position.distance_squared_to(from)
+			if d2 < bd:
+				bd = d2
+				best = di
+		if best == null:
+			return false
+		var take := best as DroppedItem
+		if not _take_dropped_item(take):
+			return false             ## full pack -- the rest stays where it lies
+		take.gather_fly(self)
+		if _drop_target == take:
+			_drop_target = null
+	else:
+		for n in get_tree().get_nodes_in_group("debris"):
+			var rd := n as RockDebris
+			if rd == null or rd == reach_node or rd.gather_to != null:
+				continue
+			if not rd.landed or rd.wood or rd.is_queued_for_deletion():
+				continue
+			var rd2 := rd.global_position.distance_squared_to(from)
+			if rd2 < bd:
+				bd = rd2
+				best = rd
+		if best == null:
+			return false
+		if not _give_item("Rock", 1, 0.8):
+			_add_log_msg("Backpack full", Color(0.9, 0.75, 0.4))
+			return false
+		_push_gain("Rock", 1)
+		(best as RockDebris).gather_fly(self)
+		if _debris_target == best:
+			_debris_target = null
+	_gather_n += 1
+	return true
+
+
+func _pile_count() -> int:
+	## How many of the looked-at thing are lying within a sweep of you -- the
+	## number the prompt offers to take, counting the one you can see.
+	var from := get_waist_point()
+	var r2 := GATHER_RADIUS * GATHER_RADIUS
+	var n := 0
+	if _drop_target != null and is_instance_valid(_drop_target):
+		var nm := _drop_target.display_name()
+		var mat := String(_drop_target.item.get("material", ""))
+		for x in get_tree().get_nodes_in_group("dropped_items"):
+			var di := x as DroppedItem
+			if di == null or di.gather_to != null:
+				continue
+			if di.display_name() == nm and String(di.item.get("material", "")) == mat \
+					and di.global_position.distance_squared_to(from) < r2:
+				n += 1
+	elif _debris_target != null and is_instance_valid(_debris_target):
+		for x in get_tree().get_nodes_in_group("debris"):
+			var rd := x as RockDebris
+			if rd == null or rd.gather_to != null or not rd.landed or rd.wood:
+				continue
+			if rd.global_position.distance_squared_to(from) < r2:
+				n += 1
+	return n
 
 
 func _update_drop_target() -> void:
@@ -9053,6 +9542,9 @@ func apply_state(d: Dictionary) -> void:
 	## Stance, steel, and the pools — derived caps first so the fill clamps right.
 	current_weapon = String(d.get("weapon", "sword"))
 	crouching = bool(d.get("crouching", false))
+	sliding = false          ## never restore INTO a slide
+	slide_t = 0.0
+	vaulting = false
 	prone = bool(d.get("prone", false))
 	_refresh_derived(false)
 	health = clampf(float(d.get("health", max_health)), 1.0, max_health)
@@ -9205,10 +9697,13 @@ func _flat_forward() -> Vector3:
 ## ========================== GOD FLIGHT (F1 mode) ===========================
 
 func _god_fly(delta: float) -> void:
-	## Minecraft rules. You hang where you let go. WASD flies along the LOOK
-	## (nose down and W dives), Space climbs, Ctrl drops, Shift is the boost,
-	## and the scroll wheel's god_speed multiplies the lot. Collision is parked
-	## for the duration and restored the instant flight ends.
+	## Minecraft rules. You hang where you let go. WASD is FLAT (2026-09-12):
+	## it slides you across the world plane the way you are facing and a
+	## nose-down look never dives you into the dirt. SHIFT climbs, CTRL drops,
+	## SPACE toggles the boost (sticky, see _input), and the scroll wheel's
+	## god_speed multiplies the lot. GOD MODE ONLY -- ordinary walking keeps
+	## Shift to sprint, Space to jump and Ctrl to dash. Collision is parked for
+	## the duration and restored the instant flight ends.
 	if _god_mask_saved < 0:
 		_god_mask_saved = collision_mask
 		collision_mask = 0
@@ -9220,9 +9715,19 @@ func _god_fly(delta: float) -> void:
 		if Input.is_key_pressed(KEY_A): iv.x -= 1.0
 		if Input.is_key_pressed(KEY_D): iv.x += 1.0
 		iv += _pad_move()   ## CONTROLLER: the left stick flies too
-	var dir := head.global_transform.basis * iv
+	## FLAT: take the head's RIGHT (horizontal whatever the pitch), rebuild
+	## forward from it, and throw the nose away.
+	var rgt := head.global_transform.basis.x
+	rgt.y = 0.0
+	if rgt.length_squared() < 0.000001:
+		rgt = transform.basis.x
+		rgt.y = 0.0
+	rgt = rgt.normalized() if rgt.length_squared() > 0.000001 else Vector3.RIGHT
+	var fwd := Vector3.UP.cross(rgt)
+	var dir := rgt * iv.x + fwd * -iv.z
+	dir.y = 0.0
 	if not typing:
-		if Input.is_key_pressed(KEY_SPACE):
+		if Input.is_key_pressed(KEY_SHIFT):
 			dir.y += 1.0
 		if Input.is_key_pressed(KEY_CTRL):
 			dir.y -= 1.0
@@ -9231,7 +9736,7 @@ func _god_fly(delta: float) -> void:
 	else:
 		dir = Vector3.ZERO
 	var spd := GOD_FLY_SPEED * god_speed
-	if not typing and Input.is_key_pressed(KEY_SHIFT):
+	if god_boost:
 		spd *= GOD_FLY_BOOST
 	## Snappy but not instant -- a 60 m/s stop on one key-up reads as a bug.
 	velocity = velocity.move_toward(dir * spd, maxf(60.0, spd * 6.0) * delta)

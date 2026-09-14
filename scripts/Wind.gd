@@ -114,6 +114,14 @@ func _process(delta: float) -> void:
 		var moved := (p - _last_player_pos).length() / maxf(delta, 0.0001)
 		_last_player_pos = p
 		push = clampf(moved / PUSH_SPEED_FULL, 0.0, 1.0)
+		## WADING (2026-09-14). Deep grass is a 15% speed tax, and a tax you can
+		## only feel is indistinguishable from the game stuttering. So the same
+		## `wade` number that slows the Player down ALSO opens the blades wider
+		## around them — the shader's trample term already does the parting, this
+		## just tells it the grass is up to your knees. Read straight off the
+		## player rather than pushed in, because this node already holds them.
+		if "wade" in player:
+			push = minf(1.0, push + float(player.get("wade")) * Locomotion.WADE_PUSH)
 		RenderingServer.global_shader_parameter_set("player_pos", p)
 	_swing = maxf(0.0, _swing - delta * SWING_DECAY)
 	push = maxf(push, _swing)
