@@ -828,6 +828,32 @@ func nearest_branch(_from: Vector3, aim: Vector3) -> TreeBranch:
 	return best if best_d <= LIMB_AIM * scale_class else null
 
 
+## The first limb a sight-line runs through, within `reach` of `from` --
+## for a blade that cuts what it is pointed at rather than what it is near.
+## Returns [TreeBranch, world point] or [] when the ray crosses no limb.
+## A limb's box is its mesh (leaves included), so a blade aimed into the
+## foliage of a limb still finds the limb: generous on purpose.
+func branch_on_ray(from: Vector3, dir: Vector3, reach: float) -> Array:
+	var best: TreeBranch = null
+	var best_t := INF
+	var best_p := Vector3.INF
+	for b in _branches:
+		var tb := b as TreeBranch
+		if not is_instance_valid(tb) or tb.gone or tb.mesh == null \
+				or not is_instance_valid(tb.mesh) or tb.mesh.mesh == null:
+			continue
+		var box: AABB = tb.mesh.global_transform * tb.mesh.mesh.get_aabb()
+		var hit = box.intersects_ray(from, dir)
+		if hit == null:
+			continue
+		var t: float = (hit as Vector3).distance_to(from)
+		if t <= reach and t < best_t:
+			best_t = t
+			best = tb
+			best_p = hit as Vector3
+	return [best, best_p] if best != null else []
+
+
 func chop_hit(toward_chopper: Vector3, aim := Vector3.INF) -> bool:
 	## One bite. Returns TRUE only on the swing that fells the tree.
 	if felled:

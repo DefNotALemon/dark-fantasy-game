@@ -725,6 +725,50 @@ func _hide_branches(lo: float, hi: float, sticks_too: bool) -> void:
 					_stick_at(mi.global_position)
 
 
+## The first branch a sight-line runs through on this downed tree, within
+## `reach` of `from`. Returns [twig record, world point] or [].
+func branch_on_ray(from: Vector3, dir: Vector3, reach: float) -> Array:
+	var best: Dictionary = {}
+	var best_t := INF
+	var best_p := Vector3.INF
+	for tw in _twigs:
+		var mi := tw["mesh"] as MeshInstance3D
+		if mi == null or not is_instance_valid(mi) or not mi.visible or mi.mesh == null:
+			continue
+		var box: AABB = mi.global_transform * mi.mesh.get_aabb()
+		var hit = box.intersects_ray(from, dir)
+		if hit == null:
+			continue
+		var t: float = (hit as Vector3).distance_to(from)
+		if t <= reach and t < best_t:
+			best_t = t
+			best = tw
+			best_p = hit as Vector3
+	return [best, best_p] if not best.is_empty() else []
+
+
+## Take one branch off a downed tree: it vanishes and what lands is sticks --
+## one for a twig, two or three for a limb (the same yield TreeBranch gives
+## a standing limb). Returns the number of sticks.
+func lop_branch(tw: Dictionary, at: Vector3) -> int:
+	var mi := tw["mesh"] as MeshInstance3D
+	if mi == null or not is_instance_valid(mi) or not mi.visible:
+		return 0
+	mi.visible = false
+	for L in _limbs.duplicate():
+		if L["mesh"] == mi:
+			var cs := L["shape"] as CollisionShape3D
+			if is_instance_valid(cs):
+				cs.queue_free()
+			_limbs.erase(L)
+	_twigs.erase(tw)
+	var reach := float(tw.get("reach", 0.5))
+	var n := 1 if reach < 1.0 else (2 if reach < 2.4 else 3)
+	for _i in range(n):
+		_stick_at(at)
+	return n
+
+
 func _stick_at(at: Vector3) -> void:
 	var world := get_parent()
 	if world == null:

@@ -4464,6 +4464,54 @@ func _wood_impact(wood: Node3D, mat_id := "", power := 1.0, tool := "") -> Array
 	return pn
 
 
+func _sword_lop_branch(reach: float, mat_id := "") -> bool:
+	## The first branch the sight-line runs through, on any tree in reach --
+	## a standing TreeV2 limb (its own HP: one to three cuts, like the axe) or
+	## anything on a downed trunk (one cut). Chips, the blade's own sound on
+	## the wood, and sticks on the ground when it comes off.
+	var from := _aim_origin()
+	var dir := -camera.global_transform.basis.z
+	var best_t := INF
+	var best_owner: Node3D = null
+	var best_hit: Variant = null
+	var best_p := Vector3.INF
+	var cull := (reach + 14.0) * (reach + 14.0)     ## a crown is wide; the trunk is not
+	for g in ["trees", "fallen_trunks"]:
+		for n in get_tree().get_nodes_in_group(g):
+			var holder := n as Node3D
+			if holder == null or not holder.has_method("branch_on_ray"):
+				continue
+			if holder.global_position.distance_squared_to(global_position) > cull:
+				continue
+			var r: Array = holder.call("branch_on_ray", from, dir, reach)
+			if r.is_empty():
+				continue
+			var t: float = (r[1] as Vector3).distance_to(from)
+			if t < best_t:
+				best_t = t
+				best_owner = holder
+				best_hit = r[0]
+				best_p = r[1]
+	if best_owner == null:
+		return false
+	var species := ""
+	if "species" in best_owner:
+		species = String(best_owner.get("species"))
+	_fx(HitFX.wood(best_p, _fx_dir(-dir), species, 0.6))
+	if mat_id != "":
+		_fx(HitFX.element(best_p, _fx_dir(-dir), Materials.blade_fx(mat_id), 0.5))
+	WoodAudio.strike(self, best_p, "sword", 0.7, best_owner)
+	var off := false
+	if best_hit is TreeBranch:
+		off = (best_hit as TreeBranch).take_hit(1)
+	elif best_owner is FallenTrunk:
+		off = (best_owner as FallenTrunk).lop_branch(best_hit as Dictionary, best_p) > 0
+	if off:
+		WoodAudio.limb(self, best_p)
+		_add_log_msg("Limb down", Color(0.72, 0.76, 0.66))
+	return true
+
+
 func _do_melee_hit() -> void:
 	var mat_id := _sword_material_id()
 	var forward := -camera.global_transform.basis.z
@@ -4519,7 +4567,13 @@ func _do_melee_hit() -> void:
 	## A sword in a tree is a bad idea and it LOOKS like one: chips fly out of
 	## the spot you struck, the trunk shivers, and not one bit of the felling
 	## job gets done. Bring an axe (2). Elemental steel still marks the bark.
-	if not landed:
+	## ...but a BRANCH in the way of the blade comes off (Lemon 2026-09-14:
+	## "make the sword capable of breaking off branches as sticks to any
+	## tree"). Point at a limb, standing or downed, and the swing takes the
+	## limb rather than nicking the trunk.
+	if not landed and _sword_lop_branch(attack_range + 1.2, mat_id):
+		cam_punch = maxf(cam_punch, 0.8)
+	elif not landed:
 		var wood_hit := _nearest_wood(forward, attack_range + 0.4)
 		if wood_hit != null:
 			_wood_impact(wood_hit, mat_id, 0.6)
