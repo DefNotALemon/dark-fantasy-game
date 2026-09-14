@@ -348,6 +348,100 @@ static func _loops(m: Dictionary, segs: PackedInt32Array) -> Array:
 
 
 ## A flat disc of end grain over one loop, facing `up` (+Y) or down.
+## A least-squares circle through a rim, refitted on its inliers: a plain
+## Kasa fit over every point, then the points that sit on or outside that
+## circle (within the bark's relief) are kept and the fit repeated. On a whole ring that
+## is the ring; on a notched one the bark that is left is the majority and
+## agrees with itself, so the wedge the axe took drops out as outliers and
+## cannot drag the centre. Returns [cx, cz, r] in the loop's x/z, or the
+## centroid and its max radius when the fit is degenerate.
+static func fit_circle(loop: PackedVector3Array) -> Array:
+	var n := loop.size()
+	var c := Vector3.ZERO
+	for p in loop:
+		c += p
+	c /= float(maxi(n, 1))
+	var rmax := 0.0
+	for p in loop:
+		rmax = maxf(rmax, Vector2(p.x - c.x, p.z - c.z).length())
+	if n < 4 or rmax < 1e-6:
+		return [c.x, c.z, rmax]
+	var use := PackedByteArray()
+	use.resize(n)
+	use.fill(1)
+	var best := [c.x, c.z, rmax]
+	for _pass in range(6):
+		var fit := _kasa(loop, use, c)
+		if fit.is_empty():
+			break
+		best = fit
+		## The axe only ever takes wood AWAY, so the points that disagree with
+		## the circle all sit INSIDE it. Keep everything on or outside it, and
+		## anything inside by no more than the bark's own relief (1.5x the
+		## median miss, never under 4% of the radius); the notch drops out.
+		var inside := PackedFloat32Array()
+		var miss := PackedFloat32Array()
+		for i in range(n):
+			var di := Vector2(loop[i].x - float(fit[0]), loop[i].z - float(fit[1])).length()
+			inside.append(float(fit[2]) - di)
+			miss.append(absf(float(fit[2]) - di))
+		var sorted := PackedFloat32Array(miss)
+		sorted.sort()
+		var tol: float = maxf(sorted[n / 2] * 1.5, float(fit[2]) * 0.04)
+		var kept := 0
+		var changed := false
+		for i in range(n):
+			var u := 1 if inside[i] <= tol else 0
+			if u != use[i]:
+				changed = true
+			use[i] = u
+			kept += u
+		if kept < 4 or not changed:
+			break
+	return best
+
+
+static func _kasa(loop: PackedVector3Array, use: PackedByteArray, about: Vector3) -> Array:
+	## normal equations for x^2 + z^2 + D x + E z + F = 0 over the used points,
+	## about `about` so the 3x3 stays well conditioned
+	var sxx := 0.0
+	var sxz := 0.0
+	var szz := 0.0
+	var sx := 0.0
+	var sz := 0.0
+	var m := 0.0
+	var bx := 0.0
+	var bz := 0.0
+	var b1 := 0.0
+	for i in range(loop.size()):
+		if use[i] == 0:
+			continue
+		var x := loop[i].x - about.x
+		var z := loop[i].z - about.z
+		var r2 := x * x + z * z
+		sxx += x * x
+		sxz += x * z
+		szz += z * z
+		sx += x
+		sz += z
+		m += 1.0
+		bx += -r2 * x
+		bz += -r2 * z
+		b1 += -r2
+	if m < 3.0:
+		return []
+	var A := Basis(Vector3(sxx, sxz, sx), Vector3(sxz, szz, sz), Vector3(sx, sz, m))
+	if absf(A.determinant()) < 1e-14:
+		return []
+	var sol := A.inverse() * Vector3(bx, bz, b1)
+	var cx := -sol.x * 0.5
+	var cz := -sol.y * 0.5
+	var rr := cx * cx + cz * cz - sol.z
+	if rr <= 0.0 or is_nan(rr):
+		return []
+	return [about.x + cx, about.z + cz, sqrt(rr)]
+
+
 static func _cap(loop: PackedVector3Array, y: float, up: bool) -> Array:
 	var n := loop.size()
 	if n < 3:
@@ -361,7 +455,19 @@ static func _cap(loop: PackedVector3Array, y: float, up: bool) -> Array:
 		rmax = maxf(rmax, Vector2(p.x - c.x, p.z - c.z).length())
 	if rmax < 1e-5:
 		return []
-	var span := rmax * 2.04
+	## THE RINGS BELONG TO THE TREE, NOT TO THE CUT (Lemon 2026-09-14). Where
+	## the break runs through the notch the loop is a D, and a disc centred on
+	## the D's centroid puts the pith in the wrong place with rings that follow
+	## the axe. Fit a circle to the OUTER rim -- the bark that is still there --
+	## and centre the grain on that: the pith sits where it grew, and the
+	## rings simply stop where the wood was taken out.
+	var fit := fit_circle(loop)
+	var ring_c := Vector3(float(fit[0]), c.y, float(fit[1]))
+	var ring_r := float(fit[2])
+	if ring_r < rmax * 0.5 or ring_r > rmax * 1.6:
+		ring_c = c                       ## a fit that ran away: fall back
+		ring_r = rmax
+	var span := ring_r * 2.04
 	var want := Vector3.UP if up else Vector3.DOWN
 
 	var verts := PackedVector3Array()
@@ -372,7 +478,7 @@ static func _cap(loop: PackedVector3Array, y: float, up: bool) -> Array:
 		var q := Vector3(p.x, y, p.z)
 		verts.append(q)
 		norms.append(want)
-		uvs.append(Vector2(0.5 + (p.x - c.x) / span, 0.5 + (p.z - c.z) / span))
+		uvs.append(Vector2(0.5 + (p.x - ring_c.x) / span, 0.5 + (p.z - ring_c.z) / span))
 		poly.append(Vector2(p.x, p.z))
 	var tris := Geometry2D.triangulate_polygon(poly)
 	var idx := PackedInt32Array()

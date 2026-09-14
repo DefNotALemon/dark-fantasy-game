@@ -79,6 +79,17 @@ var _trunk_kind: Array = []
 var _twigs: Array = []             ## [{mesh, base_y}]
 var _landed := false               ## the crown has met the ground (sound)
 var _prev_spd := 0.0
+## A settled trunk is FROZEN where it stopped -- propped on limbs whose
+## colliders are gone. Cut those limbs off and the wood that is left hangs
+## in the air (Lemon 2026-09-14: "the midsection/base will still float").
+## So every bite lets it fall again: unfreeze, wait for it to come to rest on
+## whatever is actually under it, freeze. `settled` stays true throughout --
+## it is still furniture, still buckable, never crushes anyone.
+var _resettle := false
+var _resettle_t := 0.0
+## A piece cut off a downed trunk (see _split_off): it starts lying down,
+## already landed, and never topples or creaks.
+var _split := false
 ## How many sticks the branches give up when it lands. A PSX tree is one piece
 ## of wood with no separable limbs, so the sticks come from the crash rather
 ## than from limbing it beforehand.
@@ -125,10 +136,12 @@ func _ready() -> void:
 	pm.bounce = 0.0
 	physics_material_override = pm
 
+	_split = bool(get_meta("split", false))
 	## Stand it up where the tree stood: the body's origin is the MIDDLE of the
 	## cylinder, so it has to sit half a trunk above the stump or the log spawns
-	## buried to the waist.
-	position.y += trunk_len * 0.5
+	## buried to the waist. (A split-off piece is placed by whoever cut it.)
+	if not _split:
+		position.y += trunk_len * 0.5
 	_orig_len = trunk_len
 	_base = -trunk_len * 0.5          ## local Y of the old tree's foot
 	var base := _base
@@ -166,14 +179,22 @@ func _ready() -> void:
 	cs.shape = shape
 	add_child(cs)
 
+	body_entered.connect(_on_body_entered)
+	if _split:
+		## Already down: it was lying on the ground as part of a bigger log a
+		## moment ago. It only has to drop onto whatever is under it now.
+		_age = MIN_FALL_TIME
+		settled = true
+		_landed = true
+		_crashed = true          ## no crash shake, and its limbs never prop it
+		_drop_again()
+		return
 	var dir: Vector3 = get_meta("fall_dir", Vector3.FORWARD)
 	dir.y = 0.0
 	if dir.length_squared() < 0.01:
 		dir = Vector3.FORWARD
 	dir = dir.normalized()
 	call_deferred("_start_topple", dir)
-
-	body_entered.connect(_on_body_entered)
 	## The hinge goes: one long groan that ends on the snap, about as long as
 	## the fall itself. A stump-less blast fell creaks too -- it is wood tearing.
 	WoodAudio.creak(self, global_position + Vector3.DOWN * trunk_len * 0.5, trunk_len)
@@ -346,6 +367,16 @@ func _physics_process(delta: float) -> void:
 		if over and _prev_spd - spd > 1.2 and _prev_spd > 1.5:
 			_land_sound()
 		_prev_spd = spd
+	if _resettle:
+		## Falling again after a bite. Rest = slow for a beat; a hard cap so a
+		## piece wedged against something does not simulate forever.
+		_resettle_t += delta
+		var still := linear_velocity.length() < 0.25 and angular_velocity.length() < 0.3
+		if (_resettle_t > 0.35 and still) or _resettle_t > 4.0:
+			_resettle = false
+			freeze = true
+			if _split:
+				WoodAudio.thud(self, global_position, trunk_r)
 	if _age < MIN_FALL_TIME:
 		return
 	if settled:
@@ -525,25 +556,45 @@ func free_pinned() -> void:
 
 ## ---------------------------------------------------------------- bucking ---
 
-func chop_hit(_toward_chopper: Vector3, _aim := Vector3.INF) -> bool:
-	## One bite of the axe on a downed trunk cuts one log free -- and the log
-	## is THAT PIECE OF THE TREE, lying where it was, not a token that pops
-	## off the end (Lemon 2026-09-14: "separate into logs from where the logs
-	## were, as tree lying on the ground"). The last bite takes whatever is
-	## left rather than leaving a stub that vanishes.
+func chop_hit(_toward_chopper: Vector3, aim := Vector3.INF) -> bool:
+	## One bite of the axe on a downed trunk cuts it WHERE THE AXE LANDED
+	## (Lemon 2026-09-14: "split from the side you break it instead of going
+	## from the top down every time"). `aim` is the crosshair strike point the
+	## Player already paid a raycast for; projected onto the trunk's axis it is
+	## the cut. The piece beyond the cut -- the top side -- comes off: as a Log
+	## item when it is short enough to carry, as a NEW trunk lying right there
+	## when it is not, still buckable, its own branches on it. What is left is
+	## the butt side, and it falls back onto the ground it was floating over.
+	## With no aim (a test, a blast) it takes BUCK_LENGTH off the top as before.
+	## The last bite takes whatever is left rather than leaving a stub.
 	if not settled:
 		return false
 	logs_left -= 1
-	var last := logs_left <= 0 or trunk_len - BUCK_LENGTH < BUCK_LENGTH * 0.5
-	var cut_len := trunk_len if last else BUCK_LENGTH
-	_spawn_log(cut_len)
-	trunk_len = maxf(trunk_len - cut_len, 0.0)
-	if last:
+	if trunk_len <= BUCK_LENGTH * 1.5:
+		_spawn_log(trunk_len)
+		trunk_len = 0.0
 		_scatter_last()
 		queue_free()
 		return true
+	var keep := trunk_len - BUCK_LENGTH
+	if aim != Vector3.INF and aim.is_finite():
+		var along := to_local(aim).y - _base          ## metres up the trunk from the butt
+		keep = clampf(along, BUCK_LENGTH * 0.75, trunk_len - BUCK_LENGTH * 0.75)
+	var off := trunk_len - keep
+	if off <= BUCK_LENGTH * 1.5 or not _split_off(off):
+		_spawn_log(off)
+	trunk_len = keep
 	_resize()
+	_drop_again()
 	return false
+
+
+func _drop_again() -> void:
+	## Let the physics have it back until it is resting on something real.
+	freeze = false
+	sleeping = false
+	_resettle = true
+	_resettle_t = 0.0
 
 
 func _resize() -> void:
@@ -579,12 +630,17 @@ func _cache_trunk_mesh() -> void:
 		var mi := child as MeshInstance3D
 		if mi != null and mi.mesh != null and mi.name.begins_with("Trunk"):
 			_trunk_mi = mi
+			## a split-off piece says what each of its surfaces is; a tree's own
+			## trunk is the bark tube on surface 0 and leaf cards after it
+			## (TreeKit._mesh_of), which are never sliced
+			var kinds: Array = mi.get_meta("wood_kinds", [])
 			for i in range(mi.mesh.get_surface_count()):
 				_trunk_pristine.append(mi.mesh.surface_get_arrays(i))
 				_trunk_mats.append(mi.get_surface_override_material(i))
-				## surface 0 is the bark tube; everything after it is leaf
-				## cards (TreeKit._mesh_of), which are never sliced
-				_trunk_kind.append("wood" if i == 0 else "card")
+				if i < kinds.size():
+					_trunk_kind.append(String(kinds[i]))
+				else:
+					_trunk_kind.append("wood" if i == 0 else "card")
 			return
 
 
@@ -677,6 +733,121 @@ func _stick_at(at: Vector3) -> void:
 	world.add_child(s)
 	s.global_position = at + Vector3(randf_range(-0.4, 0.4), 0.25, randf_range(-0.4, 0.4))
 	s.velocity = Vector3(randf_range(-1.4, 1.4), randf_range(0.8, 1.8), randf_range(-1.4, 1.4))
+
+
+func _split_off(off: float) -> bool:
+	## The far `off` metres of this trunk become a trunk of their own, lying
+	## exactly where they are: the same mesh space (foot at the old tree's
+	## origin, the model's scale), the bark tube sliced on the cut with end
+	## grain on the new face, the leaf cards and every branch ROOTED in that
+	## stretch moved across as the same nodes. Returns false if there is no
+	## model to slice (a plain-cylinder trunk), and the caller makes a log.
+	var world := get_parent()
+	if world == null or _model == null:
+		return false
+	_cache_trunk_mesh()
+	if _trunk_mi == null:
+		return false
+	var ms := maxf(_model.scale.y, 0.001)
+	var hi := (trunk_len + clip_below) / ms
+	var lo := (trunk_len - off + clip_below) / ms
+	var surfaces: Array = []
+	var mats: Array = []
+	var kinds: Array = []
+	for si in range(_trunk_pristine.size()):
+		var src: Array = _trunk_pristine[si]
+		var kind := String(_trunk_kind[si])
+		if kind == "wood":
+			var cut := WoodCut.slab(src, lo, hi, true, false)
+			if not (cut["wood"] as Array).is_empty():
+				surfaces.append(cut["wood"])
+				mats.append(_trunk_mats[si])
+				kinds.append("wood")
+			for cap in (cut["caps"] as Array):
+				surfaces.append(cap)
+				mats.append(WoodCut.grain_material(species))
+				kinds.append("cap")
+		else:
+			## leaf cards, and any face an earlier cut left up there
+			var kept := WoodCut.cards(src, lo - 0.001, hi + 0.001)
+			if not kept.is_empty():
+				surfaces.append(kept)
+				mats.append(_trunk_mats[si])
+				kinds.append(kind)
+	if surfaces.is_empty() or kinds[0] != "wood":
+		return false
+	var v: PackedVector3Array = surfaces[0][Mesh.ARRAY_VERTEX]
+	var cx := 0.0
+	var cz := 0.0
+	for p in v:
+		cx += p.x
+		cz += p.z
+	cx /= float(v.size())
+	cz /= float(v.size())
+	## the collider's radius is the wood AT THE CUT, not the average of a
+	## piece that tapers to the leader's tip -- or the thick end sinks into
+	## the ground up to its bark
+	var rsum := 0.0
+	var rn := 0
+	for p in v:
+		if p.y <= lo + 0.6 / ms:
+			rsum += Vector2(p.x - cx, p.z - cz).length()
+			rn += 1
+	var r_here := maxf((rsum / float(rn) if rn > 0 else trunk_r * 0.8) * ms, 0.05)
+
+	var am := ArrayMesh.new()
+	for arr in surfaces:
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var mi := MeshInstance3D.new()
+	mi.name = "Trunk_split"
+	mi.mesh = am
+	for i in range(mats.size()):
+		mi.set_surface_override_material(i, mats[i])
+	mi.set_meta("wood_kinds", kinds)
+	for pname in ["bark_var", "bark_value", "leaf_var"]:
+		var val = _trunk_mi.get_instance_shader_parameter(pname)
+		if val != null:
+			mi.set_instance_shader_parameter(pname, val)
+	var model := Node3D.new()
+	model.name = "Split_%s" % species
+	model.scale = _model.scale
+	model.add_child(mi)
+	## the branches rooted in that stretch go with it -- the same nodes, the
+	## same mesh-space positions, so nothing on them moves
+	var parts: Node = _model
+	if _model.get_child_count() == 1 and _model.get_child(0).get_child_count() > 0:
+		parts = _model.get_child(0)
+	for tw in _twigs.duplicate():
+		var by := float(tw["base_y"])
+		if by < lo or by > hi:
+			continue
+		var bm := tw["mesh"] as MeshInstance3D
+		if bm == null or not is_instance_valid(bm):
+			continue
+		for L in _limbs.duplicate():
+			if L["mesh"] == bm:
+				var cs := L["shape"] as CollisionShape3D
+				if is_instance_valid(cs):
+					cs.queue_free()
+				_limbs.erase(L)
+		_twigs.erase(tw)
+		if bm.get_parent() == parts:
+			parts.remove_child(bm)
+		model.add_child(bm)
+
+	var piece := FallenTrunk.make(Vector3.ZERO, Vector3.FORWARD, off, r_here, species,
+		maxi(logs_left, 1))
+	piece.clip_below = clip_below + trunk_len - off
+	piece.leaf_mat = leaf_mat
+	piece.sticks = 0
+	piece.set_meta("split", true)
+	piece.adopt(model)
+	world.add_child(piece)
+	## the body's origin is the middle of its cylinder: put it on this body's
+	## axis at the middle of the stretch, with this body's orientation
+	piece.global_transform = Transform3D(global_transform.basis,
+		to_global(Vector3(0, _base + trunk_len - off * 0.5, 0)))
+	return true
 
 
 func _spawn_log(cut_len: float) -> void:
