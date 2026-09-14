@@ -220,8 +220,11 @@ func _test_save_round_trip() -> void:
 	## deleted the entire v2 forest and restored nothing.
 	print("[3c] a part-chopped tree survives save and load")
 	var t := _spawn("oak", 3)
-	for i in range(3):
+	## two of three swings: PART-chopped, still standing (a third would fell
+	## it now that every trunk is a three-swing job -- 2026-09-14)
+	for i in range(2):
 		t.chop_hit(Vector3(1, 0, 0), Vector3.ZERO)
+	ok(not t.felled, "two swings leave it standing, part-chopped")
 	var d := t.save_dict()
 	ok(str(d.get("kind", "")) == "tree_v2", "save_dict is tagged tree_v2")
 	ok(d.has("branches") and d.has("chops"), "save_dict carries limb and chop state")

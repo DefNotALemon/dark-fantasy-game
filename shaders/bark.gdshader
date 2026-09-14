@@ -79,13 +79,13 @@ uniform float bark_var_strength : hint_range(0.0, 1.0) = 1.0;
 // brightness and carry the hue through untouched.
 // cell_m is the size of one bark texel IN METRES. UVs are already metres, so
 // this is a straight snap and the density never changes with trunk radius.
-uniform float cell_m : hint_range(0.004, 0.08) = 0.015;
+uniform float cell_m : hint_range(0.004, 0.08) = 0.028;
 // How much of the cell grid actually lands. 1.0 is the hard pixel-art snap the
 // first pass shipped; 0.45 keeps the chunky read without turning a detailed
 // bark sheet into tiles. This is the dial for "more/less pixelated".
-uniform float cell_mix : hint_range(0.0, 1.0) = 0.32;
-uniform float posterize : hint_range(2.0, 32.0) = 16.0;
-uniform float cell_jitter : hint_range(0.0, 0.5) = 0.035;
+uniform float cell_mix : hint_range(0.0, 1.0) = 0.55;
+uniform float posterize : hint_range(2.0, 32.0) = 9.0;
+uniform float cell_jitter : hint_range(0.0, 0.5) = 0.06;
 uniform float bands : hint_range(2.0, 8.0) = 5.0;
 uniform float band_floor : hint_range(0.0, 0.6) = 0.32;   // the shaded side is not dead
 uniform float cell_fade_far = 26.0;   // past this the cells dissolve into the mip
@@ -184,10 +184,14 @@ void fragment() {
 	col *= 1.0 + j * cell_jitter * cells_on;
 
 	// ---- the axe cut: pale wood, no bark ---------------------------------
-	if (v_cut > 0.01) {
+	// A STEP, not a blend (Lemon 2026-09-14: "no more gradients between bark
+	// and not bark"). TreeV2._carve_notch writes 0 or 1 per vertex; the
+	// interpolated value crosses 0.5 once along an edge, so the line between
+	// bark and cut is a line.
+	float cut = step(0.5, v_cut);
+	if (cut > 0.5) {
 		vec3 grain = texture(bark_albedo, suv * vec2(0.35, 2.2)).rgb;
-		col = mix(col, col_heart * (0.72 + 0.55 * dot(grain, vec3(0.333))),
-			smoothstep(0.02, 0.55, v_cut));
+		col = col_heart * (0.72 + 0.55 * dot(grain, vec3(0.333)));
 	}
 
 	// moss: north-facing (−Z), low on the trunk
@@ -204,8 +208,7 @@ void fragment() {
 	ALBEDO = col;
 	NORMAL_MAP = texture(bark_normal, mix(uv, suv, cells_on * 0.6)).rgb;
 	NORMAL_MAP_DEPTH = normal_scale;
-	ROUGHNESS = mix(texture(bark_rough, suv).r, heart_rough,
-		smoothstep(0.02, 0.55, v_cut));
+	ROUGHNESS = mix(texture(bark_rough, suv).r, heart_rough, cut);
 }
 
 // Four flat diffuse tones and nothing else. Matching grass v2.3's banded

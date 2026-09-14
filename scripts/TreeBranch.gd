@@ -13,7 +13,9 @@ extends Node3D
 ## ===========================================================================
 
 const HIT_RADIUS_PER_HP := 0.03    ## spec §8a: hp = ceil(radius / 0.03)
-const MAX_HP := 3        ## was 7, then 4 — see the swing-count note below
+## ONE CUT (Lemon 2026-09-14: "it should instantly take out a branch and the
+## axe should too"). Was 7, then 4, then 3 -- a limb is a limb, it comes off.
+const MAX_HP := 1
 const MIN_LIMB_R := 0.045   ## thinner than this and it isn't worth an axe swing
 const MAX_LIMBS := 4        ## the most a single tree will ever ask you to clear
 ## Limbing is optional now — worth doing for the sticks, never a gate.

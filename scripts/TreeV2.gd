@@ -42,7 +42,9 @@ const ALL_SPECIES: Array[String] = ["maple", "birch", "oak", "pine", "fir"]
 ## Stage -> how many 2 m logs the trunk bucks into (spec §4)
 const LOG_YIELD: Array[int] = [0, 1, 3, 5, 2]
 ## Stage -> axe bites to eat through the trunk
-const TRUNK_CHOPS: Array[int] = [1, 3, 5, 7, 4]
+## THREE SWINGS FELL A TREE, whatever its size (Lemon 2026-09-14: "the full
+## tree should take 3 hits with the axe"); a sapling is one. Was [1,3,5,7,4].
+const TRUNK_CHOPS: Array[int] = [1, 3, 3, 3, 3]
 ## Stage -> trunk radius in metres, for the collider and the fallen log
 const TRUNK_R: Array[float] = [0.03, 0.10, 0.30, 0.46, 0.30]
 const TRUNK_H: Array[float] = [1.1, 3.6, 8.2, 11.0, 8.0]
@@ -735,6 +737,9 @@ func _carve_notch() -> void:
 	## and paints heartwood, so the cut face stops wearing bark.
 	var cols := PackedColorArray()
 	cols.resize(verts.size())
+	var moved := PackedByteArray()
+	moved.resize(verts.size())
+	moved.fill(0)
 	## White = untouched bark. The bark shader reads (1 - COLOR.r), so anything
 	## without a colour array (every branch mesh) correctly reads as no cut.
 	for i in range(cols.size()):
@@ -768,15 +773,44 @@ func _carve_notch() -> void:
 		var cut: float = notch_depth * fy * fa
 		var nr: float = maxf(r - cut, 0.012)
 		verts[i] = Vector3(c.x + rel.x / r * nr, v.y, c.z + rel.z / r * nr)
-		## Anything the axe actually moved is exposed wood. Scale by the bite so
-		## the shallow edges of the wedge are half-bark, the middle is bare.
+		## Anything the axe actually moved is exposed wood -- ALL the way. No
+		## "half-bark" at the wedge's edges (Lemon 2026-09-14: "each part of the
+		## tree either is untouched or hit ... no more gradients between bark
+		## and not bark"); the shader steps on this, it does not blend.
 		if cut > 0.004:
-			var bare: float = 1.0 - clampf(cut / maxf(notch_depth, 0.001), 0.0, 1.0)
-			cols[i] = Color(bare, bare, bare, 1)
+			cols[i] = Color(0, 0, 0, 1)
+			moved[i] = 1
 
 	var arrays := _trunk_arrays.duplicate()
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_COLOR] = cols
+	## The cut is LIT as a cut: every vertex the axe moved gets its normal
+	## rebuilt from the faces it now sits on, instead of keeping the round
+	## trunk's outward normal and shading the notch as if it were still bark.
+	## Godot's front faces are clockwise, so a face's normal is -(b-a)x(c-a).
+	if _trunk_arrays[Mesh.ARRAY_NORMAL] is PackedVector3Array:
+		var nrm := PackedVector3Array(_trunk_arrays[Mesh.ARRAY_NORMAL])
+		var idx: PackedInt32Array = _trunk_arrays[Mesh.ARRAY_INDEX]
+		if nrm.size() == verts.size() and not idx.is_empty():
+			var acc := PackedVector3Array()
+			acc.resize(verts.size())
+			acc.fill(Vector3.ZERO)
+			var t := 0
+			while t + 2 < idx.size():
+				var ia := idx[t]
+				var ib := idx[t + 1]
+				var ic := idx[t + 2]
+				t += 3
+				if moved[ia] == 0 and moved[ib] == 0 and moved[ic] == 0:
+					continue
+				var fn := -(verts[ib] - verts[ia]).cross(verts[ic] - verts[ia])
+				acc[ia] = acc[ia] + fn
+				acc[ib] = acc[ib] + fn
+				acc[ic] = acc[ic] + fn
+			for i in range(verts.size()):
+				if moved[i] == 1 and acc[i].length_squared() > 1e-12:
+					nrm[i] = acc[i].normalized()
+			arrays[Mesh.ARRAY_NORMAL] = nrm
 	var am := ArrayMesh.new()
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	## keep every other surface (sapling twigs) exactly as it was

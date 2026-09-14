@@ -72,7 +72,7 @@ const SP := {
 		"heights": [1.1, 3.6, 8.2, 11.0, 8.0],
 		"radii": [0.030, 0.105, 0.31, 0.47, 0.31],
 		"elev": 50.0, "blen": 0.44, "n_bough": [0, 5, 12, 16, 11],
-		"bark": "plate", "bark_amp": 0.030, "bark_v": 2.6,
+		"bark": "plate", "bark_amp": 0.052, "bark_v": 1.9,
 		"leaf": "maple", "leaf_mult": 1.50, "leaf_size": [0.20, 0.29], "leaf_droop": 0.36,
 		"cluster": [2, 3], "cross": false, "sides": [20, 8, 5, 3],
 	},
@@ -81,7 +81,7 @@ const SP := {
 		"heights": [1.0, 4.2, 10.0, 13.5, 9.5],
 		"radii": [0.022, 0.075, 0.20, 0.29, 0.20],
 		"elev": 34.0, "blen": 0.30, "n_bough": [0, 6, 14, 18, 12],
-		"bark": "paper", "bark_amp": 0.012, "bark_v": 5.5,
+		"bark": "paper", "bark_amp": 0.020, "bark_v": 4.0,
 		"leaf": "birch", "leaf_mult": 1.90, "leaf_size": [0.15, 0.22], "leaf_droop": 0.60,
 		"cluster": [2, 4], "cross": false, "sides": [18, 8, 5, 3],
 	},
@@ -90,7 +90,7 @@ const SP := {
 		"heights": [1.0, 3.2, 7.6, 10.5, 7.6],
 		"radii": [0.032, 0.125, 0.39, 0.58, 0.39],
 		"elev": 70.0, "blen": 0.50, "n_bough": [0, 5, 11, 14, 10],
-		"bark": "fissure", "bark_amp": 0.040, "bark_v": 2.1,
+		"bark": "fissure", "bark_amp": 0.068, "bark_v": 1.5,
 		"leaf": "oak", "leaf_mult": 0.85, "leaf_size": [0.21, 0.30], "leaf_droop": 0.32,
 		"cluster": [2, 3], "cross": false, "sides": [18, 8, 5, 3],
 	},
@@ -100,7 +100,7 @@ const SP := {
 		"radii": [0.022, 0.085, 0.27, 0.43, 0.27],
 		"elev": 84.0, "blen": 0.30, "n_bough": [0, 10, 25, 30, 20],
 		"per_whorl": 5, "whorl_gap": 0.92,
-		"bark": "jigsaw", "bark_amp": 0.034, "bark_v": 1.5,
+		"bark": "jigsaw", "bark_amp": 0.058, "bark_v": 1.1,
 		"leaf": "pine", "leaf_mult": 2.20, "leaf_size": [0.26, 0.36], "leaf_droop": 0.08,
 		"cluster": [2, 3], "cross": false, "sides": [20, 7, 4, 3],
 	},
@@ -110,7 +110,7 @@ const SP := {
 		"radii": [0.020, 0.070, 0.21, 0.31, 0.21],
 		"elev": 78.0, "blen": 0.36, "n_bough": [0, 16, 32, 40, 24],
 		"per_whorl": 8, "whorl_gap": 0.94,
-		"bark": "smooth", "bark_amp": 0.010, "bark_v": 3.0,
+		"bark": "smooth", "bark_amp": 0.018, "bark_v": 2.2,
 		"leaf": "fir", "leaf_mult": 2.60, "leaf_size": [0.19, 0.27], "leaf_droop": 0.24,
 		"cluster": [2, 3], "cross": false, "sides": [16, 7, 4, 3],
 	},
@@ -119,7 +119,9 @@ const SP := {
 ## Deadwood: a snag stops looking like an oak or a maple within a season, so
 ## every species shares one relief — silvered, split wide open, bark gone in
 ## patches. Same reasoning as the shared deadwood bark set in trees-v2 §24.
-const DEAD_BARK := {"bark": "split", "bark_amp": 0.046, "bark_v": 1.8}
+## CHUNKIER (Lemon 2026-09-14): relief ~1.7x deeper and plates taller
+## (bark_v lower) across every species; the clamp in _tube still caps it.
+const DEAD_BARK := {"bark": "split", "bark_amp": 0.075, "bark_v": 1.3}
 
 
 # ===========================================================================

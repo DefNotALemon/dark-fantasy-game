@@ -426,6 +426,7 @@ func _process(_delta: float) -> bool:
 	if _frames < 3:
 		return false
 	_test_audio()
+	_test_three_hits()
 	_test_sword_limbs()
 	_test_trunk()
 	_finish()
@@ -466,6 +467,58 @@ func _log_items() -> Array:
 		if di != null and String(di.item.get("name", "")) == "Log":
 			out.append(di)
 	return out
+
+
+func _test_three_hits() -> void:
+	## three swings fell any tree; a limb is one; the notch is bark OR wood
+	ok(TreeBranch.MAX_HP == 1, "a limb is one cut (MAX_HP %d)" % TreeBranch.MAX_HP)
+	for st in range(1, 5):
+		ok(TreeV2.TRUNK_CHOPS[st] == 3, "stage %d trunk is three swings (%d)" % [st, TreeV2.TRUNK_CHOPS[st]])
+	var t := TreeV2.new()
+	t.species = "pine"
+	t.stage = 3
+	t.tree_seed = 5
+	t.position = Vector3(120, 0, 0)
+	_world.add_child(t)
+	var swings := 0
+	var felled := false
+	while not felled and swings < 10:
+		if swings == 0:
+			## the first bite: look at the colours and normals it left
+			t.chop_hit(Vector3(0, 0, 1))
+			swings += 1
+			var arr := t._trunk.mesh.surface_get_arrays(0)
+			var cols: PackedColorArray = arr[Mesh.ARRAY_COLOR]
+			var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var n: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+			var pristine: PackedVector3Array = t._trunk_arrays[Mesh.ARRAY_NORMAL]
+			var bare := 0
+			var between := 0
+			var turned := 0
+			var untouched_moved := 0
+			for i in range(cols.size()):
+				if cols[i].r < 0.001:
+					bare += 1
+					## a cut vertex's normal was rebuilt from the carved faces
+					if n[i].angle_to(pristine[i]) > 0.03:
+						turned += 1
+				else:
+					if cols[i].r < 0.999:
+						between += 1
+					## (surface_get_arrays hands back octahedral-compressed normals,
+					## so "unchanged" is within a degree)
+					if n[i].angle_to(pristine[i]) > 0.02:
+						untouched_moved += 1
+			ok(bare > 0, "the first bite bares wood (%d verts)" % bare)
+			ok(between == 0, "and nothing is half-bark: every vertex is bark OR cut (%d in between)" % between)
+			ok(turned > bare / 2, "cut vertices are lit as a cut: normals rebuilt (%d of %d turned)" % [turned, bare])
+			ok(untouched_moved == 0, "bark the axe did not touch keeps its normal (%d changed)" % untouched_moved)
+			ok(v.size() == pristine.size(), "same vertices as the pristine trunk")
+			felled = t.felled
+			continue
+		felled = t.chop_hit(Vector3(0, 0, 1))
+		swings += 1
+	ok(felled and swings == 3, "an ancient pine goes over on the third swing (%d)" % swings)
 
 
 func _count_sticks() -> int:
@@ -509,7 +562,7 @@ func _test_sword_limbs() -> void:
 			while not off and swings < 5:
 				off = limb.take_hit(1)
 				swings += 1
-			ok(off and swings <= 3, "one to three sword cuts take a standing limb (%d)" % swings)
+			ok(off and swings == 1, "ONE sword cut takes a standing limb (%d)" % swings)
 			ok(limb.gone and _count_sticks() > sticks0, "and it is gone, with sticks on the ground (+%d)"
 				% (_count_sticks() - sticks0))
 			ok(t.branch_on_ray(from, dir, 8.0).is_empty() or (t.branch_on_ray(from, dir, 8.0)[0] as TreeBranch) != limb,
