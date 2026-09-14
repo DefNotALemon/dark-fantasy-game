@@ -38,6 +38,7 @@ extends Node3D
 
 const MAX_SEG := 128
 const SHADER_PATH := "res://shaders/psx_skin.gdshader"
+const OUTLINE_SHADER_PATH := "res://shaders/psx_outline.gdshader"   ## the creator's selection rim
 const RAGDOLL_LAYER := 8          ## bit 8 (value 128): corpses and the knocked-down
 const KNOCK_SPEED := 3.4          ## m/s of shove that puts something on the ground
 const KNOCK_MASS_RATIO := 1.45    ## and the shover must outweigh it by this much
@@ -47,6 +48,8 @@ const CORPSE_FADE := 1.6
 const GETUP_BLEND := 0.45
 
 static var _shader: Shader = null
+static var _outline_shader: Shader = null
+var _outline: MeshInstance3D = null    ## the inverted-hull rim (set_outline)
 static var enabled := true        ## debug switch: false leaves the boxes as they are
 static var _blend_lock := false
 
@@ -616,6 +619,43 @@ func _sync_segments(force: bool) -> void:
 func set_flash(amount: float) -> void:
 	if mat:
 		mat.set_shader_parameter("flash", amount)
+
+
+func set_outline(on: bool, col := Color(1, 1, 1), width := 0.035) -> void:
+	## The selection rim (Lemon, 2026-09-14: "click on any character which
+	## will outline them with white"): the skin's own skinned mesh drawn a
+	## second time as an inverted hull (shaders/psx_outline.gdshader), so it
+	## follows every bone and skips every hidden segment. Built lazily, kept
+	## hidden when off; the Character Creator is the only caller today.
+	if skeleton == null or mesh_inst == null:
+		return
+	if not on:
+		if _outline != null and is_instance_valid(_outline):
+			_outline.visible = false
+		return
+	if _outline == null or not is_instance_valid(_outline):
+		if _outline_shader == null:
+			_outline_shader = load(OUTLINE_SHADER_PATH)
+		_outline = MeshInstance3D.new()
+		_outline.name = "Outline"
+		_outline.mesh = mesh_inst.mesh
+		skeleton.add_child(_outline)
+		_outline.skeleton = _outline.get_path_to(skeleton)
+		_outline.skin = mesh_inst.skin
+		_outline.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var om := ShaderMaterial.new()
+		om.shader = _outline_shader
+		om.set_shader_parameter("seg_tex", _seg_tex)
+		_outline.material_override = om
+	var m := _outline.material_override as ShaderMaterial
+	if m != null:
+		m.set_shader_parameter("colour", col)
+		m.set_shader_parameter("width", width)
+	_outline.visible = true
+
+
+func outline_on() -> bool:
+	return _outline != null and is_instance_valid(_outline) and _outline.visible
 
 
 func segment_count() -> int:

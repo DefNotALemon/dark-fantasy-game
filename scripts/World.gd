@@ -89,6 +89,7 @@ var _crofts: Crofts                   ## [crofts] and who lives out between them
 var _carcasses: Carcasses            ## [carcasses] and what the woods do with a kill
 var _warbands: Warbands              ## [warbands] and who holds the ground it happens on
 var _slimes: SlimeDirector           ## [slimes] the jellies on the surface (scripts/SlimeDirector.gd)
+var _monsters: MonsterDirector       ## [mobgen] generated monsters on the surface (scripts/MonsterDirector.gd)
 var _water_audio: WaterAudio = null  ## [water] shores, strokes, the muffle under
 var _step_audio: StepAudio = null    ## [steps] the ground under your feet
 var _drowned: Node3D = null          ## [water] the thing that has the swimmer, if any
@@ -1702,6 +1703,16 @@ func _build_wildlife() -> void:
 	_slimes.name = "SlimeDirector"
 	add_child(_slimes)
 	_slimes.bind_world(self)
+	## [mobgen] the generated monsters up top (scripts/MonsterDirector.gd):
+	## one roster per zone, one newcomer per level tier.
+	_monsters = MonsterDirector.new()
+	_monsters.name = "MonsterDirector"
+	add_child(_monsters)
+	_monsters.bind_world(self)
+
+
+func monsters() -> MonsterDirector:
+	return _monsters
 
 
 func slimes() -> SlimeDirector:

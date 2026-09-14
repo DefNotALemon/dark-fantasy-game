@@ -385,6 +385,7 @@ func _physics_process(delta: float) -> void:
 				if mto.length() <= attack_range + 0.4 and mp.has_method("take_damage") and _can_hit(mp) \
 						and not _target_down(mp):
 					mp.take_damage(attack_damage, global_position, false, Vector3.INF, self)
+					_on_hit_landed(mp)
 				## The swing doesn't care whose ribs it finds: any OTHER
 				## creature in the arc catches it too — and grudges are born
 				## there (see take_damage's infighting hook).
@@ -832,6 +833,13 @@ func _animate(_delta: float) -> void:
 	pass
 
 
+func _on_hit_landed(_target: Node) -> void:
+	## Virtual: a melee or strong hit just landed on `_target` (the player,
+	## or another creature). Generated monsters put their touch — burn,
+	## poison, chill, shock, tar — on you here (scripts/Monster.gd).
+	pass
+
+
 func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> void:
 	strong_cd = maxf(0.0, strong_cd - delta)
 	attack_cd = maxf(0.0, attack_cd - delta)
@@ -888,6 +896,7 @@ func _do_combat(delta: float, player: Node3D, to_p: Vector3, dist: float) -> voi
 						strong_dir = (strong_dir + Vector3(-strong_dir.z, 0.0, strong_dir.x) \
 							* (-_throw_side) * 0.30).normalized()
 				player.take_damage(strong_damage, global_position, strong_breaks_guard, throw, self)
+				_on_hit_landed(player)
 		if strong_time <= 0.0:
 			strong_active = false
 			strong_cd = strong_cooldown

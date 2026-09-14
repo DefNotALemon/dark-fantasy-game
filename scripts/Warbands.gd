@@ -1191,8 +1191,13 @@ func _spawn_band(id: String, c: Dictionary, at: Vector2) -> void:
 	if not (holder is Node3D) or not is_instance_valid(holder as Node3D):
 		return
 	var base := Vector3(at.x, _ground_y(at), at.y)
+	## The band's fighters are GENERATED raiders now (Lemon, 2026-09-14):
+	## one armed biped species per band cell (MonsterGen.raider), at the
+	## player's level tier. Goblin.gd stays in the repo; it just no longer
+	## spawns.
+	var raider_g := MonsterGen.raider(world_seed, int(c["cell"]), _player_tier())
 	for i in range(n):
-		var g := Goblin.new()
+		var g := Monster.from(raider_g)
 		var h := _hash(world_seed, int(c["cell"]) * 31 + i, SALT_BODY)
 		var ang := _unit(h, 1) * TAU
 		var rad := 1.2 + _unit(h, 2) * 2.6
@@ -1226,6 +1231,14 @@ func _reap() -> void:
 		_counted[sid] = seen
 		if int(st["strength"]) <= 0 and bool(st["held"]):
 			clear_camp(sid)
+
+
+func _player_tier() -> int:
+	var pl: Node = get_tree().get_first_node_in_group("player") if is_inside_tree() else null
+	var lvl := 1
+	if pl != null and "level" in pl:
+		lvl = maxi(int(pl.get("level")), 1)
+	return MonsterGen.tier_for_level(lvl)
 
 
 func _ground_y(flat: Vector2) -> float:

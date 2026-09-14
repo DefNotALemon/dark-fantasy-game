@@ -105,6 +105,7 @@ var god_boost := false         ## SPACE toggle in god mode -- sticky, not held
 var _space_boost_flip := false ## the first tap of a double tap flipped it
 var godmode: GodEditor = null
 var grass_lab: GrassLab = null   ## F3 -- the grass lab (scripts/GrassLab.gd)
+var creator: CharacterCreator = null  ## Settings -> Dev Toolkit (scripts/CharacterCreator.gd)
 var claude_chat: ClaudeChat = null   ## F4 -- Claude, riding along (scripts/ClaudeChat.gd)
 var pad: Node = null             ## the gamepad translator (scripts/Pad.gd)
 var _space_tap_ms := 0
@@ -1424,6 +1425,11 @@ func _build_hud() -> void:
 	## The grass lab builds itself too (scripts/GrassLab.gd) -- F3 opens it.
 	grass_lab = GrassLab.new()
 	hud_layer.add_child(grass_lab)
+	## The character creator / dev toolkit (scripts/CharacterCreator.gd):
+	## Settings -> Dev Toolkit -> Character Creator opens it as menu "creator".
+	creator = CharacterCreator.new()
+	creator.player = self
+	hud_layer.add_child(creator)
 	## Claude rides along too (scripts/ClaudeChat.gd) -- F4 opens the chat.
 	claude_chat = ClaudeChat.new()
 	hud_layer.add_child(claude_chat)
@@ -1558,6 +1564,10 @@ func _input(event: InputEvent) -> void:
 	## THE CLAUDE CARD (F4) owns the keyboard while it is up -- a typed M
 	## must never open the map. Esc and F4 fall through to close/toggle it.
 	if claude_chat != null and claude_chat.eat_input(event):
+		return
+	## THE CREATOR owns a left click in the world while it is up: the click
+	## selects the character under the cursor (scripts/CharacterCreator.gd).
+	if creator != null and menu_open == "creator" and creator.eat_input(event):
 		return
 	if god and menu_open == "" and event is InputEventMouseButton \
 			and (godmode == null or not godmode.visible):
@@ -6169,6 +6179,8 @@ func _show_menu_panels(which: String) -> void:
 		map_panel.visible = which == "map"
 	if grass_lab:
 		grass_lab.visible = which == "grass"
+	if creator:
+		creator.visible = which == "creator"
 	if claude_chat:
 		claude_chat.visible = which == "claude"
 	if which == "sky" and sky_panel:
@@ -6376,8 +6388,11 @@ func _spawn_types() -> Array:
 	## The M menu offers both kinds of horse; the bestiary doesn't need to.
 	return [
 		["Villager", NPC],  ## a person (scripts/NPC.gd)
-		["Boar", Boar], ["Kobold", Kobold], ["Goblin", Goblin], ["Skeleton", Skeleton],
-		["Orc", Orc], ["Ogre", Ogre], ["Dark Knight", DarkKnight],
+		## The hand-made humanoids (Kobold, Goblin, Skeleton, Orc, Ogre, Dark
+		## Knight) no longer spawn (Lemon, 2026-09-14) -- the generator does.
+		## Their scripts stay for the bestiary.
+		["Monster (rolled for here)", Monster],
+		["Boar", Boar],
 		["Horse (wild)", Horse], ["Horse (saddled)", SaddledHorse],
 	]
 
@@ -6644,6 +6659,9 @@ func _call_meteor() -> void:
 
 
 func _spawn_mob(mob_script: Variant) -> void:
+	if mob_script == Monster:
+		_spawn_generated_monster()
+		return
 	var fwd := -transform.basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized()
@@ -6662,6 +6680,37 @@ func _spawn_mob(mob_script: Variant) -> void:
 					   ## circles and won't aggro until you hit them
 	get_parent().add_child(e)
 	e.global_position = pos
+
+
+func _spawn_generated_monster() -> void:
+	## One of the species MonsterGen rolls for THIS zone at THIS level
+	## (scripts/MonsterGen.gd) -- the same roll the MonsterDirector makes.
+	var fwd := -transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var pos := global_position + fwd * 3.0
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 3.0, pos + Vector3.DOWN * 30.0)
+	q.exclude = [get_rid()]
+	var hit: Dictionary = space.intersect_ray(q)
+	if hit:
+		pos = hit.position + Vector3.UP * 0.2
+	else:
+		pos.y = global_position.y + 0.5
+	var wseed := MonsterDirector.DEFAULT_SEED
+	var w := get_parent()
+	if w != null and w.has_method("monsters") and w.call("monsters") != null:
+		wseed = int((w.call("monsters") as MonsterDirector).world_seed)
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var g := MonsterGen.for_spot(wseed, global_position, level, rng)
+	if g.is_empty():
+		return
+	var m := Monster.from(g)
+	m.confused = true
+	get_parent().add_child(m)
+	m.global_position = pos
+	_add_log_msg("%s -- %s" % [m.display_name, MonsterGen.describe(g)], Color(0.85, 0.80, 0.70))
 
 
 ## ========================= The Item Wheel (Q) ==============================
@@ -6989,6 +7038,29 @@ func _build_settings_menu() -> void:
 	cloud_note.add_theme_font_size_override("font_size", 13)
 	cloud_note.modulate = Color(1, 1, 1, 0.55)
 	vb.add_child(cloud_note)
+	## THE DEV TOOLKIT (Lemon, 2026-09-14): the character creator is a full
+	## screen of its own, and it carries this whole menu inside it as a tab.
+	vb.add_child(HSeparator.new())
+	var tk_row := HBoxContainer.new()
+	tk_row.add_theme_constant_override("separation", 8)
+	vb.add_child(tk_row)
+	var tk_lbl := Label.new()
+	tk_lbl.text = "Dev Toolkit"
+	tk_lbl.custom_minimum_size = Vector2(190, 0)
+	tk_lbl.add_theme_font_size_override("font_size", 17)
+	tk_row.add_child(tk_lbl)
+	var tk_btn := Button.new()
+	tk_btn.text = "Character Creator"
+	tk_btn.focus_mode = Control.FOCUS_NONE
+	tk_btn.custom_minimum_size = Vector2(160, 0)
+	tk_btn.pressed.connect(func() -> void: _toggle_menu("creator"))
+	tk_row.add_child(tk_btn)
+	var tk_note := Label.new()
+	tk_note.text = "People and monsters: click any character in the world to select it (white outline),\nedit its body, face, clothes and mind live; roll, spawn and save generated species."
+	tk_note.add_theme_font_size_override("font_size", 13)
+	tk_note.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(tk_note)
+	vb.add_child(HSeparator.new())
 	_settings_step_row(vb, "Mouse Sensitivity", "sens")
 	_settings_step_row(vb, "Field of View", "fov")
 

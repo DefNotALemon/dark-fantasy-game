@@ -534,7 +534,11 @@ func _spawn_pack(center: Vector3, cls: Variant, count: int) -> void:
 
 func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 	## Packs at reachable pockets; deeper = meaner; the deepest big pocket is
-	## the champion's court (same tables as caves v1 — see CONTEXT.md).
+	## the champion's court. The dwellers are GENERATED (Lemon, 2026-09-14 --
+	## scripts/MonsterGen.gd): this cave rolls its own bestiary, one roster
+	## per depth band (MonsterGen.cave_key), at the player's level tier
+	## pushed one up in the middle galleries and two in the deep. The slime
+	## pockets stay as they were.
 	## avoid_mouth = the NO-SPAWN BARRIER: nothing spawns near permanent caves.
 	var pockets := _pick_spots(reach, 13, -30.0, -5.0, 17.0, CaveField.PERM_R + 2.0)
 	if pockets.is_empty():
@@ -543,15 +547,14 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 	for i in range(pockets.size()):
 		var c := pockets[i]
 		if i == pockets.size() - 1 and pockets.size() >= 2:
-			_spawn_pack(c, DarkKnight, 1)
-			_spawn_pack(c, Orc, _rng.randi_range(2, 3))
+			## the champion: the deep band's meanest, alone, with a guard of the shallow kind
+			_spawn_gen(c, _gen_pick(c.y, true), 1)
+			_spawn_gen(c, _gen_pick(-6.0, false), _rng.randi_range(2, 3))
 			continue
 		var roll := _rng.randf()
 		if c.y > -12.0:
-			if roll < 0.45:
-				_spawn_pack(c, Kobold, _rng.randi_range(6, 10))
-			elif roll < 0.72:
-				_spawn_pack(c, Goblin, _rng.randi_range(3, 6))
+			if roll < 0.72:
+				_spawn_gen(c, _gen_pick(c.y, false), _rng.randi_range(3, 6))
 			else:
 				## [slimes] the shallow jellies: a green pocket, sometimes with
 				## a jolt or two skittering among them
@@ -559,40 +562,62 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 				if _rng.randf() < 0.5:
 					_spawn_pack(c, SlimeYellow, _rng.randi_range(1, 2))
 		elif c.y > -21.0:
-			if roll < 0.35:
-				_spawn_pack(c, Goblin, _rng.randi_range(3, 6))
-			elif roll < 0.70:
-				_spawn_pack(c, Skeleton, _rng.randi_range(4, 7))
-			elif roll < 0.85:
-				_spawn_pack(c, Ogre, _rng.randi_range(1, 2))
+			if roll < 0.85:
+				_spawn_gen(c, _gen_pick(c.y, false), _rng.randi_range(2, 5))
 			else:
 				## [slimes] the venom creeps in the middle galleries
 				_spawn_pack(c, SlimePurple, _rng.randi_range(2, 3))
 		else:
-			if roll < 0.35:
-				_spawn_pack(c, Skeleton, _rng.randi_range(4, 7))
-			elif roll < 0.65:
-				_spawn_pack(c, Orc, _rng.randi_range(2, 4))
-			elif roll < 0.85:
-				_spawn_pack(c, Ogre, _rng.randi_range(1, 2))
+			if roll < 0.85:
+				_spawn_gen(c, _gen_pick(c.y, false), _rng.randi_range(2, 4))
 			else:
-				## [slimes] the deeps burn ember — and one tar sits in the dark
+				## [slimes] the deeps burn ember -- and one tar sits in the dark
 				_spawn_pack(c, SlimeRed, _rng.randi_range(2, 4))
 				if _rng.randf() < 0.5:
 					_spawn_pack(c, SlimeBlack, 1)
-	## THE DEEP IS FULLER: an extra belt of mean packs below -20 — the wide
+	## THE DEEP IS FULLER: an extra belt of mean packs below -20 -- the wide
 	## deep galleries deserve their garrisons.
 	for c in _pick_spots(reach, 9, -36.0, -20.0, 14.0, CaveField.PERM_R + 2.0):
-		var roll := _rng.randf()
-		if roll < 0.35:
-			_spawn_pack(c, Skeleton, _rng.randi_range(5, 8))
-		elif roll < 0.7:
-			_spawn_pack(c, Orc, _rng.randi_range(3, 5))
-		elif roll < 0.92:
-			_spawn_pack(c, Ogre, _rng.randi_range(1, 3))
-		else:
-			_spawn_pack(c, DarkKnight, 1)
-			_spawn_pack(c, Orc, 2)
+		_spawn_gen(c, _gen_pick(c.y, _rng.randf() < 0.1), _rng.randi_range(2, 5))
+
+
+func _player_tier() -> int:
+	var pl: Node = get_tree().get_first_node_in_group("player") if is_inside_tree() else null
+	var lvl := 1
+	if pl != null and "level" in pl:
+		lvl = maxi(int(pl.get("level")), 1)
+	return MonsterGen.tier_for_level(lvl)
+
+
+func _gen_pick(depth_y: float, apex: bool) -> Dictionary:
+	## A species from this cave's roster for the depth band. `apex` takes the
+	## roster's meanest (largest) instead of a weighted roll.
+	var key := MonsterGen.cave_key(global_position, depth_y)
+	var tier := MonsterGen.band_tier(key, _player_tier())
+	var wseed := int(cave_seed)
+	if apex:
+		var best := {}
+		for g in MonsterGen.roster(wseed, key, tier):
+			if best.is_empty() or float((g as Dictionary).get("hp", 0.0)) > float(best.get("hp", 0.0)):
+				best = g
+		return best
+	return MonsterGen.pick(wseed, key, tier, _rng)
+
+
+func _spawn_gen(center: Vector3, genome: Dictionary, count: int) -> void:
+	## _spawn_pack for a generated species: the same ring, the same rock
+	## check, the same PEACEFUL halving.
+	if genome.is_empty():
+		return
+	for _i in range(GameMode.pack_count(count)):
+		var e := Monster.from(genome)
+		_content_root.add_child(e)
+		var a := _rng.randf() * TAU
+		var r := _rng.randf_range(0.5, 3.2)
+		var pos := center + Vector3(cos(a) * r, 1.2, sin(a) * r)
+		if field.is_rock(pos) or field.is_rock(pos + Vector3.UP * 0.6):
+			pos = center + Vector3(0, 1.2, 0)
+		e.global_position = pos
 
 
 func _crystal(pos: Vector3, with_light: bool, parent: Node3D = null) -> void:

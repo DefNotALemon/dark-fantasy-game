@@ -50,6 +50,7 @@ var grudge := false               ## struck by the player, ever (saved)
 var avoid_day := -1               ## keeps its distance from the player this day
 var record_id := ""               ## NPCDirector record key ("" = unadopted)
 var dialogue: Dictionary = {}     ## an authored talk tree; empty = NPCDialogue.default_tree
+var look: Dictionary = {}         ## the Character Creator's knobs (default_look / random_look)
 
 ## ---------------------------------------------------------- places --------
 var anchor := Vector3.ZERO        ## where it belongs (set on spawn)
@@ -214,6 +215,8 @@ func _ready() -> void:
 		schedule = default_schedule(job)
 	if anchor == Vector3.ZERO:
 		anchor = global_position
+	if look.is_empty():
+		look = default_look(npc_name, sex, job)
 	super()
 	add_to_group("npcs")
 	_idle_next = randf_range(4.0, 9.0)
@@ -242,14 +245,29 @@ func _process(_delta: float) -> void:
 ## ============================================================ the body ====
 
 func _build_body() -> void:
-	## The player's third-person body, box for box, plus elbows and knees.
-	## Everything is a BoxMesh + StandardMaterial3D under a Node3D pivot, which
-	## is exactly what CreatureSkin bakes.
-	_add_collision(Vector3(0.62, 1.78, 0.56), Vector3(0, 0.89, 0))
+	## The player's third-person body, box for box, plus elbows and knees —
+	## now PARAMETERISED by `look` (the Character Creator's knobs, 2026-09-14):
+	## height / bulk / limb / head scale the rig, the colours are the
+	## person's own, and hair, beard and hat are picked, not hashed.
+	## Everything is a BoxMesh + StandardMaterial3D under a Node3D pivot,
+	## which is exactly what CreatureSkin bakes.
+	if look.is_empty():
+		look = default_look(npc_name, sex, job)
+	var H := clampf(float(look.get("height", 1.0)), 0.6, 1.6)      ## whole-body height
+	var B := clampf(float(look.get("bulk", 1.0)), 0.6, 1.6)        ## widths
+	var LB := clampf(float(look.get("limb", 1.0)), 0.7, 1.4)       ## limb length
+	var HS := clampf(float(look.get("head", 1.0)), 0.7, 1.4)       ## head size
+	var skin_c: Color = look.get("skin", SKIN_COL)
+	var hair: Color = look.get("hair_col", HAIR_COLS[0])
 	var cloth: Array = JOB_CLOTH.get(job, JOB_CLOTH["villager"])
-	var tunic: Color = cloth[0]
-	var breeches: Color = cloth[1]
-	var hair: Color = HAIR_COLS[absi(hash(npc_name)) % HAIR_COLS.size()]
+	var tunic: Color = look.get("tunic", cloth[0])
+	var breeches: Color = look.get("breeches", cloth[1])
+	var hair_style := str(look.get("hair", "short"))
+	var beard := str(look.get("beard", "none"))
+	var hat := str(look.get("hat", "job"))
+	if hat == "job":
+		hat = _job_hat(job)
+	_add_collision(Vector3(0.62 * B, 1.78 * H, 0.56 * B), Vector3(0, 0.89 * H, 0))
 	base_body_color = tunic
 
 	rig = Node3D.new()
@@ -258,20 +276,22 @@ func _build_body() -> void:
 	loco_root = rig
 
 	## Legs: hip pivot -> thigh -> knee pivot -> shin + foot. Hips at the
-	## player's (±0.14, 0.74); the foot's sole lands on y = 0.
+	## player's (±0.14, 0.74) scaled; the foot's sole lands on y = 0.
+	var leg := H * LB
+	var hip_y := 0.74 * leg
 	for i in range(2):
 		var side := -1.0 if i == 0 else 1.0
 		var hip := Node3D.new()
 		hip.name = "HipL" if i == 0 else "HipR"
 		rig.add_child(hip)
-		hip.position = Vector3(0.14 * side, 0.74, 0.0)
-		_box_in(hip, Vector3(0.18, 0.40, 0.22), breeches, Vector3(0, -0.20, 0))
+		hip.position = Vector3(0.14 * side * B, hip_y, 0.0)
+		_box_in(hip, Vector3(0.18 * B, 0.40 * leg, 0.22 * B), breeches, Vector3(0, -0.20 * leg, 0))
 		var knee := Node3D.new()
 		knee.name = "KneeL" if i == 0 else "KneeR"
 		hip.add_child(knee)
-		knee.position = Vector3(0, -0.40, 0)
-		_box_in(knee, Vector3(0.17, 0.34, 0.21), breeches, Vector3(0, -0.17, 0))
-		_box_in(knee, Vector3(0.20, 0.12, 0.34), FOOT_COL, Vector3(0, -0.28, -0.05))
+		knee.position = Vector3(0, -0.40 * leg, 0)
+		_box_in(knee, Vector3(0.17 * B, 0.34 * leg, 0.21 * B), breeches, Vector3(0, -0.17 * leg, 0))
+		_box_in(knee, Vector3(0.20 * B, 0.12 * leg, 0.34), FOOT_COL, Vector3(0, -0.28 * leg, -0.05))
 		walk_legs.append(hip)
 		if i == 0:
 			hip_l = hip
@@ -282,37 +302,38 @@ func _build_body() -> void:
 
 	## Pelvis on the rig; everything above the waist on the spine so the
 	## upper body can lean and twist without the legs coming along.
-	_box_in(rig, Vector3(0.38, 0.22, 0.24), breeches, Vector3(0, 0.72, 0))
+	_box_in(rig, Vector3(0.38 * B, 0.22 * H, 0.24 * B), breeches, Vector3(0, hip_y - 0.02 * H, 0))
 	spine = Node3D.new()
 	spine.name = "Spine"
 	rig.add_child(spine)
-	spine.position = Vector3(0, 0.83, 0)
-	var torso := _box_in(spine, Vector3(0.44, 0.62, 0.26), tunic, Vector3(0, 0.22, 0))
+	spine.position = Vector3(0, hip_y + 0.09 * H, 0)
+	var torso := _box_in(spine, Vector3(0.44 * B, 0.62 * H, 0.26 * B), tunic, Vector3(0, 0.22 * H, 0))
 	body_mat = torso.material_override as StandardMaterial3D
 	if sex == "f":
 		## a long skirt over the breeches
-		_box_in(rig, Vector3(0.42, 0.50, 0.28), tunic.darkened(0.12), Vector3(0, 0.44, 0))
+		_box_in(rig, Vector3(0.42 * B, 0.50 * leg, 0.28 * B), tunic.darkened(0.12), Vector3(0, hip_y - 0.30 * leg, 0))
 	if job == "guard":
-		_box_in(spine, Vector3(0.46, 0.50, 0.28), Color(0.55, 0.16, 0.14), Vector3(0, 0.20, 0.0))  ## tabard
+		_box_in(spine, Vector3(0.46 * B, 0.50 * H, 0.28 * B), Color(0.55, 0.16, 0.14), Vector3(0, 0.20 * H, 0.0))  ## tabard
 	elif job == "priest":
-		_box_in(rig, Vector3(0.46, 0.66, 0.30), tunic, Vector3(0, 0.36, 0))  ## the robe
+		_box_in(rig, Vector3(0.46 * B, 0.66 * H, 0.30 * B), tunic, Vector3(0, hip_y - 0.38 * leg + 0.66 * H * 0.5 - 0.1 * H, 0))  ## the robe
 
 	## Arms: shoulder pivot -> upper arm -> elbow pivot -> forearm + hand.
 	## Shoulders at the player's (±0.26, 1.30) => spine-local y 0.47; the hand
 	## ends at the player's -0.50.
+	var arm := H * LB
 	for i in range(2):
 		var side := -1.0 if i == 0 else 1.0
 		var sh := Node3D.new()
 		sh.name = "ShoulderL" if i == 0 else "ShoulderR"
 		spine.add_child(sh)
-		sh.position = Vector3(0.26 * side, 0.47, 0.0)
-		_box_in(sh, Vector3(0.14, 0.24, 0.15), tunic, Vector3(0, -0.12, 0))
+		sh.position = Vector3(0.26 * side * B, 0.47 * H, 0.0)
+		_box_in(sh, Vector3(0.14 * B, 0.24 * arm, 0.15 * B), tunic, Vector3(0, -0.12 * arm, 0))
 		var el := Node3D.new()
 		el.name = "ElbowL" if i == 0 else "ElbowR"
 		sh.add_child(el)
-		el.position = Vector3(0, -0.24, 0)
-		_box_in(el, Vector3(0.13, 0.22, 0.14), tunic.darkened(0.08), Vector3(0, -0.11, 0))
-		_box_in(el, Vector3(0.13, 0.15, 0.14), SKIN_COL, Vector3(0, -0.27, 0.02))
+		el.position = Vector3(0, -0.24 * arm, 0)
+		_box_in(el, Vector3(0.13 * B, 0.22 * arm, 0.14 * B), tunic.darkened(0.08), Vector3(0, -0.11 * arm, 0))
+		_box_in(el, Vector3(0.13 * B, 0.15 * arm, 0.14 * B), skin_c, Vector3(0, -0.27 * arm, 0.02))
 		walk_arms.append(sh)
 		if i == 0:
 			shoulder_l = sh
@@ -325,48 +346,71 @@ func _build_body() -> void:
 	head_pivot = Node3D.new()
 	head_pivot.name = "Head"
 	spine.add_child(head_pivot)
-	head_pivot.position = Vector3(0, 0.61, 0)
-	_box_in(head_pivot, Vector3(0.24, 0.26, 0.25), SKIN_COL, Vector3(0, 0.14, 0))
-	_box_in(head_pivot, Vector3(0.05, 0.05, 0.04), SKIN_COL, Vector3(0, 0.10, -0.14))
-	_box_in(head_pivot, Vector3(0.26, 0.09, 0.27), hair, Vector3(0, 0.295, 0.01))
-	if sex == "f":
-		_box_in(head_pivot, Vector3(0.26, 0.30, 0.09), hair, Vector3(0, 0.12, 0.13))  ## long hair
-	else:
-		_box_in(head_pivot, Vector3(0.26, 0.20, 0.08), hair, Vector3(0, 0.17, 0.125))
-		if absi(hash(npc_name + "beard")) % 3 == 0:
-			_box_in(head_pivot, Vector3(0.20, 0.10, 0.06), hair, Vector3(0, 0.02, -0.11))
-	_add_eye(Vector3(-0.06, 0.16, -0.125), Vector3(0.04, 0.03, 0.02), head_pivot)
-	_add_eye(Vector3(0.06, 0.16, -0.125), Vector3(0.04, 0.03, 0.02), head_pivot)
-	match job:
-		"guard":
-			_box_in(head_pivot, Vector3(0.29, 0.13, 0.30), Color(0.45, 0.46, 0.50), Vector3(0, 0.30, 0), Vector3.ZERO, true)
-			_box_in(head_pivot, Vector3(0.05, 0.15, 0.03), Color(0.45, 0.46, 0.50), Vector3(0, 0.185, -0.14), Vector3.ZERO, true)
-		"woodcutter", "crofter":
-			_box_in(head_pivot, Vector3(0.30, 0.06, 0.31), LEATHER_COL, Vector3(0, 0.31, 0))  ## cap
-		"priest":
-			_box_in(head_pivot, Vector3(0.30, 0.22, 0.30), tunic, Vector3(0, 0.23, 0.04))    ## hood
-		"merchant":
-			_box_in(head_pivot, Vector3(0.34, 0.05, 0.36), Color(0.30, 0.22, 0.14), Vector3(0, 0.30, 0))  ## brim
+	head_pivot.position = Vector3(0, 0.61 * H, 0)
+	_box_in(head_pivot, Vector3(0.24, 0.26, 0.25) * HS, skin_c, Vector3(0, 0.14 * HS, 0))
+	_box_in(head_pivot, Vector3(0.05, 0.05, 0.04) * HS, skin_c, Vector3(0, 0.10 * HS, -0.14 * HS))
+	## Hair by style; the cap of hair is everyone's but the bald.
+	if hair_style != "bald":
+		_box_in(head_pivot, Vector3(0.26, 0.09, 0.27) * HS, hair, Vector3(0, 0.295 * HS, 0.01 * HS))
+	match hair_style:
+		"long":
+			_box_in(head_pivot, Vector3(0.26, 0.30, 0.09) * HS, hair, Vector3(0, 0.12 * HS, 0.13 * HS))
+		"bun":
+			_box_in(head_pivot, Vector3(0.26, 0.20, 0.08) * HS, hair, Vector3(0, 0.17 * HS, 0.125 * HS))
+			_box_in(head_pivot, Vector3(0.12, 0.12, 0.12) * HS, hair, Vector3(0, 0.26 * HS, 0.17 * HS))
+		"mohawk":
+			_box_in(head_pivot, Vector3(0.06, 0.14, 0.24) * HS, hair, Vector3(0, 0.36 * HS, 0.0))
+		"bald":
+			pass
+		_:
+			_box_in(head_pivot, Vector3(0.26, 0.20, 0.08) * HS, hair, Vector3(0, 0.17 * HS, 0.125 * HS))
+	match beard:
+		"stubble":
+			_box_in(head_pivot, Vector3(0.22, 0.07, 0.05) * HS, hair.lerp(skin_c, 0.55), Vector3(0, 0.03 * HS, -0.11 * HS))
+		"full":
+			_box_in(head_pivot, Vector3(0.20, 0.10, 0.06) * HS, hair, Vector3(0, 0.02 * HS, -0.11 * HS))
+		"braided":
+			_box_in(head_pivot, Vector3(0.20, 0.10, 0.06) * HS, hair, Vector3(0, 0.02 * HS, -0.11 * HS))
+			_box_in(head_pivot, Vector3(0.06, 0.16, 0.05) * HS, hair, Vector3(0, -0.10 * HS, -0.10 * HS))
+		_:
+			pass
+	_add_eye(Vector3(-0.06 * HS, 0.16 * HS, -0.125 * HS), Vector3(0.04, 0.03, 0.02) * HS, head_pivot)
+	_add_eye(Vector3(0.06 * HS, 0.16 * HS, -0.125 * HS), Vector3(0.04, 0.03, 0.02) * HS, head_pivot)
+	var eye_c: Color = look.get("eye_col", Color(0.12, 0.10, 0.08))
+	for em in eye_mats:
+		em.albedo_color = eye_c
+	match hat:
+		"helm":
+			_box_in(head_pivot, Vector3(0.29, 0.13, 0.30) * HS, Color(0.45, 0.46, 0.50), Vector3(0, 0.30 * HS, 0), Vector3.ZERO, true)
+			_box_in(head_pivot, Vector3(0.05, 0.15, 0.03) * HS, Color(0.45, 0.46, 0.50), Vector3(0, 0.185 * HS, -0.14 * HS), Vector3.ZERO, true)
+		"cap":
+			_box_in(head_pivot, Vector3(0.30, 0.06, 0.31) * HS, LEATHER_COL, Vector3(0, 0.31 * HS, 0))  ## cap
+		"hood":
+			_box_in(head_pivot, Vector3(0.30, 0.22, 0.30) * HS, tunic, Vector3(0, 0.23 * HS, 0.04 * HS))    ## hood
+		"brim":
+			_box_in(head_pivot, Vector3(0.34, 0.05, 0.36) * HS, Color(0.30, 0.22, 0.14), Vector3(0, 0.30 * HS, 0))  ## brim
+		_:
+			pass
 
 	## Tools live in the right hand and show only while the job is at work.
 	tool_axe = Node3D.new()
 	tool_axe.name = "Axe"
 	elbow_r.add_child(tool_axe)
-	tool_axe.position = Vector3(0, -0.28, 0.0)
+	tool_axe.position = Vector3(0, -0.28 * arm, 0.0)
 	_box_in(tool_axe, Vector3(0.05, 0.05, 0.78), Color(0.36, 0.26, 0.16), Vector3(0, 0, -0.30))
 	_box_in(tool_axe, Vector3(0.05, 0.18, 0.16), Color(0.40, 0.42, 0.44), Vector3(0, -0.06, -0.66), Vector3.ZERO, true)
 	tool_axe.visible = false
 	tool_broom = Node3D.new()
 	tool_broom.name = "Broom"
 	elbow_r.add_child(tool_broom)
-	tool_broom.position = Vector3(0, -0.28, 0.0)
+	tool_broom.position = Vector3(0, -0.28 * arm, 0.0)
 	_box_in(tool_broom, Vector3(0.04, 1.30, 0.04), Color(0.50, 0.40, 0.24), Vector3(0, -0.30, 0))
 	_box_in(tool_broom, Vector3(0.22, 0.20, 0.08), Color(0.62, 0.52, 0.30), Vector3(0, -0.98, 0))
 	tool_broom.visible = false
 	tool_rod = Node3D.new()
 	tool_rod.name = "Rod"
 	elbow_r.add_child(tool_rod)
-	tool_rod.position = Vector3(0, -0.28, 0.0)
+	tool_rod.position = Vector3(0, -0.28 * arm, 0.0)
 	_box_in(tool_rod, Vector3(0.03, 0.03, 1.60), Color(0.42, 0.34, 0.20), Vector3(0, 0.05, -0.70))
 	tool_rod.visible = false
 
@@ -379,11 +423,120 @@ func _build_body() -> void:
 	name_label.pixel_size = 0.0045
 	name_label.outline_size = 8
 	name_label.modulate = Color(0.94, 0.90, 0.80)
-	name_label.position = Vector3(0, 2.08, 0)
+	name_label.position = Vector3(0, 2.08 * H, 0)
 	name_label.visible = false
 	add_child(name_label)
 	## Enemy tints eye_mats red when agitated. People do not get demon eyes.
 	eye_mats.clear()
+
+
+static func _job_hat(for_job: String) -> String:
+	match for_job:
+		"guard":
+			return "helm"
+		"woodcutter", "crofter":
+			return "cap"
+		"priest":
+			return "hood"
+		"merchant":
+			return "brim"
+		_:
+			return "none"
+
+
+func rebuild_body() -> void:
+	## The Character Creator changed `look`, `sex` or `job`: tear the rig,
+	## the collision, the tag and the skin down and build them again, in
+	## place, mid-game. The nodes are removed NOW (not queue_free'd alone),
+	## or CreatureSkin.bake would collect the old boxes along with the new.
+	var was_pos := global_position if is_inside_tree() else position
+	if skin != null and is_instance_valid(skin):
+		remove_child(skin)
+		skin.queue_free()
+		skin = null
+	if has_meta("creature_skin"):
+		remove_meta("creature_skin")
+	for c in get_children():
+		if c is CollisionShape3D or c == rig or c == name_label or c is MeshInstance3D:
+			remove_child(c)
+			c.queue_free()
+	walk_legs.clear()
+	walk_arms.clear()
+	eye_mats.clear()
+	_flow_applied.clear()
+	rig = null
+	spine = null
+	head_pivot = null
+	tool_axe = null
+	tool_broom = null
+	tool_rod = null
+	name_label = null
+	_build_body()
+	skin = CreatureSkin.bake(self, _skin_opts())
+	if is_inside_tree():
+		global_position = was_pos
+
+
+## ------------------------------------------------------------- the look --
+
+const LOOK_KEYS := ["height", "bulk", "limb", "head", "skin", "hair_col", "eye_col", "hair", "beard", "hat", "tunic", "breeches"]
+const SKIN_TONES := [Color(0.62, 0.46, 0.36), Color(0.72, 0.56, 0.44), Color(0.55, 0.40, 0.30), Color(0.80, 0.66, 0.54), Color(0.45, 0.32, 0.24)]
+
+
+static func default_look(for_name: String, for_sex: String, for_job: String) -> Dictionary:
+	## What a person looked like before there was a creator: the hashed
+	## hair colour and beard, the job's cloth, the one skin tone.
+	var h := absi(hash(for_name))
+	var cloth: Array = JOB_CLOTH.get(for_job, JOB_CLOTH["villager"])
+	return {
+		"height": 1.0, "bulk": 1.0, "limb": 1.0, "head": 1.0,
+		"skin": SKIN_COL, "hair_col": HAIR_COLS[h % HAIR_COLS.size()],
+		"eye_col": Color(0.12, 0.10, 0.08),
+		"hair": "long" if for_sex == "f" else "short",
+		"beard": ("full" if absi(hash(for_name + "beard")) % 3 == 0 else "none") if for_sex != "f" else "none",
+		"hat": "job", "tunic": cloth[0], "breeches": cloth[1],
+	}
+
+
+static func random_look(rng: RandomNumberGenerator, for_sex: String, for_job: String) -> Dictionary:
+	var cloth: Array = JOB_CLOTH.get(for_job, JOB_CLOTH["villager"])
+	var tunic: Color = cloth[0]
+	var breeches: Color = cloth[1]
+	tunic = Color.from_hsv(fmod(tunic.h + rng.randf_range(-0.08, 0.08) + 1.0, 1.0), clampf(tunic.s + rng.randf_range(-0.1, 0.1), 0.0, 1.0), clampf(tunic.v + rng.randf_range(-0.1, 0.1), 0.1, 0.9))
+	breeches = Color.from_hsv(fmod(breeches.h + rng.randf_range(-0.05, 0.05) + 1.0, 1.0), breeches.s, clampf(breeches.v + rng.randf_range(-0.08, 0.08), 0.1, 0.8))
+	var hairs := ["short", "long", "bald", "bun", "mohawk"]
+	var beards := ["none", "stubble", "full", "braided"]
+	return {
+		"height": snappedf(rng.randf_range(0.88, 1.14), 0.01),
+		"bulk": snappedf(rng.randf_range(0.85, 1.22), 0.01),
+		"limb": snappedf(rng.randf_range(0.92, 1.08), 0.01),
+		"head": snappedf(rng.randf_range(0.92, 1.10), 0.01),
+		"skin": SKIN_TONES[rng.randi_range(0, SKIN_TONES.size() - 1)],
+		"hair_col": HAIR_COLS[rng.randi_range(0, HAIR_COLS.size() - 1)],
+		"eye_col": [Color(0.12, 0.10, 0.08), Color(0.25, 0.32, 0.20), Color(0.22, 0.30, 0.42), Color(0.35, 0.24, 0.14)][rng.randi_range(0, 3)],
+		"hair": hairs[rng.randi_range(0, hairs.size() - 1)] if for_sex != "f" else ["long", "bun", "short"][rng.randi_range(0, 2)],
+		"beard": beards[rng.randi_range(0, beards.size() - 1)] if for_sex != "f" else "none",
+		"hat": "job", "tunic": tunic, "breeches": breeches,
+	}
+
+
+static func look_to_json(lk: Dictionary) -> Dictionary:
+	var d := {}
+	for k in lk.keys():
+		var v = lk[k]
+		d[k] = (v as Color).to_html(false) if v is Color else v
+	return d
+
+
+static func look_from_json(d: Dictionary) -> Dictionary:
+	var lk := {}
+	for k in d.keys():
+		var v = d[k]
+		if k in ["skin", "hair_col", "eye_col", "tunic", "breeches"] and v is String:
+			lk[k] = Color.html(String(v))
+		else:
+			lk[k] = v
+	return lk
 
 
 func _skin_opts() -> Dictionary:
@@ -1592,6 +1745,7 @@ func to_dict() -> Dictionary:
 		"pos": _v3_out(global_position if is_inside_tree() else position), "anchor": _v3_out(anchor), "home": _v3_out(home),
 		"work": _v3_out(work), "seat": _v3_out(seat), "seat_h": seat_h, "work_yaw": work_yaw,
 		"home_kind": home_kind, "schedule": schedule.duplicate(true), "health": health, "dead": dying,
+		"look": look_to_json(look),
 	}
 
 
@@ -1619,5 +1773,8 @@ func apply_dict(d: Dictionary) -> void:
 	var sc = d.get("schedule", schedule)
 	if sc is Array and not (sc as Array).is_empty():
 		schedule = (sc as Array).duplicate(true)
+	var lk = d.get("look", null)
+	if lk is Dictionary and not (lk as Dictionary).is_empty():
+		look = look_from_json(lk)
 	if d.has("health"):
 		health = clampf(float(d["health"]), 1.0, max_health)
