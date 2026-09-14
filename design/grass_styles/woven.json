@@ -1,0 +1,23 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Woven turf",
+ "based_on": "default",
+ "blurb": "Thick, tufty short grass, woven over the ground — seven blades a tuft arching into their neighbours, no bare dirt between.",
+ "exported": "2026-09-14",
+ "params": {
+  "density": 1.3,
+  "short_keep": 1.0,
+  "clump_cut": -0.95,
+  "size_var": 0.9,
+  "height": 0.22,
+  "width": 0.045,
+  "blades": 8,
+  "segs": 3,
+  "lean": 0.85,
+  "droop": 0.9,
+  "w_clover": 1.4,
+  "root_dark": 0.58,
+  "tip_light": 0.42,
+  "spread": 3.0
+ }
+}

@@ -275,6 +275,7 @@ const STYLE_DEFAULTS := {
 	"w_flower": 1.0, "w_clover": 1.0, "w_fern": 1.0, "w_moss": 1.0,
 	## geometry (the fescue tuft and the hiding grass)
 	"height": 0.18, "width": 0.030, "blades": 4, "segs": 4, "lean": 0.35, "droop": 0.55,
+	"spread": 1.0,         ## x the blades' root radius: 1 = a spike, 3 = a clump a hand wide
 	"tall_height": 1.35, "tall_width": 0.068,
 	## shader
 	"col_spring": "#598730", "col_summer": "#406626", "col_autumn": "#877330", "col_winter": "#665c3d",
@@ -287,7 +288,7 @@ const STYLE_DEFAULTS := {
 const PLACEMENT_KEYS := ["density", "tall_keep", "short_keep", "clump_cut", "tall_shift", "size_var",
 	"vigour", "tint_dry", "tint_moist", "w_fescue", "w_sedge", "w_timothy", "w_bluestem", "w_flower",
 	"w_clover", "w_fern", "w_moss"]
-const GEOMETRY_KEYS := ["height", "width", "blades", "segs", "lean", "droop", "tall_height", "tall_width"]
+const GEOMETRY_KEYS := ["height", "width", "blades", "segs", "lean", "droop", "spread", "tall_height", "tall_width"]
 ## shader key -> uniform name (a colour key lands as a Color)
 const SHADER_UNIFORMS := {
 	"col_spring": "col_spring", "col_summer": "col_summer", "col_autumn": "col_autumn",
@@ -1509,10 +1510,11 @@ func _build_meshes() -> void:
 	var ss := maxi(1, int(style["segs"]))
 	var sl := float(style["lean"])
 	var sd := float(style["droop"])
+	var sp := float(style["spread"])
 	_mesh["std"] = [
-		_tuft(sh, sw, sb, ss, sl, sd),
-		_tuft(sh, sw, sb, mini(ss, 2), sl, sd),
-		_tuft(sh, sw * 1.2, maxi(1, mini(sb, 3)), 1, sl, sd),
+		_tuft(sh, sw, sb, ss, sl, sd, MAT_LEAF, sp),
+		_tuft(sh, sw, sb, mini(ss, 2), sl, sd, MAT_LEAF, sp),
+		_tuft(sh, sw * 1.2, maxi(1, mini(sb, 3)), 1, sl, sd, MAT_LEAF, sp),
 	]
 	## The hiding grass: a bunchgrass stand about 1.5 m standing and 1 m across,
 	## straight for its bottom half and flopping over above that. This is the
@@ -1657,17 +1659,22 @@ func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
 
 
 func _tuft(height: float, width: float, blades: int, segs: int,
-		lean: float, droop: float, matid := MAT_LEAF) -> ArrayMesh:
+		lean: float, droop: float, matid := MAT_LEAF, spread := 1.0) -> ArrayMesh:
 	## A tuft is a fan of blades around one root, each with its own height,
 	## its own lean and its own twist. Identical blades read as a fan; varied
 	## ones read as a plant.
+	## `spread` (GRASS LAB, v2.8) scales the root radius: at 1 the blades rise
+	## from within 4 cm of one point and the tuft is a spike; at 3 they come
+	## up across a hand's width and the tuft is a CLUMP whose blades cross its
+	## neighbours' -- the difference between scattered spikes and turf, at the
+	## same instance count.
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for b in range(blades):
 		var ang := TAU * float(b) / float(blades) + 0.35 + float(b % 3) * 0.21
 		var out := Vector3(cos(ang), 0.0, sin(ang))
 		var vary := 0.78 + 0.44 * float((b * 7) % 5) / 4.0
-		_strip(st, out * (0.018 + 0.020 * float(b % 2)), out,
+		_strip(st, out * (0.018 + 0.020 * float(b % 2)) * spread, out,
 			height * vary, width * (0.85 + 0.3 * float(b % 2)),
 			lean * (0.72 + 0.5 * float((b * 3) % 4) / 3.0), droop * vary,
 			segs, 0.58, matid, 0.5 - float(b % 2))

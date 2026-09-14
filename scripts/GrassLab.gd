@@ -67,6 +67,7 @@ const KNOBS := [
 	["segs", "Segments", 1, 6, 1, "geom"],
 	["lean", "Lean", 0.0, 1.0, 0.01, "geom"],
 	["droop", "Droop", 0.0, 2.0, 0.01, "geom"],
+	["spread", "Root spread (1 spike, 3 clump)", 0.5, 4.0, 0.1, "geom"],
 	["tall_height", "Tall height (m)", 0.4, 2.5, 0.02, "geom"],
 	["tall_width", "Tall width (m)", 0.02, 0.2, 0.002, "geom"],
 	["pixel_on", "Pixel cells (0/1)", 0.0, 1.0, 1.0, "shader"],

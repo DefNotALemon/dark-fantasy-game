@@ -31,6 +31,7 @@ var _i := -1
 var _wait := 0
 var _v := 0            ## which vantage of the current style is next
 var _out := "user://grass_look/"
+var _only := ""
 
 
 func _init() -> void:
@@ -41,6 +42,11 @@ func _boot() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() >= 1:
 		_out = String(args[0])
+	## a second arg is a FILTER: only styles whose file name contains it (and
+	## "default" for the shipped look) -- one style is ten seconds, all of
+	## them is three minutes
+	if args.size() >= 2:
+		_only = String(args[1])
 	if not _out.ends_with("/"):
 		_out += "/"
 	DirAccess.make_dir_recursive_absolute(_out)
@@ -104,6 +110,12 @@ func _boot() -> void:
 		var d: Dictionary = p
 		_styles.append({"name": String(d["name"]), "file": String(d["file"]),
 			"params": GrassSystem.load_style_file(String(d["path"]))})
+	if _only != "":
+		var keep: Array = []
+		for st in _styles:
+			if String((st as Dictionary)["file"]).contains(_only) or String((st as Dictionary)["file"]) == "default":
+				keep.append(st)
+		_styles = keep
 	print("GrassLook: %d styles -> %s" % [_styles.size(), _out])
 	_next()
 	process_frame.connect(_shoot_tick)

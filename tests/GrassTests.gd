@@ -293,9 +293,15 @@ func _run() -> void:
 			% [stub_h, std_h])
 	_note("fescue %.2f m, stubble %.2f m — %.0f%% of the v2.3 blade height"
 		% [std_h, stub_h, 100.0 * std_h / 0.4956])
-	_ok(int((budget["std"] as Array)[0]) < 35,
-		"and a near fescue tuft is lighter than v2.3's 35 triangles (%d now)"
+	## v2.8 (2026-09-14, Lemon: "much thicker and tuftier small grass, thickly
+	## woven over the ground"): the shipped Woven turf is 8 blades x 3 segments
+	## = 48 triangles a near tuft, deliberately up from v2.4's 28. The near
+	## band is 9 m; the cost is in the far LOD, which is still 3 blades x 1.
+	_ok(int((budget["std"] as Array)[0]) <= 48,
+		"a near fescue tuft is at most the woven turf's 48 triangles (%d now)"
 			% int((budget["std"] as Array)[0]))
+	_ok(int((budget["std"] as Array)[2]) <= 8,
+		"...and the FAR fescue tuft stays a handful (%d)" % int((budget["std"] as Array)[2]))
 
 	print("\n-- 8. placement over a real (synthetic) hillside --")
 	_note("the valley is %d x %d chunks; the world beyond it is unbounded" % [gs._ncx, gs._ncz])
@@ -451,8 +457,12 @@ func _run() -> void:
 		% [d0, _commas(drawn), _commas(est_tris)])
 	_note("without the far thinning it would be ~%s tufts"
 		% _commas(int(dens * (near_a + mid_a + full_a + thin_a))))
-	_ok(est_tris < 1000000, "the ring fits a sane triangle budget")
-	_ok(drawn < 300000, "and a sane instance budget")
+	## v2.8: the woven turf places 1.3x the tufts and its far LOD is unchanged,
+	## so the ring went from ~877k triangles / 208k tufts to about 1.3M / 290k.
+	## Lemon asked for thicker; the caps move with it, and no further without
+	## a look at the frame time on the Pro (Esc > Draw Distance is the dial).
+	_ok(est_tris < 1500000, "the ring fits the woven-turf triangle budget (1.5M)")
+	_ok(drawn < 320000, "and the woven-turf instance budget (320k)")
 
 	## The setting has to actually buy something. Area squares, so halving the
 	## ring should quarter it — this is the claim the Esc menu's note makes.

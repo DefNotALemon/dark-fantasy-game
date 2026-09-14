@@ -1,0 +1,23 @@
+{
+ "schema": "myrkfell.grass_style/1",
+ "name": "Woven turf",
+ "based_on": "woven",
+ "exported": "2026-09-14",
+ "note": "THE SHIPPED LOOK. GrassSystem.setup() applies this at boot; the F3 lab's SHIP button rewrites it. Lemon 2026-09-14: 'much thicker and tuftier small grass, thickly woven over the ground'.",
+ "params": {
+  "density": 1.3,
+  "short_keep": 1.0,
+  "clump_cut": -0.95,
+  "size_var": 0.9,
+  "height": 0.22,
+  "width": 0.045,
+  "blades": 8,
+  "segs": 3,
+  "lean": 0.85,
+  "droop": 0.9,
+  "w_clover": 1.4,
+  "root_dark": 0.58,
+  "tip_light": 0.42,
+  "spread": 3.0
+ }
+}
