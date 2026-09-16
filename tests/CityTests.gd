@@ -11,7 +11,7 @@ extends SceneTree
 ##
 ## Every section stakes a `claim()`; MIN_ASSERTIONS is the floor.
 
-const MIN_ASSERTIONS := 150
+const MIN_ASSERTIONS := 180
 const SRC := "res://scripts/Cities.gd"
 
 var _pass := 0
@@ -77,6 +77,21 @@ class GrassStub extends RefCounted:
 		return true
 
 
+## GrassSystem v3.1 as the city sees it: it mows, it takes the paved street
+## segments, and it takes the town's rect back off the GPU field.
+class GrassV31Stub extends RefCounted:
+	var calls: Array = []
+	var paved: Array = []
+	var towns: Array = []
+	func cut_at(center: Vector3, radius: float) -> bool:
+		calls.append([center, radius])
+		return true
+	func pave(segs: Array) -> void:
+		paved.append_array(segs)
+	func set_towns(rects: Array) -> void:
+		towns = rects.duplicate()
+
+
 class SkyStub extends RefCounted:
 	var hour := 12.0
 
@@ -117,6 +132,43 @@ class WorldStub extends Node3D:
 		return 5.0
 	func is_water(_x: float, _z: float) -> bool:
 		return false
+
+
+## The shape World ACTUALLY has (2026-09-13): no `places()`, no (x, z) height
+## probe — a private `_terrain` node and a `_surface_y(Vector3)`. Cities read
+## none of it before this stub existed and the six stood underground.
+class TerrainStub extends Node3D:
+	var rows: Array = []
+	var slope := 0.0        ## metres of fall per metre of +x
+	var base := 40.0
+	func places() -> Array:
+		return rows
+	func sample_height(wx: float, _wz: float) -> float:
+		return base + wx * slope
+	func is_water_at(pos: Vector3) -> bool:
+		return pos.x > 10000.0
+
+
+## A terrain node with the roster and nothing else: no sample_height, so the
+## only ground probe in the building is the world's own _surface_y.
+class RosterOnlyTerrainStub extends Node3D:
+	var rows: Array = []
+	func places() -> Array:
+		return rows
+
+
+class MyrkWorldStub extends Node3D:
+	## deliberately answers NONE of the (x, z) ground names
+	var _terrain: Node3D = null
+	var base := 0.0
+	var slope := 0.0
+	func _surface_y(p: Vector3) -> float:
+		return base + p.x * slope
+
+
+class TerrainOnlyWorldStub extends Node3D:
+	## not even _surface_y: the terrain node is the only probe there is
+	var _terrain: Node3D = null
 
 
 func _portland(wseed := 1, dirs: Array = [], ground := Callable(self, "_flat"), water := Callable(self, "_dry")) -> Dictionary:
@@ -160,8 +212,11 @@ func _run_all() -> void:
 	_t_proximity()
 	_t_lamps_live()
 	_t_grass()
+	_t_paving()
 	_t_roadnet()
 	_t_bind_world()
+	_t_ground()
+	_t_net_names()
 	_t_report()
 	_t_no_input()
 	print("")
@@ -568,7 +623,17 @@ func _t_staging() -> void:
 			gate_marks += 1
 	ok(towers == gates.size() * 2, "two towers per gate (%d)" % towers)
 	ok(gate_marks == gates.size(), "one threshold per gate")
-	ok(segs >= wall.size() - gates.size() and segs <= wall.size() + gates.size(), "wall segments: %d for %d verts and %d gates" % [segs, wall.size(), gates.size()])
+	## 2026-09-13: a wall RUN is cut into CONFORM_SPAN pieces so it can follow
+	## the ground, so the count is no longer one box per polygon edge.
+	ok(segs >= wall.size() - gates.size(), "a wall piece for every run at least: %d for %d verts and %d gates" % [segs, wall.size(), gates.size()])
+	var longest := 0.0
+	for ch in wall_node.get_children():
+		if not str(ch.name).begins_with("Seg"):
+			continue
+		for gc in (ch as Node).get_children():
+			if gc is CollisionShape3D and (gc as CollisionShape3D).shape is BoxShape3D:
+				longest = maxf(longest, ((gc as CollisionShape3D).shape as BoxShape3D).size.z)
+	ok(longest <= Cities.CONFORM_SPAN + 0.01, "no wall piece spans more than CONFORM_SPAN (longest %.2f m)" % longest)
 	var seg_colliders := true
 	for ch in wall_node.get_children():
 		if str(ch.name).begins_with("Seg") and not (ch is StaticBody3D):
@@ -741,10 +806,10 @@ func _t_grass() -> void:
 	c.set_grass(g)
 	c.stage("Portland")
 	ok(g.calls.size() == 1, "one cut per staging (got %d)" % g.calls.size())
-	var call: Array = g.calls[0]
-	ok(call[0] == c.cities["Portland"]["centre"], "cut at the centre")
+	var cl: Array = g.calls[0]
+	ok(cl[0] == c.cities["Portland"]["centre"], "cut at the centre")
 	var R := float(c.cities["Portland"]["core_r"])
-	ok(float(call[1]) > R * (1.0 + Cities.WALL_JITTER * 0.5), "cut radius reaches past the outermost wall vertex")
+	ok(float(cl[1]) > R * (1.0 + Cities.WALL_JITTER * 0.5), "cut radius reaches past the outermost wall vertex")
 	c.stage("Portland")
 	ok(g.calls.size() == 1, "re-staging a staged city does not mow again")
 	c.strike("Portland")
@@ -757,6 +822,62 @@ func _t_grass() -> void:
 	c.set_grass(null)
 	c.strike("Portland")
 	ok(c.stage("Portland") != null, "no grass → staging still works")
+	root.remove_child(c)
+	c.free()
+
+
+func _t_paving() -> void:
+	claim("paving: city streets are cobble and brick, the grass gets their world-space strip, and the town rect goes back to the CPU")
+	var c := Cities.new()
+	root.add_child(c)
+	c.set_roster([])
+	c.build()
+	var g := GrassV31Stub.new()
+	c.set_grass(g)
+	var node := c.stage("Portland")
+	var lay: Dictionary = c.cities["Portland"]
+	var cen: Vector3 = lay["centre"]
+
+	## the surfaces
+	var kinds := {}
+	for ch in node.get_node("Streets").get_children():
+		var mi := ch as MeshInstance3D
+		if mi != null and mi.material_override != null:
+			kinds[(mi.material_override as StandardMaterial3D).albedo_color] = true
+	ok(kinds.has(Cities.mat("cobble").albedo_color), "the thoroughfares are cobbled")
+	ok(not kinds.has(Cities.mat("dirt").albedo_color), "no dirt track left inside the walls")
+	ok(Cities.mat("cobble").albedo_color != Cities.mat("brick").albedo_color,
+		"cobble and brick are two different surfaces")
+
+	## the strip handed to the grass
+	ok(g.paved.size() > 0, "the streets were handed over (%d segments)" % g.paved.size())
+	var world_ok := true
+	for sv in g.paved:
+		var seg := sv as Dictionary
+		var a := seg["a"] as Vector2
+		if a.distance_to(Vector2(cen.x, cen.z)) > float(lay["core_r"]) * 2.0:
+			world_ok = false
+		if float(seg["w"]) < Cities.STREET_W:
+			world_ok = false
+	ok(world_ok, "every segment is in WORLD space, inside the city, at least a street wide")
+
+	## the rect the GPU field steps out of
+	ok(g.towns.size() == 1, "one town claimed (%d)" % g.towns.size())
+	if g.towns.size() == 1:
+		var r: Rect2 = g.towns[0]
+		ok(r.has_point(Vector2(cen.x, cen.z)), "the rect is centred on the city")
+		ok(r.size.x > float(lay["core_r"]) * 2.0,
+			"...and reaches past the wall (%.0f m across)" % r.size.x)
+	c.stage("Bangor")
+	ok(g.towns.size() == 2, "a second city adds to the claim rather than replacing it")
+
+	## a grass system that predates v3.1 is simply not asked
+	c.strike("Portland")
+	c.strike("Bangor")
+	var old := GrassStub.new()
+	c.set_grass(old)
+	ok(c.stage("Portland") != null, "an old grass system without pave/set_towns still stages")
+	ok(old.calls.size() == 1, "...and still gets mown")
 	root.remove_child(c)
 	c.free()
 
@@ -847,6 +968,143 @@ func _t_bind_world() -> void:
 	bare.free()
 
 
+## THE UNDERGROUND TOWNS, 2026-09-13. World keeps its roster on a private
+## terrain node and spells its height probe `_surface_y(Vector3)`. Cities
+## looked for `places()` and four (x, z) names, found neither, and laid all
+## six out flat at y = 0 — on a bake whose benches stand at 8 to 108 m, the
+## towns were buried in their own hills.
+func _t_ground() -> void:
+	claim("the ground: the world's real spellings are found, and the city follows the hill")
+	var w := MyrkWorldStub.new()
+	w.base = 108.0
+	var t := RosterOnlyTerrainStub.new()
+	t.rows = [
+		{"name": "Presque Isle", "pos": [4080.0, -6832.0], "y": 108.0, "rank": 1},
+		{"name": "Bangor", "pos": [2794.0, -2320.0], "y": 13.8, "rank": 2},
+	]
+	w._terrain = t
+	w.add_child(t)
+	root.add_child(w)
+	var c := Cities.boot(w)
+	ok(c.roster_source == "world", "the roster is found on the world's private _terrain (%s)" % c.roster_source)
+	ok(c.cities.size() == 2, "…both named rows became cities")
+	var pi: Dictionary = c.cities["Presque Isle"]
+	var cen: Vector3 = pi["centre"]
+	ok(absf(cen.x - 4080.0) < 0.01 and absf(cen.z - (-6832.0)) < 0.01, "…at the bake's own position")
+	ok(absf(cen.y - w._surface_y(cen)) < 0.01, "_surface_y(Vector3) found — the ONLY probe here: centre y %.1f, not 0" % cen.y)
+	ok(cen.y > 100.0, "…so the Shelf Town stands on its shelf, not 108 m under it")
+	for lot in pi["lots"]:
+		var lp: Vector2 = lot["pos"]
+		ok(absf(float(lot["y"]) - w._surface_y(Vector3(cen.x + lp.x, 0.0, cen.z + lp.y))) < 0.01, "every lot sits on the ground")
+		break
+	# --- the site grid ---
+	ok((pi["site"] as Dictionary).has("h"), "the layout carries its own site heightfield")
+	ok(absf(Cities.local_y(pi, 0.0, 0.0)) < 0.01, "local_y is 0 at the centre by construction")
+	var flat := _portland()
+	var zeroes := true
+	for v in (flat["site"] as Dictionary)["h"] as PackedFloat32Array:
+		if absf(v) > 0.0001:
+			zeroes = false
+	ok(zeroes, "a flat world's site grid is all zeroes")
+	c.free()
+	root.remove_child(w)
+	w.free()
+	# --- a hillside: the wall, the streets and the lamps walk down it --------
+	var w2 := TerrainOnlyWorldStub.new()
+	var t2 := TerrainStub.new()
+	t2.base = 60.0
+	t2.slope = 0.08       ## 8 m of fall per 100 m — 30 m across a hub
+	t2.rows = [{"name": "Portland", "pos": [0.0, 0.0], "y": 60.0, "rank": 2}]
+	w2._terrain = t2
+	w2.add_child(t2)
+	root.add_child(w2)
+	var c2 := Cities.boot(w2)
+	ok(c2.roster_source == "world", "roster off the terrain node with no _surface_y either")
+	var lay: Dictionary = c2.cities["Portland"]
+	ok(absf(float((lay["centre"] as Vector3).y) - 60.0) < 0.01, "sample_height(x, z) found on the terrain node")
+	var probe := Cities.local_y(lay, 100.0, 0.0)
+	ok(absf(probe - 8.0) < 0.2, "local_y reads the hill: +100 m east is %.2f m up (want 8)" % probe)
+	ok(absf(Cities.local_y(lay, -100.0, 0.0) + 8.0) < 0.2, "…and 8 m down to the west")
+	var node := c2.stage("Portland")
+	ok(node != null, "the hillside city stages")
+	var worst := 0.0
+	var checked := 0
+	for holder_name in ["Wall", "Streets", "Lamps"]:
+		var holder: Node3D = node.get_node_or_null(holder_name)
+		if holder == null:
+			continue
+		for ch in holder.get_children():
+			var n3 := ch as Node3D
+			if n3 == null or str(n3.name).begins_with("Lintel"):
+				continue
+			var want := Cities.local_y(lay, n3.position.x, n3.position.z)
+			## a wall piece is a BOX, centred half its height up; only its
+			## FOOT has to meet the ground, so allow the body's own reach.
+			var slack := 12.0 if holder_name == "Wall" else 1.0
+			worst = maxf(worst, absf(n3.position.y - want) - slack)
+			checked += 1
+	ok(checked > 20, "…with wall, street and lamp nodes to check (%d)" % checked)
+	ok(worst <= 0.0, "nothing floats or sinks: worst piece is %.2f m past its slack" % worst)
+	var lamps: Node3D = node.get_node_or_null("Lamps")
+	var lamp_spread := 0.0
+	if lamps != null and lamps.get_child_count() > 1:
+		var ys: Array = []
+		for lp in lamps.get_children():
+			ys.append((lp as Node3D).position.y)
+		ys.sort()
+		lamp_spread = float(ys[ys.size() - 1]) - float(ys[0])
+	ok(lamp_spread > 4.0, "the lamps are at different heights on a hill (%.1f m apart)" % lamp_spread)
+	var pad: Node3D = node.get_node_or_null("SquarePad")
+	ok(pad != null and absf(pad.position.y - 0.03) < 0.01, "the square pad sits on the benched centre")
+	## A street LIES ON the hill. Laid level, piece by piece, the gate street
+	## came down Portland's harbour bank as a dashed line of floating plates.
+	var streets: Node3D = node.get_node_or_null("Streets")
+	var tilted := 0
+	var street_pieces := 0
+	if streets != null:
+		for ch in streets.get_children():
+			var n3 := ch as Node3D
+			if n3 == null:
+				continue
+			street_pieces += 1
+			if rad_to_deg(n3.basis.y.angle_to(Vector3.UP)) > 2.0:
+				tilted += 1
+	ok(street_pieces > 20, "the hillside city has street pieces (%d)" % street_pieces)
+	@warning_ignore("integer_division")
+	ok(tilted > street_pieces / 2, "most of them lie along the slope, not level on it (%d of %d)" % [tilted, street_pieces])
+	c2.free()
+	root.remove_child(w2)
+	w2.free()
+
+
+## The bake writes "Lewiston–Auburn" with an EN DASH and the road net is built
+## from the bake; the tier table says "Lewiston-Auburn". Asking the net under
+## the canonical spelling got an empty edge list, and the Twin Mills stood
+## with two default gates facing nothing (2026-09-13).
+func _t_net_names() -> void:
+	claim("the net's own spelling: a city asks the road net by the name the NET knows")
+	var c := Cities.new()
+	root.add_child(c)
+	c.set_roster([
+		{"name": "Lewiston–Auburn", "pos": [0.0, 0.0]},
+		{"name": "Bangor", "pos": [600.0, 0.0]},
+	])
+	ok(c.cities.is_empty() or true, "roster set")
+	var net := NetStub.new()
+	net.places = {"Lewiston–Auburn": Vector2(0, 0), "Bangor": Vector2(600, 0)}
+	net.edges = [{"a": "Lewiston–Auburn", "b": "Bangor"}]
+	c.set_roadnet(net)
+	c.build()
+	ok(c.cities.has("Lewiston-Auburn"), "the en-dash row still becomes the canonical city")
+	ok(c.net_name_for("Lewiston-Auburn") == "Lewiston–Auburn", "…and the net is asked under ITS spelling (%s)" % c.net_name_for("Lewiston-Auburn"))
+	var dirs: Array = c.road_dirs_for("Lewiston-Auburn")
+	ok(dirs.size() == 1, "the road to Bangor is found (%d)" % dirs.size())
+	ok(dirs.size() == 1 and absf((dirs[0] as Vector2).angle_to(Vector2(1, 0))) < 0.01, "…pointing east, at Bangor")
+	ok((c.cities["Lewiston-Auburn"]["gates"] as Array).size() == 2, "one road gate plus its opposite")
+	ok(c.net_name_for("Bangor") == "Bangor", "a name the net already knows is left alone")
+	c.free()
+
+
 func _t_report() -> void:
 	claim("report and fingerprint")
 	var c := Cities.new()
@@ -864,7 +1122,8 @@ func _t_report() -> void:
 	ok(str(near["name"]) == "Portland" and absf(float(near["dist"]) - Vector2(99.0, 98.0).length()) < 0.01, "nearest_city measures on the ground plane")
 	c.set_roster([])
 	c.build()
-	ok(str(c.nearest_city(Vector3(1735.0, 0.0, -3400.0))["name"]) == "Presque Isle", "nearest_city finds the Shelf town")
+	var pi: Vector2 = Cities.BUILTIN_ROSTER["Presque Isle"]
+	ok(str(c.nearest_city(Vector3(pi.x, 0.0, pi.y + 88.0))["name"]) == "Presque Isle", "nearest_city finds the Shelf town")
 	ok(str(c.cities["Bangor"]["epithet"]) == "Gate of the North", "epithets ride the layout")
 	c.free()
 

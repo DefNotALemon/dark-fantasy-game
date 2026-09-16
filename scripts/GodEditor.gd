@@ -9,9 +9,12 @@ extends PanelContainer
 ## character stays standing where you left them. F1 again drops you back into
 ## their head, wherever the camera has wandered to.
 ##
-##   SPECTATOR  the camera has no body. WASD along the look, SPACE up, CTRL
-##              down, SHIFT boosts, wheel is the speed dial. Nothing to collide
-##              with, nothing to fall off.
+##   SPECTATOR  the camera has no body. WASD is FLAT -- it slides you along
+##              the world plane the way you are facing, never down the nose --
+##              SHIFT rises, CTRL drops, SPACE TOGGLES the speed boost (press
+##              once for fast, again for normal) and the wheel is the speed
+##              dial. Nothing to collide with, nothing to fall off. These keys
+##              are GOD MODE ONLY: ordinary play keeps jump, sprint and dash.
 ##
 ##   THE BODY   parked. Its collision layer goes to 0 and EditorMode.active
 ##              goes true, so no mob, no animal, no swarm and no falling trunk
@@ -119,7 +122,6 @@ var grass_density := 1.0         ## 0..1, what Grow lays down
 var grass_brush := 14.0          ## metres
 var _grass_label: Label = null
 
-
 var selected_id := ""
 
 ## --- draft ------------------------------------------------------------------
@@ -155,7 +157,6 @@ var _tool_btns := {}
 var _note_title: LineEdit
 var _note_body: TextEdit
 var _sel_name: LineEdit
-var _sel_info: Label
 var _flag_btns := {}
 
 
@@ -282,31 +283,52 @@ func drop_in_here() -> void:
 	_player.god_sticky = false
 	_flag("god", false)
 	_player.flying = false
-	if map_over():
-		_player._map_over_god(false)   ## the map is an overlay -- shut it first
+	if overlay_over():
+		## a menu is an overlay over us -- shut it first
+		_player._menu_over_god(_player.menu_open, false)
 	_player._close_menu()              ## -> closed() -> return_to_body()
 	_note("Dropped in. Survival -- the landing is on the house.")
 
 
-## --- the map over the editor ------------------------------------------------
-## Player._toggle_menu("map") while we are up shows the map WITHOUT closing us:
-## menu_open becomes "map" and we stay visible and spectating underneath.
+## --- a menu over the editor --------------------------------------------------
+## Player._toggle_menu(anything) while we are up shows that menu WITHOUT
+## closing us: menu_open becomes the menu and we stay visible and spectating
+## underneath. Since 2026-09-12 this is EVERY menu, not just the map -- the
+## point of dev mode is that you never have to leave it to look at something.
+
+func overlay_over() -> bool:
+	## A menu -- any menu -- is sitting on top of us.
+	return visible and _player != null and _player.menu_open != "" \
+		and _player.menu_open != "god"
+
 
 func map_over() -> bool:
 	return visible and _player != null and _player.menu_open == "map"
 
 
-func map_opened() -> void:
+func overlay_opened(which: String) -> void:
 	_painting = false
 	_looking = false
 	if mouse_look:
-		set_mouse_look(false)      ## the map needs a pointer
-	_note("Map. Click to travel · M or Esc back to the editor.")
+		set_mouse_look(false)      ## a menu needs a pointer
+	if which == "map":
+		_note("Map. Click to travel · M or Esc back to the editor.")
+	else:
+		_note("%s, over the editor. Its own key or Esc goes back to the editor."
+			% which.capitalize())
+
+
+func overlay_closed() -> void:
+	_looking = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE    ## back to CURSOR mode
+
+
+func map_opened() -> void:
+	overlay_opened("map")
 
 
 func map_closed() -> void:
-	_looking = false
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE    ## back to CURSOR mode
+	overlay_closed()
 
 
 func travel_to(target: Vector3) -> void:
@@ -356,9 +378,9 @@ func eat_input(event: InputEvent) -> bool:
 			return false   ## Player's own KEY_F1 case opens the panel
 		return false
 
-	if map_over():
-		## The map is open on top of us: it owns every click, wheel and key
-		## (M / Esc close it through Player). We take nothing.
+	if overlay_over():
+		## A menu is open on top of us: it owns every click, wheel and key
+		## (its own key / Esc close it through Player). We take nothing.
 		_painting = false
 		return false
 
@@ -400,9 +422,19 @@ func eat_input(event: InputEvent) -> bool:
 				## F FLIPS THE MOUSE between looking and being a cursor.
 				set_mouse_look(not mouse_look)
 				return true
-			KEY_SPACE, KEY_CTRL:
-				## The camera reads these by polling. Swallow the events so the
-				## parked body never banks a jump or a dash for later.
+			KEY_SPACE:
+				## SPACE IS THE BOOST TOGGLE (Lemon, 2026-09-12) -- sticky, so
+				## you are not holding a key across a 4 km flight. Shared with
+				## the player's god flight through Player.god_boost.
+				if spectating() and _player != null:
+					_player.god_boost = not _player.god_boost
+					_player._add_log_msg("Boost %s" % ("on" if _player.god_boost
+						else "off"), Color(0.62, 0.92, 1.0))
+					return true
+				return spectating()
+			KEY_CTRL, KEY_SHIFT:
+				## The camera reads these by polling (down / up). Swallow the
+				## events so the parked body never banks a dash or a sprint.
 				return spectating()
 			KEY_F2:
 				## Drop in: body comes here, editor closes, survival resumes.
@@ -479,8 +511,8 @@ func take_motion(event: InputEvent) -> bool:
 	## leave your character spinning on the spot while you fly.
 	if not spectating() or not (event is InputEventMouseMotion):
 		return false
-	if map_over():
-		return true    ## the map has the pointer; nothing turns
+	if overlay_over():
+		return true    ## the menu has the pointer; nothing turns
 	## Captured = look with the mouse. Cursor = look only while RMB is down.
 	if not mouse_look and not _looking:
 		return true    ## eaten anyway: a free cursor must not turn anything
@@ -1126,11 +1158,12 @@ func _process(delta: float) -> void:
 		return
 	if cam != null and _player != null:
 		cam.speed_mult = _player.god_speed
-		cam.typing = typing or map_over()   ## WASD must not fly you under the map
+		cam.boost = _player.god_boost       ## the Space toggle, shared
+		cam.typing = typing or overlay_over()  ## WASD must not fly you under a menu
 	_update_aim()
 	_update_ghost()
 	_refresh_status()
-	if _painting and (tool == "ground" or tool == "grass") and not map_over():
+	if _painting and (tool == "ground" or tool == "grass") and not overlay_over():
 		if _over_panel():
 			_paint_last = Vector3(INF, INF, INF)   ## lift the brush over the panel
 		elif _aim_valid and tool == "ground":
@@ -1161,8 +1194,9 @@ func _refresh_status() -> void:
 	var body := ""
 	if spectating() and cam != null:
 		body = "  ·  body %.0f m" % cam.distance_to_body(_player)
-	_status.text = "%s  ×%.2f  ·  mouse %s%s\nx %.0f  y %.0f  z %.0f\nground %.0f · %s%s\nzone: %s" % [
-		mode, _player.god_speed, mouse, body, p.x, p.y, p.z, g, region,
+	var boosted := "  ·  BOOST" if _player.god_boost else ""
+	_status.text = "%s  ×%.2f%s  ·  mouse %s%s\nx %.0f  y %.0f  z %.0f\nground %.0f · %s%s\nzone: %s" % [
+		mode, _player.god_speed, boosted, mouse, body, p.x, p.y, p.z, g, region,
 		("" if place == "" else " · " + place), zname]
 	if _hint != null:
 		var aim := "—"

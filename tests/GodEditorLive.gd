@@ -49,6 +49,7 @@ func _init() -> void:
 	await t_planviz()
 	await t_editor()
 	await t_spectator()
+	await t_god_controls()
 	await t_world_is_blind()
 	await t_prefab_instancing()
 
@@ -275,6 +276,83 @@ func t_spectator() -> void:
 	var mm := InputEventMouseMotion.new()
 	ok(not ge.take_motion(mm), "...and does not eat motion")
 	ge.free()
+
+
+func t_god_controls() -> void:
+	## The 2026-09-12 control scheme: FLAT WASD, Shift up, Ctrl down, and a
+	## boost that is a TOGGLE rather than a held key. move_dir is the pure
+	## half of EditorCam._process, so the maths can be driven without a
+	## keyboard -- headless has no window to press keys into.
+	print("-- god controls: flat WASD, Shift/Ctrl height, sticky boost")
+	var cam := EditorCam.new()
+	root.add_child(cam)
+	await process_frame
+	var W := Vector3(0, 0, -1)
+
+	## nose buried in the dirt -- W must still go FLAT forward, not down
+	cam.yaw = 0.0
+	cam.pitch = -1.4
+	var d := cam.move_dir(W, 0.0)
+	ok(absf(d.y) < 0.0001, "nose down, W has no dive (y %.4f)" % d.y)
+	ok(d.distance_to(Vector3(0, 0, -1)) < 0.0001, "...it is flat north")
+	cam.pitch = 1.4
+	d = cam.move_dir(W, 0.0)
+	ok(absf(d.y) < 0.0001, "nose up, W has no climb either (y %.4f)" % d.y)
+
+	## ...but it still follows the YAW
+	cam.yaw = PI * 0.5
+	d = cam.move_dir(W, 0.0)
+	ok(d.distance_to(Vector3(-1, 0, 0)) < 0.0001, "turned 90 degrees, W follows")
+	cam.yaw = 0.0
+
+	## height is its own pair of keys, and it is world up/down
+	d = cam.move_dir(Vector3.ZERO, 1.0)
+	ok(d.distance_to(Vector3.UP) < 0.0001, "Shift alone is straight up")
+	d = cam.move_dir(Vector3.ZERO, -1.0)
+	ok(d.distance_to(Vector3.DOWN) < 0.0001, "Ctrl alone is straight down")
+	cam.pitch = -1.4
+	d = cam.move_dir(Vector3.ZERO, 1.0)
+	ok(d.distance_to(Vector3.UP) < 0.0001, "...and pitch does not tilt it")
+	d = cam.move_dir(W, 1.0)
+	ok(d.y > 0.7 and d.y < 0.71 and d.z < -0.7, "W+Shift is a 45 degree climb")
+	ok(absf(d.length() - 1.0) < 0.0001, "and the result is a unit vector")
+
+	## the boost is STICKY -- a flag, not a key poll
+	cam.speed_mult = 1.0
+	cam.boost = false
+	var plain := cam.speed()
+	cam.boost = true
+	ok(absf(cam.speed() - plain * EditorCam.BOOST) < 0.001,
+		"the boost flag multiplies by %.1f" % EditorCam.BOOST)
+	cam.boost = false
+	ok(absf(cam.speed() - plain) < 0.001, "and toggling it back is normal speed")
+	var csrc := FileAccess.get_file_as_string("res://scripts/EditorCam.gd")
+	ok(not csrc.contains("KEY_SPACE"),
+		"EditorCam polls Space nowhere -- the toggle is an event in GodEditor")
+	cam.free()
+
+	## --- every menu is an overlay over the editor (2026-09-12) -----------
+	var ps := FileAccess.get_file_as_string("res://scripts/Player.gd")
+	ok(ps.contains("func _menu_over_god("), "Player has the general overlay")
+	ok(ps.contains("func god_overlay("), "...and one test for what is over the editor")
+	ok(ps.contains("func _show_menu_panels("), "...and ONE panel table")
+	var close_at := ps.find("func _close_menu(")
+	ok(close_at > 0 and ps.substr(close_at, 400).contains("_menu_over_god(over, false)"),
+		"_close_menu sends an overlay back to the editor, not to the body")
+	var tog_at := ps.find("func _toggle_menu(")
+	ok(tog_at > 0 and ps.substr(tog_at, 700).contains("_menu_over_god(which, true)"),
+		"_toggle_menu opens ANY menu over the editor while it is up")
+	ok(ps.substr(tog_at, 700).contains("if which != \"god\" and godmode != null and godmode.visible:"),
+		"...for every menu, not a list of them")
+	var gs := FileAccess.get_file_as_string("res://scripts/GodEditor.gd")
+	ok(gs.contains("func overlay_over("), "GodEditor knows when a menu is over it")
+	ok(gs.contains("func overlay_opened(") and gs.contains("func overlay_closed("),
+		"...and has both hooks")
+	ok(gs.contains("func map_opened(") and gs.contains("func map_closed("),
+		"...while the map's named hooks still exist for the patcher")
+	ok(not gs.contains("if map_over():\n\t\t## The map is open"),
+		"eat_input defers to ANY menu, not just the map")
+	await process_frame
 
 
 func t_world_is_blind() -> void:

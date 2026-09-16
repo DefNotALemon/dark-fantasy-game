@@ -76,20 +76,28 @@ const ALIASES := {
 }
 
 ## World extent of the Maine bake (metres). x runs east, z runs SOUTH
-## (Godot's −z is north), origin at the centre of the bake.
+## (Godot's −z is north).
+##
+## 2026-09-13: the bake's origin is NOT the centre of the map. maine_meta.json
+## puts its bounds at x −1199.79…6000.21, z −8800.08…1999.92 — the spawn valley
+## sits inside it, not at its middle. The first estimate assumed a centred box
+## and every city came out ~4.2 km from the place it was named after.
 const WORLD_W := 7200.0
 const WORLD_H := 10800.0
+const WORLD_X0 := -1199.79      ## west edge of the bake
+const WORLD_Z0 := -8800.08      ## north edge of the bake
 
 ## ESTIMATED positions — see rule 5. Real lat/lon of each city mapped
 ## linearly into Maine's bounding box (lon −71.08…−66.95, lat 43.06…47.46)
-## and then into the bake. Overridden by name the moment a roster is bound.
+## and then into the bake's real bounds above. Within ~115 m of the bake's own
+## rows; overridden by name the moment a roster is bound.
 const BUILTIN_ROSTER := {
-	"Portland": Vector2(-2167.0, 3931.0),
-	"Lewiston-Auburn": Vector2(-2081.0, 2851.0),
-	"Bangor": Vector2(425.0, 1134.0),
-	"Augusta": Vector2(-1332.0, 2333.0),
-	"Brunswick": Vector2(-1649.0, 3316.0),
-	"Presque Isle": Vector2(1735.0, -3488.0),
+	"Portland": Vector2(235.0, 529.0),
+	"Lewiston-Auburn": Vector2(309.0, -554.0),
+	"Bangor": Vector2(2814.0, -2274.0),
+	"Augusta": Vector2(1067.0, -1070.0),
+	"Brunswick": Vector2(744.0, -97.0),
+	"Presque Isle": Vector2(4142.0, -6888.0),
 }
 
 ## ---------------------------------------------------------- the numbers ---
@@ -126,6 +134,15 @@ const STRIKE_RADIUS := 850.0                      ## strike when this far (hyste
 const TICK := 0.5                                 ## seconds between distance checks
 const MOW_PAD := 8.0                              ## mown ring past the wall
 
+## --- the site's own heightfield (2026-09-13) -------------------------------
+## `layout()` samples the ground ONCE, over the city's own square, and keeps
+## the answers in the layout. Staging stays a dumb reader (rule 1): a builder
+## asks `local_y()` rather than holding a ground probe of its own, so a staged
+## city can never disagree with the layout it came from.
+const SITE_STEP := 8.0                            ## metres between site samples
+const SITE_PAD := 24.0                            ## sampled past the wall's widest vertex
+const CONFORM_SPAN := 8.0                         ## longest wall/street piece laid at one height
+
 ## Lamps burn from a little before nightfall to a little after dawn —
 ## DayNight's DAWN_HOUR is 6.0 and NIGHTFALL_HOUR 20.6.
 const LAMP_ON_HOUR := 19.5
@@ -138,7 +155,10 @@ var roster_source := "none"          ## "world" | "builtin" | "none"
 var cities: Dictionary = {}          ## name → layout Dictionary
 var _rows: Dictionary = {}           ## name → Vector2 (world x, z) from the roster
 var _road_dirs: Dictionary = {}      ## name → Array[Vector2] injected or read off the net
+var _raw_names: Dictionary = {}      ## canonical name → the spelling the roster used
+var _net_names: Dictionary = {}      ## canonical name → the spelling the ROAD NET answers to
 var _staged: Dictionary = {}         ## name → Node3D
+var _town_rects: Array = []          ## Rect2 per staged city, world XZ — see _claim_ground
 var _lit := false
 var _acc := 0.0
 var hour_override := -1.0            ## ≥ 0 pins the lamp clock (tests, the sky menu); < 0 reads the sky
@@ -195,6 +215,13 @@ func bind_world(world: Object) -> void:
 		var ch: Object = world.call("chronicle")
 		if ch != null:
 			rows = ch.get("places")
+	if rows == null:
+		## World keeps the bake under a private `_terrain` and never re-exports
+		## `places()` itself — before 2026-09-13 that dropped every city onto
+		## the builtin estimate, 4.2 km from the place it was named after.
+		var terr_r: Object = _terrain_of(world)
+		if terr_r != null and terr_r.has_method("places"):
+			rows = terr_r.call("places")
 	if rows is Array and (rows as Array).size() > 0:
 		set_roster(rows as Array)
 	elif rows is Dictionary and (rows as Dictionary).size() > 0:
@@ -202,14 +229,44 @@ func bind_world(world: Object) -> void:
 	else:
 		set_roster([])
 	# --- the heightfield and the water map ---
+	##
+	## 2026-09-13 — THE UNDERGROUND TOWNS. None of the four (x, z) names below
+	## exist on World: it spells its probe `_surface_y(Vector3)` and hands the
+	## heightfield itself out to nobody. So `_ground_fn` stayed invalid, every
+	## city was laid out flat at y = 0, and the six stood buried under their
+	## own benches — Presque Isle by 108 m. Both Vector3 spellings and the
+	## terrain node's own samplers are tried now, in that order.
+	_ground_fn = Callable()
+	_water_fn = Callable()
+	var terr: Object = _terrain_of(world)
 	for m in ["ground_height", "height_at", "terrain_height", "ground_y"]:
 		if world.has_method(m):
 			_ground_fn = Callable(world, m)
 			break
+	if not _ground_fn.is_valid():
+		for m in ["_surface_y", "surface_y"]:
+			if world.has_method(m):
+				var w: Object = world
+				var mm: String = m
+				_ground_fn = func(x: float, z: float) -> float:
+					return float(w.call(mm, Vector3(x, 0.0, z)))
+				break
+	if not _ground_fn.is_valid() and terr != null and terr.has_method("sample_height"):
+		var th: Object = terr
+		_ground_fn = func(x: float, z: float) -> float:
+			return float(th.call("sample_height", x, z))
 	for m in ["is_water", "water_at", "in_water"]:
 		if world.has_method(m):
 			_water_fn = Callable(world, m)
 			break
+	if not _water_fn.is_valid() and terr != null and terr.has_method("is_water_at"):
+		## NOT the raw water map: the bake keeps sea cells BURIED under
+		## Portland's and Freeport's town pads, and `is_water_at` is the
+		## facade that only calls it water where the surface stands over
+		## the bed. Sampling the raw map drowns a third of the hub.
+		var tw: Object = terr
+		_water_fn = func(x: float, z: float) -> bool:
+			return bool(tw.call("is_water_at", Vector3(x, 0.0, z)))
 	# --- grass, for the mow ---
 	if world.has_method("grass"):
 		_grass = world.call("grass")
@@ -226,12 +283,32 @@ func bind_world(world: Object) -> void:
 		_sky = null
 
 
+## The ground node, by whichever name the world keeps it under. A world that
+## answers none of these is a flat, dry world, which is the normal case in the
+## headless suite.
+static func _terrain_of(world: Object) -> Object:
+	if world == null:
+		return null
+	for m in ["terrain", "overworld", "ground_node"]:
+		if world.has_method(m):
+			var t: Variant = world.call(m)
+			if t is Object and t != null:
+				return t as Object
+	for prop in ["_terrain", "terrain", "_overworld"]:
+		var v: Variant = world.get(prop)
+		if v is Object and v != null:
+			return v as Object
+	return null
+
+
 ## Rows are the bake's `places` records: {name, pos:[x,z], y, rank}. A Vector2
 ## or Vector3 `pos` is accepted too. Only names in CITY_TIERS (after ALIASES)
 ## become cities; everything else is ignored. An empty roster falls back to
 ## the builtin estimate.
 func set_roster(rows: Array) -> void:
 	_rows.clear()
+	_raw_names.clear()
+	_net_names.clear()
 	for r in rows:
 		if not (r is Dictionary):
 			continue
@@ -243,6 +320,7 @@ func set_roster(rows: Array) -> void:
 		if p == null:
 			continue
 		_rows[nm] = p
+		_raw_names[nm] = str(row.get("name", nm))
 	if _rows.size() > 0:
 		roster_source = "world"
 	else:
@@ -290,6 +368,39 @@ func set_roadnet(net: Object) -> void:
 		return
 	if net.has_method("edges_from") and net.has_method("place_pos"):
 		_net = net
+
+
+## The name the ROAD NET knows this city by. The tier table says
+## "Lewiston-Auburn"; the bake writes "Lewiston–Auburn" with an EN DASH, and
+## the net is built from the bake, so asking it under the canonical spelling
+## got an empty edge list and the Twin Mills stood with two default gates
+## facing nothing (2026-09-13, the same en-dash trap as the missing sixth
+## city). Tries the canonical name, the roster's own spelling, then the dash
+## variants, and keeps whichever the net answers to.
+func net_name_for(city: String) -> String:
+	if _net_names.has(city):
+		return _net_names[city]
+	var found := city
+	if _net != null:
+		var tries: Array = [city]
+		if _raw_names.has(city) and not tries.has(_raw_names[city]):
+			tries.append(_raw_names[city])
+		for dash in ["–", "—"]:
+			var alt := city.replace("-", dash)
+			if not tries.has(alt):
+				tries.append(alt)
+		for t in tries:
+			var e: Variant = _net.call("edges_from", t)
+			var n := 0
+			if e is PackedInt32Array:
+				n = (e as PackedInt32Array).size()
+			elif e is Array:
+				n = (e as Array).size()
+			if n > 0:
+				found = t
+				break
+	_net_names[city] = found
+	return found
 
 
 ## Direct injection, for tests and for a world with no net: unit Vector2s
@@ -347,7 +458,8 @@ func road_dirs_for(city: String) -> Array:
 	if _net == null or not _rows.has(city):
 		return out
 	var here: Vector2 = _rows[city]
-	var edges: Variant = _net.call("edges_from", city)
+	var key := net_name_for(city)
+	var edges: Variant = _net.call("edges_from", key)
 	## RoadNet.edges_from answers a PackedInt32Array of EDGE IDS, resolved
 	## through RoadNet.edge(id); a net that hands the records straight back is
 	## accepted too. (2026-09-12: the id form is the real one, and it used to
@@ -365,7 +477,7 @@ func road_dirs_for(city: String) -> Array:
 		var e: Variant = e0
 		if (e is int) and _net.has_method("edge"):
 			e = _net.call("edge", int(e))
-		var far: Variant = _edge_far_end(e, city, here)
+		var far: Variant = _edge_far_end(e, key, here)
 		if far == null:
 			continue
 		var d: Vector2 = (far as Vector2) - here
@@ -478,6 +590,7 @@ static func layout(city: String, tier: int, centre: Vector2, road_dirs: Array, w
 		"tier": tier,
 		"epithet": EPITHETS.get(city, ""),
 		"centre": Vector3(centre.x, cy, centre.y),
+		"site": _site_heights(centre, R, ground, cy),
 		"core_r": R,
 		"wall": wall,
 		"wall_kind": WALL_KIND[tier],
@@ -492,6 +605,52 @@ static func layout(city: String, tier: int, centre: Vector2, road_dirs: Array, w
 		"lamps": lamps,
 		"rejected": rejected,
 	}
+
+
+## A square of LOCAL ground heights (world y minus the centre's), SITE_STEP
+## apart, reaching SITE_PAD past the wall's widest possible vertex. Local, so
+## a flat world is all zeroes and a staged city's node positions can use the
+## numbers as they stand.
+static func _site_heights(centre: Vector2, R: float, ground: Callable, cy: float) -> Dictionary:
+	var reach: float = R * (1.0 + WALL_JITTER * 0.5) + SITE_PAD
+	var n: int = int(ceil(reach * 2.0 / SITE_STEP)) + 1
+	var h := PackedFloat32Array()
+	h.resize(n * n)
+	if ground.is_valid():
+		for iz in range(n):
+			var lz: float = -reach + float(iz) * SITE_STEP
+			for ix in range(n):
+				var lx: float = -reach + float(ix) * SITE_STEP
+				h[iz * n + ix] = _y_at(ground, centre.x + lx, centre.y + lz) - cy
+	return {"n": n, "step": SITE_STEP, "reach": reach, "h": h}
+
+
+## Ground height LOCAL to the city centre at a local (x, z) — bilinear off the
+## site grid, clamped at its edge, 0.0 for a flat world or an old layout with
+## no grid in it. THE one question every builder asks about the ground.
+static func local_y(c: Dictionary, lx: float, lz: float) -> float:
+	var site: Dictionary = c.get("site", {})
+	if site.is_empty():
+		return 0.0
+	var n: int = int(site.get("n", 0))
+	if n < 2:
+		return 0.0
+	var step: float = float(site["step"])
+	var reach: float = float(site["reach"])
+	var h: PackedFloat32Array = site["h"]
+	if h.size() < n * n:
+		return 0.0
+	var fx: float = clampf((lx + reach) / step, 0.0, float(n - 1))
+	var fz: float = clampf((lz + reach) / step, 0.0, float(n - 1))
+	var ix: int = mini(int(floor(fx)), n - 2)
+	var iz: int = mini(int(floor(fz)), n - 2)
+	var tx: float = fx - float(ix)
+	var tz: float = fz - float(iz)
+	var a: float = h[iz * n + ix]
+	var b: float = h[iz * n + ix + 1]
+	var d0: float = h[(iz + 1) * n + ix]
+	var d1: float = h[(iz + 1) * n + ix + 1]
+	return lerpf(lerpf(a, b, tx), lerpf(d0, d1, tx), tz)
 
 
 static func _y_at(ground: Callable, x: float, z: float) -> float:
@@ -594,7 +753,7 @@ static func _gates(wall: PackedVector2Array, road_dirs: Array, city: String, wse
 
 ## Radial streets from every gate to the square, one hashed bend each so
 ## nothing is razor-straight.
-static func _streets(wall: PackedVector2Array, gates: Array, tier: int, city: String, wseed: int) -> Array:
+static func _streets(_wall: PackedVector2Array, gates: Array, tier: int, city: String, wseed: int) -> Array:
 	var out: Array = []
 	var R: float = CORE_R[tier]
 	var i := 0
@@ -1008,6 +1167,7 @@ func stage(city: String) -> Node3D:
 	_build_lamps(root, c)
 	_apply_lamps(root, _lit)
 	_mow(c)
+	_claim_ground(c)
 	return root
 
 
@@ -1028,6 +1188,19 @@ func strike_all() -> void:
 ## A town is not a hayfield. One cut over the whole core, past the wall;
 ## the grass records it in its own cut ledger and re-reads it on stream-in,
 ## so this costs nothing on a reload. Silent no-op with no grass bound.
+## THE TOWN IS NOT A MEADOW. A staged city hands its footprint to the grass:
+## the chunks inside it belong to the CPU placer, which is the only thing that
+## knows about paved streets and mown yards (GrassSystem.set_towns, and the
+## GPU field steps out of the rect the way it steps out of the valley).
+func _claim_ground(c: Dictionary) -> void:
+	if _grass == null or not _grass.has_method("set_towns"):
+		return
+	var cen: Vector3 = c["centre"]
+	var r: float = float(c["core_r"]) * (1.0 + WALL_JITTER * 0.5) + MOW_PAD
+	_town_rects.append(Rect2(cen.x - r, cen.z - r, r * 2.0, r * 2.0))
+	_grass.call("set_towns", _town_rects)
+
+
 func _mow(c: Dictionary) -> void:
 	if _grass == null:
 		return
@@ -1052,6 +1225,11 @@ static func mat(kind: String) -> StandardMaterial3D:
 		"stone_dk":  m.albedo_color = Color(0.32, 0.31, 0.29)
 		"palisade":  m.albedo_color = Color(0.36, 0.27, 0.16)
 		"dirt":      m.albedo_color = Color(0.36, 0.28, 0.19)
+		## A city is paved and the country is not — that contrast is the whole
+		## point of walking through a gate. Cobble for the thoroughfares and
+		## the ring roads, brick for the lanes between them.
+		"cobble":    m.albedo_color = Color(0.44, 0.43, 0.40)
+		"brick":     m.albedo_color = Color(0.44, 0.26, 0.20)
 		"door":      m.albedo_color = Color(0.14, 0.09, 0.05)
 		"canvas_r":  m.albedo_color = Color(0.62, 0.22, 0.18)
 		"canvas_b":  m.albedo_color = Color(0.20, 0.30, 0.50)
@@ -1081,6 +1259,20 @@ static func _box_in(parent: Node, size: Vector3, m: Material, pos: Vector3, yaw 
 	mi.material_override = m
 	mi.position = pos
 	mi.rotation.y = yaw
+	parent.add_child(mi)
+	return mi
+
+
+## A box laid ALONG a slope: yaw about +y, then pitch about its own +x, so
+## its long axis (local z) runs up the hill instead of cutting into it.
+static func _slab_in(parent: Node, size: Vector3, m: Material, pos: Vector3, yaw: float, pitch: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = m
+	mi.position = pos
+	mi.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
 	parent.add_child(mi)
 	return mi
 
@@ -1122,9 +1314,11 @@ func _build_ground_pad(root: Node3D, c: Dictionary) -> void:
 	cm.height = 0.12
 	cm.radial_segments = 24
 	pad.mesh = cm
-	pad.material_override = mat("dirt")
+	## Tier 1 keeps its dirt square — a market at a crossroads is trodden
+	## earth. The two bigger tiers are proper cities and lay stone.
+	pad.material_override = mat("dirt" if int(c["tier"]) < 2 else "cobble")
 	pad.name = "SquarePad"
-	pad.position = Vector3(0.0, 0.03, 0.0)
+	pad.position = Vector3(0.0, local_y(c, 0.0, 0.0) + 0.03, 0.0)
 	root.add_child(pad)
 
 
@@ -1156,7 +1350,7 @@ func _build_wall(root: Node3D, c: Dictionary) -> void:
 				gate_dir = g["dir"]
 				break
 		if gate_t < 0.0:
-			_wall_piece(holder, a, b, h, t, m, "Seg%d" % i)
+			_wall_piece(holder, c, a, b, h, t, m, "Seg%d" % i)
 		else:
 			var L := a.distance_to(b)
 			var u := (b - a) / maxf(L, 0.001)
@@ -1165,37 +1359,62 @@ func _build_wall(root: Node3D, c: Dictionary) -> void:
 			var left := gc - u * half
 			var right := gc + u * half
 			if (left - a).length() > 1.0:
-				_wall_piece(holder, a, left, h, t, m, "Seg%dL" % i)
+				_wall_piece(holder, c, a, left, h, t, m, "Seg%dL" % i)
 			if (b - right).length() > 1.0:
-				_wall_piece(holder, right, b, h, t, m, "Seg%dR" % i)
-			_tower(holder, left, h, m, "TowerL%d" % i)
-			_tower(holder, right, h, m, "TowerR%d" % i)
+				_wall_piece(holder, c, right, b, h, t, m, "Seg%dR" % i)
+			_tower(holder, c, left, h, m, "TowerL%d" % i)
+			_tower(holder, c, right, h, m, "TowerR%d" % i)
 			# a threshold of dirt through the gap, so the gate reads from a distance
 			var yaw := atan2(gate_dir.x, gate_dir.y)
-			_box_in(holder, Vector3(GATE_W, 0.1, t + 4.0), mat("dirt"), Vector3(gc.x, 0.02, gc.y), yaw).name = "Gate%d" % i
+			var gy := local_y(c, gc.x, gc.y)
+			_box_in(holder, Vector3(GATE_W, 0.5, t + 4.0), mat("dirt"),
+					Vector3(gc.x, gy - 0.22, gc.y), yaw).name = "Gate%d" % i
 			if kind == "stone":
 				var lintel := _box_in(holder, Vector3(GATE_W + TOWER_W, 1.2, t), mat("stone_dk"),
-						Vector3(gc.x, h - 0.6, gc.y), yaw)
+						Vector3(gc.x, gy + h - 0.6, gc.y), yaw)
 				lintel.name = "Lintel%d" % i
 
 
-func _wall_piece(holder: Node3D, a: Vector2, b: Vector2, h: float, t: float, m: Material, nm: String) -> void:
+## A wall run, cut into CONFORM_SPAN pieces so it FOLLOWS the ground instead
+## of hanging off the centre's height. A 75 m segment of Portland's wall used
+## to span a 20 m drop into the harbour in one box.
+func _wall_piece(holder: Node3D, c: Dictionary, a: Vector2, b: Vector2, h: float, t: float, m: Material, nm: String) -> void:
+	var L := a.distance_to(b)
+	if L < 0.05:
+		return
+	var steps := maxi(1, int(ceil(L / CONFORM_SPAN)))
+	for s in range(steps):
+		var p0 := a.lerp(b, float(s) / float(steps))
+		var p1 := a.lerp(b, float(s + 1) / float(steps))
+		_wall_span(holder, c, p0, p1, h, t, m, nm if steps == 1 else "%s_%d" % [nm, s])
+
+
+## One box: top flush with the HIGHER end, foot 2 m under the lower one, so a
+## sloped span shows neither a gap nor a step.
+func _wall_span(holder: Node3D, c: Dictionary, a: Vector2, b: Vector2, h: float, t: float, m: Material, nm: String) -> void:
 	var L := a.distance_to(b)
 	var mid := (a + b) * 0.5
+	var y0 := local_y(c, a.x, a.y)
+	var y1 := local_y(c, b.x, b.y)
+	var top := maxf(y0, y1) + h
+	var bot := minf(y0, y1) - 2.0
+	var hh := top - bot
+	var mid_y := (top + bot) * 0.5
 	var d := b - a
 	var yaw := atan2(d.x, d.y)                     # local +z runs a→b
-	var sb := _collider(Vector3(t, h + 2.0, L), Vector3(mid.x, h * 0.5 - 1.0, mid.y), yaw)
+	var sb := _collider(Vector3(t, hh, L), Vector3(mid.x, mid_y, mid.y), yaw)
 	sb.name = nm
 	holder.add_child(sb)
-	_box_in(sb, Vector3(t, h + 2.0, L), m, Vector3.ZERO)
+	_box_in(sb, Vector3(t, hh, L), m, Vector3.ZERO)
 	if t >= 1.0:
 		# a walkway lip along the top
-		_box_in(sb, Vector3(t + 0.6, 0.5, L), mat("stone_dk"), Vector3(0.0, h * 0.5 + 0.75, 0.0))
+		_box_in(sb, Vector3(t + 0.6, 0.5, L), mat("stone_dk"), Vector3(0.0, top - 0.25 - mid_y, 0.0))
 
 
-func _tower(holder: Node3D, at: Vector2, h: float, m: Material, nm: String) -> void:
+func _tower(holder: Node3D, c: Dictionary, at: Vector2, h: float, m: Material, nm: String) -> void:
 	var th := h + 2.5
-	var sb := _collider(Vector3(TOWER_W, th + 2.0, TOWER_W), Vector3(at.x, th * 0.5 - 1.0, at.y))
+	var gy := local_y(c, at.x, at.y)
+	var sb := _collider(Vector3(TOWER_W, th + 2.0, TOWER_W), Vector3(at.x, gy + th * 0.5 - 1.0, at.y))
 	sb.name = nm
 	holder.add_child(sb)
 	_box_in(sb, Vector3(TOWER_W, th + 2.0, TOWER_W), m, Vector3.ZERO)
@@ -1208,20 +1427,59 @@ func _build_streets(root: Node3D, c: Dictionary) -> void:
 	var holder := Node3D.new()
 	holder.name = "Streets"
 	root.add_child(holder)
+	## `roads` is gate streets, then minor radials, then rings (layout()). The
+	## thoroughfares and the rings are COBBLE, the lanes between them BRICK.
+	## Outside the walls a road is still dirt — that is what a gate is for.
+	var n_gate: int = (c["streets"] as Array).size()
+	var n_minor: int = (c["minor"] as Array).size()
+	var cen: Vector3 = c["centre"]
+	var paved: Array = []
+	var ri := -1
 	var k := 0
 	for pl in c["roads"]:
+		ri += 1
+		var surface := "brick" if (ri >= n_gate and ri < n_gate + n_minor) else "cobble"
 		var p2: PackedVector2Array = pl
 		for i in range(p2.size() - 1):
 			var a := p2[i]
 			var b := p2[i + 1]
-			var d := b - a
-			var L := d.length()
-			if L < 0.5:
+			var seg := b - a
+			var SL := seg.length()
+			if SL < 0.5:
 				continue
-			var mid := (a + b) * 0.5
-			_box_in(holder, Vector3(STREET_W, 0.08, L + STREET_W * 0.5), mat("dirt"),
-					Vector3(mid.x, 0.02, mid.y), atan2(d.x, d.y)).name = "S%d" % k
-			k += 1
+			## Cut into CONFORM_SPAN pieces and sit each on its own ground. A
+			## ring street is one 60 m chord between wall vertices; laid flat
+			## it either floats over the slope or vanishes into it.
+			var steps := maxi(1, int(ceil(SL / CONFORM_SPAN)))
+			for s in range(steps):
+				var q0 := a.lerp(b, float(s) / float(steps))
+				var q1 := a.lerp(b, float(s + 1) / float(steps))
+				var d := q1 - q0
+				var L := d.length()
+				if L < 0.05:
+					continue
+				var mid := (q0 + q1) * 0.5
+				var y0 := local_y(c, q0.x, q0.y)
+				var y1 := local_y(c, q1.x, q1.y)
+				var gy := (y0 + y1) * 0.5
+				## A street LIES ON the slope, it does not step down it. The
+				## first conforming pass laid every piece level and Portland's
+				## gate street came down the harbour bank as a dashed line of
+				## floating plates. 0.6 m thick, top at the ground: a thin
+				## strip opens a seam at every joint the moment it tilts.
+				var pitch := atan2(y1 - y0, L)
+				var run := sqrt(L * L + (y1 - y0) * (y1 - y0))
+				_slab_in(holder, Vector3(STREET_W, 0.6, run + STREET_W * 0.5), mat(surface),
+						Vector3(mid.x, gy - 0.28, mid.y), atan2(d.x, d.y), -pitch).name = "S%d" % k
+				k += 1
+				## ...and the meadow stops at the kerb. The slab's top sits AT
+				## the ground, so grass left standing under one grows straight
+				## up through the cobbles. WORLD coordinates: the polylines are
+				## local to the city centre, GrassSystem is not.
+				paved.append({"a": Vector2(cen.x + q0.x, cen.z + q0.y),
+					"b": Vector2(cen.x + q1.x, cen.z + q1.y), "w": STREET_W + 0.6})
+	if _grass != null and _grass.has_method("pave"):
+		_grass.call("pave", paved)
 
 
 func _build_lots(root: Node3D, c: Dictionary) -> void:
@@ -1253,9 +1511,9 @@ func _build_lots(root: Node3D, c: Dictionary) -> void:
 				_roof_in(spire, Vector3(2.0, 3.0, 2.0), mat("slate"), Vector3(0.0, s.y * 0.8 + 1.5, 0.0))
 			"inn":
 				_house_body(house, Vector3(s.x * 1.3, s.y * 1.25, s.z * 1.3), "daub", "thatch" if tier < 3 else "slate", true)
-				var sign := _box_in(house, Vector3(1.2, 0.8, 0.12), mat("board"),
+				var sign_mi := _box_in(house, Vector3(1.2, 0.8, 0.12), mat("board"),
 						Vector3(s.x * 0.65 + 0.7, s.y * 0.9, s.z * 0.65 - 0.2))
-				sign.name = "Sign"
+				sign_mi.name = "Sign"
 			_:
 				var wall_kind := "daub" if _h(world_seed, c["name"], 5000 + i) < 0.7 else "board"
 				_house_body(house, s, wall_kind, "thatch" if tier < 3 or _h(world_seed, c["name"], 6000 + i) < 0.5 else "slate", false)
@@ -1301,7 +1559,7 @@ func _build_square(root: Node3D, c: Dictionary) -> void:
 		var p: Vector2 = st["pos"]
 		var stall := Node3D.new()
 		stall.name = "Stall%d" % i
-		stall.position = Vector3(p.x, 0.0, p.y)
+		stall.position = Vector3(p.x, local_y(c, p.x, p.y), p.y)
 		stall.rotation.y = float(st["yaw"])
 		holder.add_child(stall)
 		_box_in(stall, Vector3(3.0, 0.9, 1.2), mat("board"), Vector3(0.0, 0.45, 0.0))
@@ -1322,7 +1580,7 @@ func _build_lamps(root: Node3D, c: Dictionary) -> void:
 		var p: Vector2 = lp
 		var lamp := Node3D.new()
 		lamp.name = "Lamp%d" % i
-		lamp.position = Vector3(p.x, 0.0, p.y)
+		lamp.position = Vector3(p.x, local_y(c, p.x, p.y), p.y)
 		holder.add_child(lamp)
 		_box_in(lamp, Vector3(0.18, 3.2, 0.18), mat("iron"), Vector3(0.0, 1.6, 0.0))
 		var head := _box_in(lamp, Vector3(0.42, 0.42, 0.42), mat("lamp_off"), Vector3(0.0, 3.35, 0.0))

@@ -394,6 +394,19 @@ func t_surface_amnesty() -> void:
 
 func t_the_bear() -> void:
 	print(" [the bear: warnings without a charge]")
+	## A floor under this one: the standoff below runs long enough that a
+	## bear in free fall (the lab has no ground) would drop clean out of its
+	## own warn radius and stand down for the wrong reason.
+	var floor_body := StaticBody3D.new()
+	floor_body.collision_layer = 1
+	var floor_shape := CollisionShape3D.new()
+	var floor_box := BoxShape3D.new()
+	floor_box.size = Vector3(120, 1, 120)
+	floor_shape.shape = floor_box
+	floor_body.add_child(floor_shape)
+	_world.add_child(floor_body)
+	floor_body.global_position = Vector3(800, -0.5, 800)
+
 	var br := Critter.make("black_bear")
 	_world.add_child(br)
 	br.global_position = Vector3(800, 0, 800)
@@ -419,6 +432,51 @@ func t_the_bear() -> void:
 	ok(br.mood != Critter.Mood.CHARGE, "but it never charges (mood %d)" % br.mood)
 	near(_player.damage_taken, 0.0, 0.001, "and it never lands a blow")
 	ok(br._bluff_count >= 1, "it climbed the ladder — it simply has no top rung")
+
+	## THE STANDOFF (2026-09-14). Off the top of a ladder it may not climb,
+	## the bear holds its ground — it does NOT re-run the rung every time the
+	## clip ends. Before this a Peaceful bear reared, then huffed, rang the
+	## Telegraph and shouted its alarm every 1.2 s for as long as you stood
+	## anywhere inside its 58 m leash, and every deer on the hill relayed it.
+	var tele := Telegraph.new()
+	_world.add_child(tele)
+	var rings: Array[int] = [0]
+	tele.alarmed.connect(func(_p: Vector3, _r: float, _t: int, who: String) -> void:
+		if who == br.display_name:
+			rings[0] += 1)
+	await process_frame
+	for _i in range(420):          ## let the opener (bear_stand, 5 s) finish
+		await physics_frame
+		if br._sig == "":
+			break
+	var rings_before: int = rings[0]
+	var starts := 0
+	var prev_sig: String = br._sig
+	for _i in range(240):          ## four seconds nose to nose
+		await physics_frame
+		if br._sig != prev_sig and br._sig != "":
+			starts += 1
+		prev_sig = br._sig
+	eq(br._bluff_count, 1, "PEACEFUL: the one rung is climbed once, not once per clip")
+	eq(br.mood, Critter.Mood.WARN, "and it is still holding its ground")
+	eq(rings[0] - rings_before, 0, "nothing more on the wire — the forest was told the first time")
+	ok(starts <= 1, "at most one more huff in four seconds, not one every 1.2 s (%d)" % starts)
+	near(_player.damage_taken, 0.0, 0.001, "and still not a scratch")
+
+	## Back off past its warn radius and it lets the matter drop — it does
+	## not hold the whole 58 m leash against someone it is not allowed to
+	## touch. That leash is for a fight, and on Peaceful there is no fight.
+	_player.global_position = Vector3(800, 0, 832)   ## 32 m, past warn_at * 1.6
+	var dropped := false
+	for _i in range(300):
+		await physics_frame
+		if br.mood != Critter.Mood.WARN:
+			dropped = true
+			break
+	ok(dropped, "PEACEFUL: it stands down once you have backed off (mood %d)" % br.mood)
+	ok(br.mood != Critter.Mood.CHARGE, "and still never charges")
+	tele.queue_free()
+	_player.global_position = Vector3(800, 0, 806)
 
 	## Hit it and the whole ladder is available again.
 	br.take_damage(1.0)
@@ -448,6 +506,7 @@ func t_the_bear() -> void:
 
 	br.queue_free()
 	br2.queue_free()
+	floor_body.queue_free()
 	GameMode.set_mode(GameMode.Mode.NORMAL, self)
 	_player.global_position = Vector3.ZERO
 	_player.damage_taken = 0.0

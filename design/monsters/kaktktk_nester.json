@@ -1,0 +1,46 @@
+{
+	"abilities": [
+		"shock"
+	],
+	"accent": "3fcca7",
+	"arms": "none",
+	"born_tier": 0,
+	"bulk": 0.87,
+	"climber": true,
+	"col": "997c4e",
+	"dmg": 16.0,
+	"duelist": false,
+	"eye_col": "f2f2e6",
+	"eyes": 2,
+	"families": [
+		"beast"
+	],
+	"head": "snout",
+	"head_size": 0.97,
+	"horns": 0,
+	"hp": 93.0,
+	"id": "sp_77412494",
+	"leg_len": 1.16,
+	"mass": 48.0,
+	"monster": true,
+	"name": "Kaktktk Nester",
+	"native": false,
+	"neck": 0.58,
+	"nerve": 0.04,
+	"orb_tier": 2,
+	"pack": [
+		3,
+		6
+	],
+	"plan": "hexapod",
+	"plates": true,
+	"segments": 0,
+	"size": 1.35,
+	"special": "flurry",
+	"speed": 6.5,
+	"spines": false,
+	"tail": "",
+	"tier": 2,
+	"tile": "stone",
+	"xp_tier": 2
+}

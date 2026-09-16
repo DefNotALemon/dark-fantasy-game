@@ -101,9 +101,9 @@ static func bindings() -> Array:
 			"what": "THE ITEM WHEEL -- hold, drag toward a slot, release to use it",
 			"live": "hold", "expect": "wheel_open", "why": ""},
 		{"tok": "KEY_E", "code": KEY_E, "label": "E",
-			"what": "INTERACT -- grab, pick up, pack a bedroll, gather rock, hoist a log, light and feed a fire, drink",
+			"what": "INTERACT -- grab, pick up, pack a bedroll, gather rock, hoist a log, light and feed a fire, drink; HOLD it over a heap and the whole pile of that same kind comes in",
 			"live": "none", "expect": "",
-			"why": "needs something in reach; a probe on empty ground proves nothing either way"},
+			"why": "needs something in reach; a probe on empty ground proves nothing either way. The hold is covered by tests/GatherTests.gd"},
 		{"tok": "KEY_M", "code": KEY_M, "label": "M",
 			"what": "THE MAP (the mob menu it used to open moved to K)",
 			"live": "menu", "expect": "map", "why": ""},
@@ -153,7 +153,7 @@ static func bindings() -> Array:
 			"what": "the SKY menu -- time, season, weather, lightning, aurora",
 			"live": "menu", "expect": "sky", "why": ""},
 		{"tok": "KEY_ESCAPE", "code": KEY_ESCAPE, "label": "Esc",
-			"what": "closes whatever is open; with nothing open, the settings menu",
+			"what": "closes whatever is open; with nothing open, the settings menu -- and in DEV MODE it opens settings OVER the editor instead of closing it",
 			"live": "menu", "expect": "settings", "why": ""},
 	]
 
@@ -178,9 +178,10 @@ static func god_eats() -> Array:
 		{"tok": "KEY_F2", "cond": "", "what": "drop in -- the panel owns it outright"},
 		{"tok": "KEY_B", "cond": "k.shift_pressed", "what": "Shift+B brings the body here; plain B falls through to Player's drop"},
 		{"tok": "KEY_F", "cond": "", "what": "flips the mouse between looking and being a cursor"},
-		{"tok": "KEY_SPACE", "cond": "spectating()", "what": "swallowed only while spectating, so the parked body never banks a jump"},
-		{"tok": "KEY_CTRL", "cond": "spectating()", "what": "same, for the dash"},
-		{"tok": "KEY_ESCAPE", "cond": "", "what": "closes the panel; while typing it drops focus first and nothing else gets through"},
+		{"tok": "KEY_SPACE", "cond": "spectating()", "what": "the BOOST TOGGLE (2026-09-12) -- swallowed only while spectating, so the parked body never banks a jump"},
+		{"tok": "KEY_CTRL", "cond": "spectating()", "what": "descend; swallowed so the parked body never banks a dash"},
+		{"tok": "KEY_SHIFT", "cond": "spectating()", "what": "ascend (2026-09-12); swallowed so the parked body never banks a sprint"},
+		{"tok": "KEY_ESCAPE", "cond": "", "what": "clears a draft polygon, then falls through to Player -- which since 2026-09-12 opens SETTINGS over the editor rather than closing it; while typing it drops focus first and nothing else gets through"},
 	]
 
 
@@ -207,8 +208,8 @@ static func poll_ok() -> Array:
 	## Polling is invisible to event consumption, so it is a second, quieter
 	## way to claim a key and it needs its own allowlist.
 	return [
-		{"file": "scripts/EditorCam.gd", "toks": ["KEY_SPACE", "KEY_CTRL", "KEY_SHIFT"],
-			"why": "god fly: up, down and boost, read by polling on purpose -- which is exactly why GodEditor swallows the events"},
+		{"file": "scripts/EditorCam.gd", "toks": ["KEY_CTRL", "KEY_SHIFT"],
+			"why": "god fly height: Shift up, Ctrl down, read by polling on purpose -- which is exactly why GodEditor swallows the events. Space is NOT polled any more: since 2026-09-12 the boost is a sticky toggle GodEditor flips on the key EVENT"},
 	]
 
 

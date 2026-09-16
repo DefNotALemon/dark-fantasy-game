@@ -8,6 +8,7 @@ class_name RockDebris
 
 const SMALL_DMG := 0.0
 const BIG_DMG := 10.0
+const GATHER_FLY := 0.30         ## hold-E sweep: s from the ground to the pack
 
 var vel := Vector3.ZERO
 var big := false
@@ -20,6 +21,8 @@ var _life := 0.0
 var _fade := 0.0
 var _hurt_done := false
 var _refoot := randf_range(0.3, 0.6)  ## staggered footing re-checks once landed
+var gather_to: Node3D = null     ## hold-E sweep: non-null means it is leaving
+var gather_t := 0.0
 
 
 static func make(at: Vector3, velocity: Vector3, is_big := false, is_wood := false, is_hazard := false) -> RockDebris:
@@ -62,6 +65,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if gather_to != null:
+		_fly_home(delta)
+		return
 	if landed:
 		_life += delta
 		## The ground under a landed rock can be dug away (or a sleep shift
@@ -90,10 +96,10 @@ func _physics_process(delta: float) -> void:
 		## ROLLING: gravity's slope component drives it, friction argues.
 		## Gentle ground talks it to a stop; STEEP ground keeps it going;
 		## losing the ground under it (a cliff lip) drops it back into a fall.
-		var space := get_world_3d().direct_space_state
+		var dss := get_world_3d().direct_space_state
 		var gq := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.35,
 			global_position + Vector3.DOWN * 0.7)
-		var ghit := space.intersect_ray(gq)
+		var ghit := dss.intersect_ray(gq)
 		if ghit.is_empty():
 			_rolling = false  ## rolled off the edge — falling again
 			return
@@ -117,7 +123,7 @@ func _physics_process(delta: float) -> void:
 		if sp > 0.05:
 			var wq := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.08,
 				global_position + Vector3.UP * 0.08 + vel * delta * 2.0)
-			var whit := space.intersect_ray(wq)
+			var whit := dss.intersect_ray(wq)
 			if not whit.is_empty() and (whit.normal as Vector3).y < 0.45:
 				vel = vel.bounce(whit.normal as Vector3) * 0.3
 		global_position += vel * delta
@@ -169,4 +175,32 @@ func _physics_process(delta: float) -> void:
 		## Wall or ceiling: bounce off, lose most of the energy, keep falling.
 		vel = vel.bounce(n) * 0.35
 	if global_position.y < -60.0:
+		queue_free()
+
+
+## --------------------- The pile sweep (hold E) ----------------------------
+## A pickaxe leaves five or six of these lying together, which is exactly the
+## case hold-E is for. The player counts the rock into the pack and then hands
+## the chunk itself over to this: out of the "debris" group so the sweep cannot
+## take it twice, then up to the waist, shrinking, and gone.
+
+
+func gather_fly(to: Node3D) -> void:
+	remove_from_group("debris")
+	gather_to = to
+	gather_t = 0.0
+
+
+func _fly_home(delta: float) -> void:
+	if not is_instance_valid(gather_to):
+		queue_free()
+		return
+	gather_t += delta
+	var k := clampf(gather_t / GATHER_FLY, 0.0, 1.0)
+	var dst: Vector3 = gather_to.global_position + Vector3.UP * 1.0
+	global_position = global_position.lerp(dst, clampf(delta * 13.0, 0.0, 1.0))
+	global_position.y += (1.0 - k) * 2.4 * delta
+	rotation += _spin * delta * 0.6
+	scale = Vector3.ONE * maxf(0.05, 1.0 - k * k)
+	if k >= 1.0:
 		queue_free()

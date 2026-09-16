@@ -250,6 +250,13 @@ func t_spawn() -> void:
 		## HitFX must resolve every animal as flesh — that is what makes the
 		## blood toggle, the bestiary and the weapon tables work on day one.
 		eq(HitFX.kind_of(c), "flesh", "%s bleeds through the existing HitFX path" % k)
+		## The territory anchor is where the spawner PUT it, not the world
+		## origin it was standing on during _ready(). Every spawner in the
+		## game positions AFTER add_child — 2026-09-14: all of Myrkfell's
+		## wildlife was walking home to (0, 0, 0) and piling up on the first
+		## wall in the way.
+		var off := c._home.distance_to(c.global_position)
+		ok(off < 1.0, "%s calls the place it was put home (%.1f m off)" % [k, off])
 
 	## Bigger animals get bigger collision. This is the cheapest proof the dex
 	## numbers are actually reaching the body.
@@ -1034,8 +1041,8 @@ func t_specials() -> void:
 
 func _head_h(rig: Dictionary) -> float:
 	var head := rig["head"] as Node3D
-	var root := rig["root"] as Node3D
-	return head.global_position.y - root.global_position.y
+	var rt := rig["root"] as Node3D
+	return head.global_position.y - rt.global_position.y
 
 
 func t_buzz() -> void:
@@ -1056,17 +1063,17 @@ func t_buzz() -> void:
 	eq(CritterAnim.buzz_for("SWARM"), [], "swarms have no buzz")
 	CritterAnim.last_unhandled = ""
 	for sp: String in FAMS.keys():
-		var fam := String(FAMS[sp])
+		var fam0 := String(FAMS[sp])
 		var rig := _rig_of(sp)
-		eq(String(rig["family"]), fam, "%s builds a %s rig" % [sp, fam])
-		var cands := CritterAnim.buzz_for(fam)
-		ok(not cands.is_empty(), "%s has buzz candidates" % fam)
-		for c in cands:
-			ok(CLIPS.has(String(c)), "%s buzz list only names buzz clips (%s)" % [fam, c])
+		eq(String(rig["family"]), fam0, "%s builds a %s rig" % [sp, fam0])
+		var cands0 := CritterAnim.buzz_for(fam0)
+		ok(not cands0.is_empty(), "%s has buzz candidates" % fam0)
+		for c in cands0:
+			ok(CLIPS.has(String(c)), "%s buzz list only names buzz clips (%s)" % [fam0, c])
 		for c in CLIPS:
 			CritterAnim.play(rig, String(c), 0.5, 1.0 / 60.0)
 			CritterAnim.neutral(rig)
-		eq(CritterAnim.last_unhandled, "", "every buzz clip has a play() branch on %s" % fam)
+		eq(CritterAnim.last_unhandled, "", "every buzz clip has a play() branch on %s" % fam0)
 
 	## Poses, measured on a whitetail.
 	var deer := _rig_of("whitetail")

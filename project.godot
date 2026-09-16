@@ -29,14 +29,13 @@ window/size/viewport_height=720
 
 project/assembly_name="The Withering"
 
-[filesystem]
-
-import/blender/enabled=false
-
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
 
+[filesystem]
+
+import/blender/enabled=false
 
 [rendering]
 

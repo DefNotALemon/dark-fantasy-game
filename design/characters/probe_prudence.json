@@ -1,0 +1,20 @@
+{
+	"courage": 0.578869581222534,
+	"job": "villager",
+	"look": {
+		"beard": "braided",
+		"breeches": "504930",
+		"bulk": 1.2,
+		"eye_col": "384d6b",
+		"hair": "mohawk",
+		"hair_col": "cc4d1a",
+		"hat": "job",
+		"head": 1.05,
+		"height": 1.15,
+		"limb": 1.02,
+		"skin": "9e755c",
+		"tunic": "802626"
+	},
+	"personality": "friendly",
+	"sex": "f"
+}

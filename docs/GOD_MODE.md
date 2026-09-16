@@ -18,9 +18,9 @@ The camera has no body. Nothing to collide with, nothing to fall off.
 | | |
 |---|---|
 | **F1** | out of your body / back into it |
-| **WASD** | fly along the look |
-| **Space / Ctrl** | up / down (world up, so looking at your feet still climbs) |
-| **Shift** | ×3.2 boost |
+| **WASD** | fly **flat** — across the world plane the way you face; a nose-down look never dives you into the ground |
+| **Shift / Ctrl** | up / down (world up and down) |
+| **Space** | ×3.2 boost — a **toggle**, not a held key. Press once for fast, again for normal; the header reads `BOOST` while it is on |
 | **scroll wheel up** | faster (×1.22 a click, up to ×24) |
 | **scroll wheel down** | slower, back toward ×1.00 — which is the ordinary walk, and it snaps there |
 | **F** | flip the mouse: **CURSOR** ⇄ **LOOK** |
@@ -73,7 +73,10 @@ The panel's **GOD** toggle decides what your *character* is when you return.
 Off (the default): an ordinary mortal, and closing the editor is just resuming
 play. On: they keep the invulnerability and gain Minecraft flight —
 **double-tap Space** — and it survives closing the panel, so you can run and fly
-around as the character with the editor shut.
+around as the character with the editor shut. Character flight uses the same
+god controls: flat WASD, Shift up, Ctrl down, a single Space tap toggling the
+boost. None of this touches ordinary play — walking around out of god mode
+still has Shift to sprint, Space to jump and Ctrl to dash.
 
 Spectating is invulnerable either way; there is no body out there to hit.
 
@@ -184,20 +187,40 @@ the smallest zone under the cursor, and its notes with it.
 
 ---
 
-## The map, from inside the editor
+## Every menu, from inside the editor
 
-`M` used to close the editor (any other menu did), so "open the map in dev
-mode" meant leaving dev mode. Now, while the panel is up, the map is an
-**overlay**: `Player._toggle_menu("map")` sets `menu_open = "map"` and leaves
-the editor visible and spectating underneath (`Player._map_over_god`). The
-editor takes no input while the map is up (`GodEditor.map_over()`), the
-spectator camera holds still (WASD is muted through `cam.typing`), and the
-arrow on the map is the **camera**, not the parked body (`Player.map_eye()`).
-Clicking travels **both**: `GodEditor.travel_to()` teleports the body (warming
-the terrain first) and places the camera 14 m up and 22 m back, looking at the
-spot, so F1 still returns you to your character where you are. `M`, `Esc`,
-`F1` or travelling close just the map — `menu_open` goes back to `"god"` and
-the cursor is yours again. `tools/patch_ground.py` is the Player.gd wiring.
+Opening a menu used to close the editor, so "look at the map in dev mode"
+meant leaving dev mode. The map stopped doing that first; since 2026-09-12
+**every** menu is an **overlay**:
+
+| key | menu |
+|---|---|
+| **M** | the map |
+| **Tab / I** | the big menu (inventory, stats, progression, bestiary) |
+| **K** | spawn a mob |
+| **G** | creative: every item in the game |
+| **'** | the sky menu — time, season, weather |
+| **F3** | the grass lab |
+| **Esc** | settings — *over* the editor, **not** the way out of it |
+
+`Player._toggle_menu(anything)` hands off to `Player._menu_over_god()`, which
+sets `menu_open` to that menu and leaves the editor visible and spectating
+underneath. The editor takes no input while a menu is up
+(`GodEditor.overlay_over()`), the spectator camera holds still (WASD is muted
+through `cam.typing`), and the body stays parked and untouchable the whole
+time. The menu's own key, or `Esc`, closes just that menu: `menu_open` goes
+back to `"god"` and the cursor belongs to the panel again.
+
+**Leaving dev mode is F1** (back into your body), **F2** (drop in where the
+camera is) or the panel's buttons — Esc no longer does it, because Esc is the
+settings menu now.
+
+Map specifics: the arrow on the map is the **camera**, not the parked body
+(`Player.map_eye()`), and clicking travels **both** — `GodEditor.travel_to()`
+teleports the body (warming the terrain first) and places the camera 14 m up
+and 22 m back, looking at the spot, so F1 still returns you to your character
+where you are. `Player._map_over_god` survives as the named entry point for
+the map, and `tools/patch_ground.py` is the Player.gd wiring.
 
 ## What it writes
 

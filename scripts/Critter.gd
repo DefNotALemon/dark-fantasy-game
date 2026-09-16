@@ -90,6 +90,7 @@ var _breathe := 0.0
 var _threat_pos := Vector3.ZERO
 var _flee_dir := Vector3.ZERO
 var _home := Vector3.ZERO        ## territory anchor — nothing wanders forever
+var _home_set := false           ## captured on the first physics tick — _settle_home()
 var home_radius := 30.0
 ## [weather] 0..1, handed over by WildlifeDirector.set_clock out of
 ## Weatherwise.cover_urge(): how badly this animal wants to be under
@@ -233,7 +234,8 @@ func _ready() -> void:
 		add_to_group("critter_predators")
 	if CritterDex.flag(species, "prey", false) or arch == Arch.SKITTER:
 		add_to_group("critter_prey")
-	_home = global_position
+	## NOT `_home = global_position` here — see _settle_home(). During
+	## _ready() this node is still standing on the world origin.
 	_sig_cool = randf_range(SIG_COOLDOWN.x, SIG_COOLDOWN.y)
 	_buzz_cool = randf_range(BUZZ_COOLDOWN.x, BUZZ_COOLDOWN.y)
 	_call_cool = randf_range(2.0, CALL_COOLDOWN.y)
@@ -241,6 +243,24 @@ func _ready() -> void:
 	## Nothing that cannot be provoked should ever be able to hurt anything.
 	if CritterDex.flag(species, "nofight", false):
 		attack_damage = 0.0
+
+
+func _settle_home() -> void:
+	## THE TERRITORY IS WHERE IT WAS PUT, NOT WHERE IT WAS BORN. Every spawner
+	## in the game — WildlifeDirector._place, the K menu's _spawn_critter, the
+	## carcass guilds through spawn_one, the tests — calls add_child() FIRST
+	## and sets global_position AFTERWARDS, so when _ready() ran this node was
+	## still sitting on the world origin. Reading `_home` there handed every
+	## wild animal in Myrkfell the same patch, (0, 0, 0), and _graze/_patrol
+	## marched all of them toward it until a wall, a fence or a river stopped
+	## them: a whole hillside of deer, grouse and chickadees facing the same
+	## bearing, nose to the same wall, was the symptom (2026-09-14). The
+	## anchor is captured on the first physics tick instead, once the spawner
+	## has finished placing us. A saved home survives (from_dict) — except a
+	## saved ORIGIN, which is this same bug written to disk.
+	_home_set = true
+	if _home == Vector3.ZERO:
+		_home = global_position
 
 
 func _skin_opts() -> Dictionary:
@@ -305,6 +325,8 @@ func _build_body() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not _home_set:
+		_settle_home()
 	if knocked:
 		_knocked_tick(delta)
 		return
@@ -590,36 +612,62 @@ func _do_bluffer(delta: float, pl: Node3D, dist: float) -> void:
 			tw.y = 0.0
 			_face(tw, delta, 5.0)
 			_steer(Vector3.ZERO, delta, 10.0)
-			if _sig == "":
+			## Whether it is ALLOWED to mean it. Peaceful shuts this door
+			## (GameMode.may_engage), and so does a species with no bite. An
+			## animal that can never reach the top rung is in a STANDOFF, and
+			## the branches below treat it as one rather than as a charge
+			## that is always one frame away.
+			var can_mean_it := attack_damage > 0.0 and GameMode.may_engage(self, pl)
+			if _sig == "" and _bluff_count < bold:
 				## The ladder opens with the biggest thing the animal can still
 				## do. For a healthy bear that is rearing up — it plants itself,
 				## reads the air, and comes down meaner. Below the gate it
 				## cannot, and drops straight to the huff, which is exactly the
 				## reward for having hurt it: the wounded bear is the weaker
-				## bear even though it is angrier.
+				## bear even though it is angrier. Each rung is climbed ONCE.
 				var opener := _payoff_sig()
 				_play_sig(opener if opener != "" else _warn_sig())
 				_bluff_count += 1
 				Telegraph.ring(self, global_position, aggro_radius * 1.2,
 					Telegraph.Threat.ALARM, display_name)
 				_say(String((profile.get("call", {}) as Dictionary).get("alarm", "")))
+			elif _sig == "" and _sig_cool <= 0.0:
+				## THE STANDOFF. Off the top of the ladder with nowhere to go —
+				## a bear on Peaceful, a moose you have not stepped inside
+				## charge_at of — it holds its ground and huffs again on the
+				## idle cadence (SIG_COOLDOWN, 4-13 s). Until 2026-09-14 the
+				## rung above re-ran every time its clip ended: a Peaceful bear
+				## reared up, then huffed, rang the Telegraph and shouted its
+				## alarm call every 1.2 s for as long as you stayed inside its
+				## 58 m leash, and every deer on the hillside relayed it. Never
+				## the payoff move here — rearing up is a decision, not a
+				## nervous tic — and nothing on the wire: the forest was told
+				## the first time.
+				_play_sig(_warn_sig())
+				if randf() < 0.5:
+					_say(String((profile.get("call", {}) as Dictionary).get("alarm", "")))
 			## Skunks do not charge. They have a better idea.
 			if CritterDex.flag(species, "spray", false) and _bluff_count >= bold \
 					and dist < SPRAY_RANGE and _spray_cool <= 0.0:
 				_do_spray(pl)
-			elif dist < charge_at and _bluff_count >= bold and attack_damage > 0.0 \
-					and GameMode.may_engage(self, pl):
+			elif dist < charge_at and _bluff_count >= bold and can_mean_it:
 				## PEACEFUL removes the top rung of the ladder and nothing
 				## else: the animal still notices, still warns, still rears up
 				## and huffs and holds its ground — it just never means it,
 				## until the day you hit it (GameMode.may_engage).
 				_set_mood(Mood.CHARGE, 3.0)
-			elif relentless and _bluff_count >= bold and attack_damage > 0.0 \
-					and dist < leash_radius and GameMode.may_engage(self, pl):
+			elif relentless and _bluff_count >= bold and can_mean_it and dist < leash_radius:
 				## It gave you the warning. It is not going to stand here
 				## repeating itself while you walk around it.
 				_set_mood(Mood.CHARGE, 3.0)
-			elif not relentless and dist > warn_at * 1.6 and mood_t <= 0.0:
+			elif (not relentless or not can_mean_it) and dist > warn_at * 1.6 and mood_t <= 0.0:
+				## Backed off far enough and it lets the matter drop. A
+				## relentless animal that CANNOT mean it (Peaceful) stands
+				## down on the same terms as any other bluffer instead of
+				## holding the whole 58 m leash against someone it is not
+				## allowed to touch — the leash is for a fight, and there is
+				## no fight. Before this a Peaceful bear stayed planted,
+				## huffing, until you were fifty-eight metres away.
 				_bluff_count = 0
 				_set_mood(Mood.EASY, 0.0)
 			elif relentless and dist > leash_radius:

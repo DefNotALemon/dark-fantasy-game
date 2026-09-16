@@ -29,6 +29,14 @@ var _refoot := randf_range(0.3, 0.6)  ## staggered footing re-checks while resti
 var keep_yaw := false
 var tumble := true
 var log_r := 0.0             ## radius of a log, for the thud's pitch; 0 = not a log
+## THE PILE SWEEP (hold E). When a gather counts this one into the pack it
+## does not simply blink out: it leaves the "dropped_items" group first, so
+## nothing can take it twice, and then flies to the taker's waist, shrinking,
+## and frees itself on arrival. Five of them leaving at 90 ms apart reads as
+## a little stream of loot going up your arm.
+const GATHER_FLY := 0.30     ## s from the ground to the pack
+var gather_to: Node3D = null ## who is taking it; non-null means it is leaving
+var gather_t := 0.0
 
 
 static func make(d: Dictionary) -> DroppedItem:
@@ -63,6 +71,9 @@ func _keeps() -> bool:
 
 
 func _physics_process(delta: float) -> void:
+	if gather_to != null:
+		_fly_home(delta)
+		return
 	if not _keeps():
 		_life -= delta
 		if _life <= 0.0:
@@ -121,6 +132,31 @@ func _physics_process(delta: float) -> void:
 		if log_r > 0.0 or String(item.get("name", "")) == "Log":
 			WoodAudio.thud(self, global_position,
 				log_r if log_r > 0.0 else float(item.get("log_r", 0.22)))
+
+
+func gather_fly(to: Node3D) -> void:
+	## Already counted into the pack -- this is only the leaving. Out of the
+	## group on the same frame so a sweep cannot pick it up a second time.
+	remove_from_group("dropped_items")
+	gather_to = to
+	gather_t = 0.0
+	tumble = false
+	_resting = false
+
+
+func _fly_home(delta: float) -> void:
+	if not is_instance_valid(gather_to):
+		queue_free()
+		return
+	gather_t += delta
+	var k := clampf(gather_t / GATHER_FLY, 0.0, 1.0)
+	var dst: Vector3 = gather_to.global_position + Vector3.UP * 1.0
+	global_position = global_position.lerp(dst, clampf(delta * 13.0, 0.0, 1.0))
+	global_position.y += (1.0 - k) * 2.4 * delta   ## a little lift out of the grass
+	rotate_y(9.0 * delta)
+	scale = Vector3.ONE * maxf(0.05, 1.0 - k * k)
+	if k >= 1.0:
+		queue_free()
 
 
 func _glance_off(who: Node3D) -> void:

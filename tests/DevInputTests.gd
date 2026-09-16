@@ -365,8 +365,10 @@ func _t_god() -> void:
 			overlap.append(t)
 	same(sorted_join(overlap), "KEY_B, KEY_CTRL, KEY_ESCAPE, KEY_F, KEY_F2, KEY_SPACE",
 			"six of Player's keys are shadowed while the panel is up, and only six")
-	## The conditional ones are the subtlety: an unconditional swallow of Space
-	## would ground the spectator camera, which polls it.
+	## (Shift is swallowed too since 2026-09-12 -- it is the spectator ASCEND --
+	## but it is not a REGISTRY key, so it is not one of Player's shadows.)
+	## The conditional ones are the subtlety: an unconditional swallow of Shift
+	## or Ctrl would ground the spectator camera, which polls them for height.
 	var conds_ok := true
 	for t in eats:
 		var c := String((eats[t] as Dictionary)["cond"])
@@ -379,7 +381,7 @@ func _t_god() -> void:
 	## F1 must fall THROUGH, or the panel can never be opened again.
 	ok(src.contains("KEY_F1") and src.contains("return false   ## Player's own KEY_F1 case opens the panel"),
 			"F1 is explicitly handed back to Player")
-	ok(body.contains("if map_over():"), "the map over the panel takes precedence over both")
+	ok(body.contains("if overlay_over():"), "a menu over the panel takes precedence over both")
 	same(sorted_join(REG.input_callbacks(src)), "",
 			"and the panel declares no input callback of its own -- Player feeds it")
 	ok(not reg.has("KEY_S") and cases.has("KEY_S"),
@@ -516,8 +518,8 @@ func _t_others() -> void:
 	ok(menu.contains("input_locked"), "and Player is locked out the whole time it is up")
 	var cam := read(REG.CAM)
 	same(sorted_join(REG.polled_toks(cam)),
-			"KEY_A, KEY_CTRL, KEY_D, KEY_S, KEY_SHIFT, KEY_SPACE, KEY_W",
-			"the spectator camera polls exactly the fly set")
+			"KEY_A, KEY_CTRL, KEY_D, KEY_S, KEY_SHIFT, KEY_W",
+			"the spectator camera polls exactly the fly set (Space left it on 2026-09-12: the boost is a toggle now, flipped on the event)")
 	ok(cb_files.size() == 2, "only two files in scripts/ declare an input callback at all (%d)"
 			% cb_files.size())
 	same(sorted_join(cb_files), "scripts/MainMenu.gd, scripts/Player.gd",

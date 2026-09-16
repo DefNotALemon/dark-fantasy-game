@@ -14,9 +14,12 @@ extends Camera3D
 ## its head — so leaving the editor always returns you to your character,
 ## wherever the camera wandered off to.
 ##
-## Minecraft spectator rules: WASD along the look, Space up, Ctrl down, Shift
-## boosts. `speed_mult` is the scroll wheel, shared with the player's god
-## speed so the dial reads the same in both.
+## GOD CONTROLS (Lemon, 2026-09-12): WASD is FLAT -- it moves you on the
+## world plane along the way you are facing, and nose-down never dives you
+## into the dirt. SHIFT rises, CTRL drops, both in world up/down. SPACE is a
+## TOGGLE, not a held key: on = fast, press again = normal. `speed_mult` is
+## the scroll wheel and `boost` is the Space toggle, both shared with the
+## player's god flight so the dial and the toggle read the same in both.
 ##
 ## It owns its own yaw and pitch rather than rotating a parent, so nothing in
 ## the player's camera rig (the perch glide, the walk bob, the hit shake) can
@@ -24,7 +27,7 @@ extends Camera3D
 ## ===========================================================================
 
 const BASE_SPEED := 12.0        ## m/s at speed_mult 1.0
-const BOOST := 3.2              ## Shift
+const BOOST := 3.2              ## the Space toggle
 const ACCEL := 9.0              ## how hard it chases the target velocity
 const STOP := 14.0              ## ...and how hard it stops. Higher = tighter.
 const PITCH_LIMIT := 1.5
@@ -32,6 +35,7 @@ const PITCH_LIMIT := 1.5
 var active := false
 var typing := false             ## a panel text box has the keyboard
 var speed_mult := 1.0
+var boost := false              ## SPACE toggle -- sticky, not a held key
 var yaw := 0.0
 var pitch := 0.0
 
@@ -97,7 +101,7 @@ func _apply_rot() -> void:
 
 func speed() -> float:
 	var s := BASE_SPEED * speed_mult
-	if not typing and Input.is_key_pressed(KEY_SHIFT):
+	if boost:
 		s *= BOOST
 	return s
 
@@ -111,23 +115,35 @@ func _process(delta: float) -> void:
 		if Input.is_key_pressed(KEY_S): iv.z += 1.0
 		if Input.is_key_pressed(KEY_A): iv.x -= 1.0
 		if Input.is_key_pressed(KEY_D): iv.x += 1.0
-	var dir := global_transform.basis * iv
+	var lift := 0.0
 	if not typing:
-		## Up and down are WORLD up and down, not camera up and down -- looking
-		## at your feet and pressing Space should still climb.
-		if Input.is_key_pressed(KEY_SPACE):
-			dir.y += 1.0
+		## Height is its own pair of keys, in WORLD up and down.
+		if Input.is_key_pressed(KEY_SHIFT):
+			lift += 1.0
 		if Input.is_key_pressed(KEY_CTRL):
-			dir.y -= 1.0
-	if dir.length_squared() > 0.000001:
-		dir = dir.normalized()
-	else:
-		dir = Vector3.ZERO
+			lift -= 1.0
+	var dir := move_dir(iv, lift)
 	var target := dir * speed()
 	var rate := (ACCEL if dir != Vector3.ZERO else STOP) * maxf(1.0, speed_mult) * delta * 10.0
 	_vel = _vel.move_toward(target, rate)
 	if _vel.length_squared() > 0.000001:
 		global_position += _vel * delta
+
+
+func move_dir(iv: Vector3, lift: float) -> Vector3:
+	## The direction the keys are asking for, as a unit vector. FLAT: the
+	## input goes through YAW ONLY and the pitch is thrown away, so you slide
+	## across the map at the height you are at however far down the nose is --
+	## which is what you want when you are looking at ground you are laying
+	## out. Height is `lift`, in world up/down, and it is the only thing that
+	## can put a y in the result.
+	##
+	## Pure maths, no Input: it is the part the tests can drive.
+	var dir := Basis.from_euler(Vector3(0.0, yaw, 0.0)) * iv
+	dir.y = lift
+	if dir.length_squared() > 0.000001:
+		return dir.normalized()
+	return Vector3.ZERO
 
 
 func distance_to_body(body: Node3D) -> float:
