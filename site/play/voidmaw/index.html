@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Voidmaw</title>
+  <link rel="stylesheet" href="../../styles.css">
+</head>
+<body>
+  <nav class="chrome">
+    <a href="../../">← Games</a>
+    <span class="title">Voidmaw</span>
+    <a href="game.html" target="_blank" rel="noopener">Fullscreen</a>
+  </nav>
+  <div class="stage">
+    <iframe src="game.html" title="Voidmaw" allow="autoplay; fullscreen" allowfullscreen></iframe>
+  </div>
+  <script>
+    const frame = document.querySelector("iframe");
+    frame.addEventListener("load", () => {
+      try { frame.contentWindow.focus(); } catch (err) {}
+    });
+  </script>
+</body>
+</html>

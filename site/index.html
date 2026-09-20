@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Play DefNotALemon games in the browser.">
+  <title>Play — DefNotALemon</title>
+  <link rel="icon" href="assets/voidmaw-card.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="scan" aria-hidden="true"></div>
+  <header class="top">
+    <p class="kicker">Select a game</p>
+    <h1>Play</h1>
+  </header>
+
+  <main class="cabinet" id="cabinet">
+    <a class="game is-selected" href="play/voidmaw/" data-key="1" id="card-voidmaw">
+      <span class="game-art" aria-hidden="true">
+        <img src="assets/voidmaw-card.svg" alt="">
+      </span>
+      <span class="game-meta">
+        <span class="game-num">01</span>
+        <span class="game-name">Voidmaw</span>
+        <span class="game-blurb">Mine crystals. Stack bombs. Stop the Maw from waking up.</span>
+        <span class="game-cta">Play now</span>
+      </span>
+    </a>
+
+    <a class="game game-myrk" href="play/myrkfell/" data-key="2" id="card-myrkfell">
+      <span class="game-art" aria-hidden="true">
+        <img src="assets/myrkfell-menu.png" alt="">
+      </span>
+      <span class="game-meta">
+        <span class="game-num">02</span>
+        <span class="game-name">Myrkfell</span>
+        <span class="game-blurb">Dark fantasy survival slice. Runs in Godot — not in the browser yet.</span>
+        <span class="game-cta game-cta-alt">Open notes</span>
+      </span>
+    </a>
+  </main>
+
+  <footer class="hint">
+    <p><kbd>←</kbd> <kbd>→</kbd> choose · <kbd>Enter</kbd> launch · <kbd>1</kbd> <kbd>2</kbd> jump</p>
+  </footer>
+  <script src="arcade.js"></script>
+</body>
+</html>

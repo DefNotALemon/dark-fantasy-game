@@ -5,6 +5,9 @@ This repository is in early prototype — a playable vertical slice built bit by
 
 See `docs/DESIGN.md` for the full design and `docs/CONCEPT_ART_PROMPTS.md` for art prompts.
 
+## Play in a browser
+The arcade lives in `site/` (GitHub Pages: `https://defnotalemon.github.io/dark-fantasy-game/`). **Voidmaw** runs there. This Godot slice (Myrkfell) still needs the editor below — there is no web export yet.
+
 ## How to run
 1. Open Godot 4.4.
 2. Import / open this folder as a project.

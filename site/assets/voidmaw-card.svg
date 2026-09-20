@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" role="img" aria-label="Voidmaw">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#1a0a18"/>
+      <stop offset="55%" stop-color="#0a0614"/>
+      <stop offset="100%" stop-color="#05030c"/>
+    </radialGradient>
+    <radialGradient id="maw" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff6b7d"/>
+      <stop offset="40%" stop-color="#ff3b5c"/>
+      <stop offset="100%" stop-color="#3a0410"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="450" fill="url(#g)"/>
+  <g fill="#e9e3ff" opacity="0.7">
+    <circle cx="40" cy="36" r="1.2"/>
+    <circle cx="120" cy="70" r="1"/>
+    <circle cx="210" cy="28" r="1.4"/>
+    <circle cx="300" cy="90" r="1"/>
+    <circle cx="390" cy="44" r="1.1"/>
+    <circle cx="510" cy="22" r="1.3"/>
+    <circle cx="620" cy="80" r="1"/>
+    <circle cx="710" cy="40" r="1.2"/>
+    <circle cx="760" cy="120" r="1"/>
+    <circle cx="80" cy="200" r="1"/>
+    <circle cx="170" cy="260" r="1.1"/>
+    <circle cx="680" cy="230" r="1"/>
+    <circle cx="740" cy="300" r="1.2"/>
+    <circle cx="90" cy="340" r="1"/>
+    <circle cx="250" cy="380" r="1.1"/>
+    <circle cx="560" cy="360" r="1"/>
+  </g>
+  <circle cx="400" cy="168" r="54" fill="url(#maw)"/>
+  <circle cx="400" cy="168" r="22" fill="#12030a"/>
+  <circle cx="392" cy="160" r="6" fill="#ffd0d6"/>
+  <g stroke="#5ef2ff" fill="#5ef2ff">
+    <polygon points="118,300 132,274 146,304 132,294" opacity="0.95"/>
+    <polygon points="188,248 198,228 208,250 198,242"/>
+    <polygon points="640,270 654,246 668,274 654,264"/>
+    <rect x="126" y="308" width="5" height="9" transform="rotate(-18 128 312)"/>
+    <rect x="194" y="252" width="4" height="8" transform="rotate(12 196 256)"/>
+    <rect x="648" y="276" width="5" height="9" transform="rotate(16 650 280)"/>
+  </g>
+  <polygon points="400,292 424,348 400,334 376,348" fill="#e9e3ff"/>
+  <polygon points="400,318 456,328 400,324" fill="#5ef2ff" opacity="0.7"/>
+  <polygon points="400,318 344,328 400,324" fill="#ffb347" opacity="0.55"/>
+</svg>
