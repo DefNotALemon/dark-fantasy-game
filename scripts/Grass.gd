@@ -40,6 +40,12 @@ const TUFTS_PER_CHUNK := 3400    ## placement attempts per chunk. History: 650 a
 const FULL_COVER := true         ## v2.6: every dry cell is full meadow — no
 								 ## treeline, sand, canopy, tideline or slope
 								 ## thinning. Flip false for the graded world.
+								 ## Snow, packed tracks and the road net still
+								 ## refuse it; those are not a dry meadow.
+const SNOW_LINE := 440.0         ## match terrain_psx.gdshader snow_line — Katahdin's
+								 ## shoulders. Blades stop where the ground turns white.
+const ROAD_W := 5.4              ## country-road kerb, m. City streets bring their
+								 ## own width through pave(); this is the cart track.
 const GPU_FESCUE := false        ## v3 would hand RED FESCUE outside the valley to a
 								 ## particle process shader (scripts/GrassGPU.gd) — 66%
 								 ## of the meadow off the CPU. OFF, and not because of
@@ -68,7 +74,7 @@ const LOD_MID := 16.0            ## 2-segment blades (27→22→21, →16 at v2.
 ##
 ## Area goes as the square: 60 → 90 m is 2.25× the tufts on screen. The
 ## defaults here are "Medium".
-const CULL_END := 90.0           ## DEFAULT draw distance, m — whole chunks stop
+const CULL_END := 110.0          ## DEFAULT draw distance, m — horseback meadow
 const DRAW_MIN := 30.0           ## Esc → Draw Distance: Low
 const DRAW_MAX := 180.0          ## ...to Ultra. Past this the streamer thrashes.
 const FADE_START_F := 0.58       ## blades start sinking + taking the ground's colour
@@ -242,6 +248,9 @@ var _gpu_on := false             ## read from WORKER THREADS in _place_chunk, so
 ## its chunks in `_regrow`, which the streamer re-places off-thread when its
 ## queue is empty, so a brushful of meadow never hitches the frame.
 var _paint: GrassPaint = null
+var _gp: Object = null           ## GroundPaint, duck-typed on worn_id_at. Worker threads
+								 ## read it; the handle is set once on the main thread.
+var _roads_bound := false        ## the RoadNet has been stamped into _paved
 var _regrow: Dictionary = {}     ## chunk key -> true: standing, and the paint under it changed
 var _empty: Dictionary = {}      ## chunk key -> true: placed and found NOTHING (sea, a bare
 								 ## paint) — _restream stops asking until a regrow says otherwise
@@ -530,6 +539,9 @@ func setup(f: CaveField, seed_v: int) -> void:
 	_ow = Overworld.inst
 	if _ow != null:
 		_sea = _ow.sea_level
+		_gp = _ow.ground_paint
+	if _gp == null and GroundPaint.inst != null:
+		_gp = GroundPaint.inst
 	if GrassPaint.inst != null:
 		set_paint(GrassPaint.inst)
 	## v3. The GPU field owns the fescue everywhere the baked heightfield is the
@@ -787,9 +799,21 @@ func _process(delta: float) -> void:
 	_stream_t += delta
 	if _stream_t >= STREAM_TICK:
 		_stream_t = 0.0
-		if p != null and p.global_position.distance_to(_focus) > CHUNK_M * 0.5:
-			_focus = p.global_position
-			_restream()
+		if p != null:
+			## On foot the ring sits on you. In the saddle it sits AHEAD, so a
+			## gallop does not run onto a bald disc the streamer has not built.
+			var next := p.global_position
+			if p.get("mount") != null:
+				var cam := get_viewport().get_camera_3d()
+				if cam != null:
+					var fwd := -cam.global_transform.basis.z
+					fwd.y = 0.0
+					if fwd.length_squared() > 0.0001:
+						next += fwd.normalized() * 90.0
+			if next.distance_to(_focus) > CHUNK_M * 0.5:
+				_focus = next
+				_restream()
+	_bind_roads()
 	_stream_step()
 	_drain_applies()
 
@@ -914,10 +938,10 @@ func _cover_at(gy: float, fw: float) -> float:
 	## EVERY DRY CELL IS FULL MEADOW. The old graded answer — a twentieth on
 	## sand, ~45% under a closed canopy, 15% above the treeline, wrack at the
 	## tideline — is kept below behind `FULL_COVER` so it can come back with one
-	## flag flip. The water veto in `_place_chunk` is the only thing that says
-	## no now; the species MIX still reads `fw` (wood floors grow fern and moss,
-	## fields grow clover and timothy), so the forest still changes what grows,
-	## just not whether it grows.
+	## flag flip. Water, snow, packed tracks and the road net still say no in
+	## `_place_chunk`; the species MIX still reads `fw` (wood floors grow fern
+	## and moss, fields grow clover and timothy), so the forest still changes
+	## what grows, just not whether it grows.
 	if FULL_COVER:
 		return 1.0
 	if fw < 0.06:
@@ -1005,6 +1029,62 @@ func pave(segs: Array) -> void:
 				touched[key] = true
 	_paved = next
 	_replace_standing(func(key: Vector2i) -> bool: return touched.has(key))
+
+
+## The country roads, as the RoadNet carved them. City streets already arrive
+## through pave() from Cities; this is the 41 km of cart track BETWEEN the
+## places, stamped the same way so a tuft never stands in the metalled line.
+## Idempotent: the net is a pure function of the roster, so binding twice
+## would double every segment in `_paved`.
+func bind_roads(net: Object) -> void:
+	if _roads_bound:
+		return
+	if net == null:
+		return
+	_roads_bound = true
+	pave_roads(net)
+
+
+func pave_roads(net: Object, width: float = ROAD_W) -> void:
+	if net == null:
+		return
+	var eds: Variant = net.get("edges")
+	if typeof(eds) != TYPE_ARRAY:
+		return
+	var segs: Array = []
+	for e in eds:
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var ed := e as Dictionary
+		if not ed.has("poly"):
+			continue
+		var poly: PackedVector2Array = ed["poly"]
+		for k in range(poly.size() - 1):
+			segs.append({"a": poly[k], "b": poly[k + 1], "w": width})
+	if not segs.is_empty():
+		pave(segs)
+
+
+func _bind_roads() -> void:
+	if _roads_bound:
+		return
+	if RoadNet.inst == null or not is_instance_valid(RoadNet.inst):
+		return
+	if RoadNet.inst.has_method("ready") and not RoadNet.inst.ready():
+		return
+	bind_roads(RoadNet.inst)
+
+
+## Snow, packed dirt and a wet track are not meadow. The snow line matches the
+## terrain shader so Katahdin's white shoulders stay bare; dirt and mud are
+## paint-only columns (a road you laid, a yard), and the bake's own snow class
+## is column K. Water still has its own veto in `_place_chunk`.
+func _surface_blocks_grass(wx: float, wz: float, gy: float) -> bool:
+	if gy >= SNOW_LINE:
+		return true
+	if _gp == null or not _gp.has_method("worn_id_at"):
+		return false
+	return not GroundPaint.grass_on_tile(int(_gp.call("worn_id_at", wx, wz)))
 
 
 ## GRASS PAINT. Hand over the map (Overworld builds it after the terrain, so
@@ -1241,11 +1321,15 @@ func _place_chunk(key: Vector2i) -> Dictionary:
 			var wy := _ow.sample_water(wx, wz)
 			if wy != Overworld.NO_WATER and wy > gy - 0.15:
 				continue      ## nothing grows in the lake, the river or the sea
+			if _surface_blocks_grass(wx, wz, gy):
+				continue      ## snow, packed dirt, a wet track — not meadow
 			gc = _ow.sample_color(wx, wz)
 			fw = _ow._forest_weight(gc)
 			cover = _cover_at(gy, fw) if painted < 0.0 else painted
 			if cover <= 0.02:
 				continue
+		elif _surface_blocks_grass(wx, wz, 0.0):
+			continue          ## a painted snowfield or track over the valley
 		elif painted >= 0.0:
 			cover = painted
 			if cover <= 0.02:

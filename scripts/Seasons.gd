@@ -129,21 +129,22 @@ static func index_of_phase(p: float) -> int:
 #  The map — latitude, altitude, and the sea
 # ===========================================================================
 
-## The north-south span of `Chronicle.REGION_ROSTER`: Casco Bay at z = +560 is
-## the south end, Aroostook at z = −7000 the north. z runs NEGATIVE northward.
-const SOUTH_Z := 560.0
-const NORTH_Z := -7000.0
+## The north-south span of `Chronicle.REGION_ROSTER`: Casco Bay at z = +1200
+## is the south end, Aroostook at z = −6360 the north. z runs NEGATIVE northward.
+const SOUTH_Z := 1200.0
+const NORTH_Z := -6360.0
 
-## Katahdin's summit is the roof of the map at ~900 m, and sea level is 0.
+## Reference altitude where elevation reaches its full seasonal influence.
+## Kept above Katahdin's 597 m roof so the summit remains severe but blended.
 const ALT_FULL_Y := 900.0
 
 ## Maine's coastline, as the three bay anchors the region roster already
 ## names: Casco Bay, Penobscot Bay, Down East. Anything on the seaward side of
 ## this polyline is open water and takes the sea's full influence.
 const COAST: Array = [
-	Vector2(600.2, 559.9),
-	Vector2(2657.3, -520.1),
-	Vector2(4971.6, -2800.1),
+	Vector2(274.3, 1200.0),
+	Vector2(2331.4, 120.0),
+	Vector2(4645.7, -2160.0),
 ]
 
 ## How far inland the sea is still felt. Penobscot Bay at 397 m reads 0.64,

@@ -119,7 +119,7 @@ gives the fort its own title, so standing in the magazine reads
 appends one record:
 
 ```gdscript
-{"name": "Fort Knox", "pos": [2636.0, -1946.0], "y": pad_y, "rank": 1}
+{"name": "Fort Knox", "pos": [2310.1, -1305.9], "y": pad_y, "rank": 1}
 ```
 
 That is all a landmark needs. `MapPanel._draw_places` gives it a dot and a

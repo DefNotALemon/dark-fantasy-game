@@ -23,9 +23,9 @@ class_name Player
 ##   C ........... toggle CROUCH (from prone, C rises to the crouch)
 ##   X ........... toggle PRONE (from prone, X stands you all the way up).
 ##                 Each stance down is slower, lower, harder to spot (tall
-##                 grass: ×0.6 upright, ×0.35 crouched, ×0.22 prone). Going
-##                 prone settles slow with a body-weight roll; jumping or
-##                 climbing stands you up
+##                 grass: ×0.6 upright, ×0.35 crouched, ×0.22 prone). The
+##                 body SQUATS and CRAWLS with the camera — knees, a hunched
+##                 walk, then belly-down. Jumping or climbing stands you up
 ##   F ........... mount / dismount a saddled horse (WASD ride, Shift gallop,
 ##                 Space jump; LMB sweeps the sword saddle-side — look left or
 ##                 right to pick the side, straight ahead to alternate)
@@ -129,6 +129,7 @@ var head: Node3D
 var camera: Camera3D
 var body_rig: Node3D
 var leg_pivots: Array[Node3D] = []   ## visible legs — they stride with the gait
+var knee_pivots: Array[Node3D] = []  ## shins, so a crouch is a squat not a sink
 var viewmodel: Node3D
 var sword_vm: Node3D    ## the held blade — rebuilt when a different sword is equipped
 var hands_root: Node3D  ## every FP viewmodel hangs off this ONE node so the
@@ -518,6 +519,7 @@ var mount: Horse = null
 var mounted_swing := false       ## the current swing is a saddle sweep
 var mounted_side := 0            ## 0 = left sweep, 1 = right (alternates)
 var body_col: CollisionShape3D   ## disabled while in the saddle
+var _cam_before_mount := ""      ## restore FP/TP on dismount without saving Settings
 
 ## --- Knockdown (a horse's kick / being bucked off): you go DOWN — fall flat,
 ## then pick yourself up, and you are fully vulnerable the whole way through.
@@ -565,7 +567,7 @@ var set_fall_dmg := false        ## Fall damage: OFF by default (Lemon, 2026-09-
 								 ## Gates the hard-landing knockdown too -- that
 								 ## was the half god mode did not already cover.
 var set_clouds := 1              ## Clouds: 0 off / 1 painterly / 2 volumetric
-var set_draw := 90.0             ## Draw Distance, m — how far the meadow reaches.
+var set_draw := 110.0            ## Draw Distance, m — how far the meadow reaches.
 								 ## The grass streams across 78 km² now, so this
 								 ## is the one number that decides what it costs:
 								 ## area squares, so 45 -> 90 m is 4x the tufts.
@@ -645,12 +647,15 @@ var _v_consumed := false
 
 ## --- Stances (C toggles crouch, X toggles prone): each step down slower,
 ## lower, harder to spot. Crouched in tall grass = wake radius ×0.35; PRONE
-## in it = ×0.22 — a shadow flat against the earth. Going prone has weight:
-## the eyes sink slow with a settling roll. (Collision doesn't shrink yet —
-## TODO(design): crawl-under-gaps needs a clearance check to stand.) ---
+## in it = ×0.22 — a shadow flat against the earth. The body eases into a
+## squat / belly-crawl (Locomotion.stance_pose) on the same clock as the
+## eyes. (Collision doesn't shrink yet — TODO(design): crawl-under-gaps
+## needs a clearance check to stand.) ---
 var crouching := false           ## true in crouch AND prone (stealth reads this)
 var prone := false
 var _eye_h := 1.62               ## eased eye height (1.62 / 1.08 / 0.45)
+var _stance_w := 0.0             ## 0 stand, 1 crouch, 2 prone (eased)
+var _stance_pose: Dictionary = {}
 var oh_bob_t := 0.0
 
 ## --- Weapons (1 = sword, 2 = bow, 3 = pickaxe, while no menu is open) ---
@@ -969,6 +974,22 @@ func _make_arm(shoulder: Vector3, armor_col: Color, skin_col: Color) -> Node3D:
 	return pivot
 
 
+func _make_leg(sx: float, leather: Color) -> void:
+	## Hip + knee so crouch is a squat and the walk actually bends. Thigh and
+	## shin both tint as pants; the foot stays the shoe mesh.
+	var hip := Node3D.new()
+	body_rig.add_child(hip)
+	hip.position = Vector3(sx, 0.74, 0)
+	leg_meshes.append(_box(hip, Vector3(0.18, 0.38, 0.22), leather, Vector3(0, -0.19, 0)))
+	var knee := Node3D.new()
+	hip.add_child(knee)
+	knee.position = Vector3(0, -0.38, 0)
+	leg_meshes.append(_box(knee, Vector3(0.16, 0.36, 0.20), leather, Vector3(0, -0.18, 0)))
+	foot_meshes.append(_box(knee, Vector3(0.20, 0.12, 0.34), BODY_FOOT_COL, Vector3(0, -0.38, -0.05)))
+	leg_pivots.append(hip)
+	knee_pivots.append(knee)
+
+
 func _build_body() -> void:
 	var col := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
@@ -997,14 +1018,9 @@ func _build_body() -> void:
 	var skin := Color(0.62, 0.46, 0.36)
 	torso_mesh = _box(body_rig, Vector3(0.44, 0.62, 0.26), armor, Vector3(0, 1.05, 0))      ## torso
 	pelvis_mesh = _box(body_rig, Vector3(0.38, 0.22, 0.24), leather, Vector3(0, 0.72, 0))    ## pelvis
-	## Legs on hip pivots so they stride with the gait (look down and walk).
+	## Legs on hip + knee pivots so a crouch is a squat and a walk bends.
 	for sx: float in [-0.14, 0.14]:
-		var leg := Node3D.new()
-		body_rig.add_child(leg)
-		leg.position = Vector3(sx, 0.74, 0)
-		leg_meshes.append(_box(leg, Vector3(0.18, 0.72, 0.22), leather, Vector3(0, -0.36, 0)))    ## leg
-		foot_meshes.append(_box(leg, Vector3(0.20, 0.12, 0.34), BODY_FOOT_COL, Vector3(0, -0.68, -0.05)))  ## foot
-		leg_pivots.append(leg)
+		_make_leg(sx, leather)
 	## Arms hang from shoulder pivots so they can swing with your stride.
 	## Left arm is always shown; the right arm only appears when the sword is
 	## sheathed (otherwise the right hand is the sword viewmodel on the camera).
@@ -1533,8 +1549,8 @@ func _update_camera_arm(delta: float) -> void:
 	## animation), and walls shove the perch inward so it never clips rock.
 	## During the bed sequence the sleep tweens own _eye_h — hands off.
 	## Going prone (or rising from it) moves SLOW — a body's weight, not a
-	## camera snap: that slow ease IS the going-prone animation, topped with
-	## the settling roll pulse from _stance_settle_pulse.
+	## camera snap. The visible body squats / lays out on the same clock
+	## (Locomotion.stance_pose, ticked in _tick_stance).
 	if sleep_phase == "":
 		var eye_target := 0.45 if prone else (1.08 if crouching else 1.62)
 		var ease_v := 4.2 if (prone or _eye_h < 0.9) else 7.0
@@ -1548,7 +1564,12 @@ func _update_camera_arm(delta: float) -> void:
 		## so the middle view sits a little higher and a little further out —
 		## you are looking OVER the character, not through him.
 		var centred: float = 1.0 - minf(absf(cam_shoulder), 1.0)
-		want = Vector3(0.55 * cam_shoulder, 0.32 + 0.14 * centred, 2.6 + 0.45 * centred)
+		if mount != null:
+			## Saddle vista: higher and further back so the wood and the road
+			## read as a place you are travelling through, not a skull-cam.
+			want = Vector3(0.78 * cam_shoulder, 0.62 + 0.22 * centred, 4.6 + 0.7 * centred)
+		else:
+			want = Vector3(0.55 * cam_shoulder, 0.32 + 0.14 * centred, 2.6 + 0.45 * centred)
 		var from := head.global_position
 		var to := head.to_global(want)
 		var space := get_world_3d().direct_space_state
@@ -2004,8 +2025,7 @@ func _physics_process(delta: float) -> void:
 			_drop_carried_logs("both hands went to the ledge")
 		elif is_on_floor() and pressed_by == null:  ## no jumping out from under a bear
 			velocity.y = JUMP_VELOCITY
-			crouching = false  ## jumping stands you up
-			prone = false
+			_clear_stance()  ## jumping stands you up (body eases on the next ticks)
 			_drop_carried_logs("you jumped")
 
 	## LEANED ON: an animal's weight (the bear's press). It ends when the
@@ -2270,12 +2290,17 @@ func _update_action_camera(delta: float) -> void:
 	## torso commit into cuts and chops and stoop to the pack (mirror-safe:
 	## rotation and scale live on separate channels).
 	## Not while you're on your back — _update_knockdown owns the rig then.
-	## ...and a turn leans the TORSO harder than it leans the eye — a watcher
-	## sees you drop a shoulder into the corner (2026-09-14, Locomotion.bank).
-	if body_rig and kd_phase == "":
+	## Stance pitch (crouch hunch / prone belly) rides on the same X as the
+	## combat lean so they compose instead of fighting. A turn leans the
+	## TORSO harder than it leans the eye (2026-09-14, Locomotion.bank).
+	if body_rig and kd_phase == "" and grabbed_by == null:
+		var sp: Dictionary = _stance_pose
+		var pitch := clampf(rot.x, -8.0, 8.0) * 0.55 + float(sp.get("pitch_deg", 0.0))
+		var roll := clampf(rot.z, -6.0, 6.0) * 0.6 - _bank * Locomotion.BODY_BANK_DEG
 		body_rig.rotation_degrees = body_rig.rotation_degrees.lerp(
-			Vector3(clampf(rot.x, -8.0, 8.0) * 0.55, byaw,
-				clampf(rot.z, -6.0, 6.0) * 0.6 - _bank * Locomotion.BODY_BANK_DEG), k)
+			Vector3(pitch, byaw, roll), k)
+		body_rig.position = body_rig.position.lerp(
+			Vector3(0.0, float(sp.get("body_y", 0.0)), float(sp.get("body_z", 0.0))), k)
 
 
 func _frame_fx_and_regen(delta: float) -> void:
@@ -2293,6 +2318,7 @@ func _frame_fx_and_regen(delta: float) -> void:
 	## the progression timers.
 	_update_grab(delta)          ## advance the reach BEFORE the camera reads it
 	_update_gather(delta)        ## hold E: the rest of the pile comes in
+	_tick_stance(delta)
 	_update_action_camera(delta)
 	_update_wheel_hold(delta)
 	if bedroll_bundle:
@@ -2810,8 +2836,7 @@ func _update_swim(delta: float) -> bool:
 			_set_water_tint(0.0)
 			return false
 		swimming = true
-		crouching = false
-		prone = false
+		_clear_stance()
 		sprinting = false
 		_fall_speed = 0.0
 		velocity.y = maxf(velocity.y, -2.0)     ## the water takes the fall
@@ -3025,13 +3050,26 @@ func _update_mounted(delta: float) -> void:
 	velocity = Vector3.ZERO
 
 	## The saddle's rhythm replaces your own stride in the camera.
+	var loco := float(mount._loco_amount)
+	if mount.ride_run:
+		loco = minf(loco * 1.35, 1.0)
 	head_bob = head_bob.lerp(Vector2(
-		sin(mount.walk_t) * 0.020,
-		(absf(sin(mount.walk_t)) - 0.5) * -0.030) * mount._loco_amount,
+		sin(mount.walk_t) * 0.028,
+		(absf(sin(mount.walk_t)) - 0.5) * -0.042) * loco,
 		clampf(delta * 10.0, 0.0, 1.0))
 	gait_amount = lerpf(gait_amount, 0.0, clampf(delta * 6.0, 0.0, 1.0))
+	var hv := Vector3(mount.velocity.x, 0.0, mount.velocity.z)
+	var want := -mount.global_transform.basis.z
+	want.y = 0.0
+	_bank = lerpf(_bank, Locomotion.bank(hv, want, Horse.RIDE_RUN),
+		clampf(delta * 5.0, 0.0, 1.0))
 
 	_frame_fx_and_regen(delta)
+	if camera != null and menu_open == "":
+		var ride_speed := hv.length()
+		var want_fov := Locomotion.fov_bonus(ride_speed, Horse.RIDE_WALK, Horse.RIDE_RUN)
+		_fov_extra = lerpf(_fov_extra, want_fov, clampf(delta * 3.2, 0.0, 1.0))
+		camera.fov = set_fov + _fov_extra
 	_apply_step_smooth(delta)
 	_update_body_arms(delta)
 	_update_hud(delta)
@@ -3242,7 +3280,7 @@ func _sleep(_bed: Node3D) -> void:
 	_drop_carried_logs("you lay down")
 	input_locked = true
 	sleep_phase = "lying"
-	crouching = false
+	_clear_stance()
 	_v_held = false
 	velocity = Vector3.ZERO
 	## Getting INTO bed: the eyes glide down over the roll and tilt to rest.
@@ -3347,6 +3385,7 @@ func _mount(h: Horse) -> void:
 	mount = h
 	h.rider = self
 	h.confused = false
+	_clear_stance(true)
 	if body_col:
 		body_col.set_deferred("disabled", true)
 	velocity = Vector3.ZERO
@@ -3357,6 +3396,12 @@ func _mount(h: Horse) -> void:
 	bow_draw = 0.0
 	pick_swinging = false
 	sheathed = false  ## ride with steel in hand
+	## Riding is a landscape verb: pull to third person for the gallop without
+	## writing Settings (dismount restores whatever you had).
+	_cam_before_mount = cam_mode
+	if cam_mode == "fp":
+		cam_mode = "tp"
+		cam_snap = 1.0
 	_add_log_msg("Mounted — Shift gallop, Space jump, F dismount", Color(0.85, 0.9, 1.0))
 
 
@@ -3372,6 +3417,11 @@ func _dismount() -> void:
 	if body_col:
 		body_col.set_deferred("disabled", false)
 	velocity = Vector3.ZERO
+	if _cam_before_mount != "":
+		cam_mode = _cam_before_mount
+		_cam_before_mount = ""
+		if cam_mode == "tp":
+			cam_snap = 1.0
 
 
 func thrown_from_mount(h: Node3D) -> void:
@@ -3380,6 +3430,9 @@ func thrown_from_mount(h: Node3D) -> void:
 	mount = null
 	if body_col:
 		body_col.set_deferred("disabled", false)
+	if _cam_before_mount != "":
+		cam_mode = _cam_before_mount
+		_cam_before_mount = ""
 	global_position = h.global_position - h.transform.basis.x * 1.15 + Vector3.UP * 0.9
 	var side := (-h.transform.basis.x + Vector3(randf() - 0.5, 0.0, randf() - 0.5) * 0.3).normalized()
 	_start_knockdown(h.global_position, side * 5.5)
@@ -3755,6 +3808,36 @@ func creature_press_end(fling: Vector3) -> void:
 		_start_knockdown(from, Vector3(fling.x, 0.0, fling.z))
 
 
+func _clear_stance(snap := false) -> void:
+	## Jump / swim / climb / saddle / bed all stand you up. `snap` is for
+	## paths that will not tick stance this frame (a mantle, a mount) so the
+	## belly-down pose cannot freeze through the animation.
+	crouching = false
+	prone = false
+	if not snap:
+		return
+	_stance_w = 0.0
+	sliding = false
+	_stance_pose = Locomotion.stance_pose(0.0, gait_amount, gait_phase, false)
+	if body_rig != null and kd_phase == "" and grabbed_by == null:
+		body_rig.position = Vector3.ZERO
+		body_rig.rotation_degrees.x = 0.0
+
+
+func _tick_stance(delta: float) -> void:
+	## Ease the visible body toward stand / crouch / prone on the same clock
+	## as the eyes. Knockdown, the saddle, a climb, a swim, a jaw or the bed
+	## all own the rig — those force the weight back to standing so we do not
+	## fight them.
+	var want := 0.0
+	if kd_phase == "" and mount == null and not climbing and not swimming \
+			and grabbed_by == null and sleep_phase == "":
+		want = Locomotion.stance_target(crouching, prone, sliding)
+	_stance_w = lerpf(_stance_w, want,
+		clampf(delta * Locomotion.stance_ease(_stance_w, want), 0.0, 1.0))
+	_stance_pose = Locomotion.stance_pose(_stance_w, gait_amount, gait_phase, sliding)
+
+
 func _update_gait(delta: float) -> void:
 	## The one shared stride. Amplitude eases toward "how fast are we actually
 	## moving" so animations breathe in and out instead of snapping, and the
@@ -3762,8 +3845,9 @@ func _update_gait(delta: float) -> void:
 	var hspeed := Vector2(velocity.x, velocity.z).length()
 	var target := clampf(hspeed / SPRINT_SPEED, 0.0, 1.0) if is_on_floor() else 0.0
 	gait_amount = lerpf(gait_amount, target, clampf(delta * 6.0, 0.0, 1.0))
+	var gait_rate := float(_stance_pose.get("gait_rate", 1.0))
 	if is_on_floor():
-		gait_phase += delta * (4.5 + hspeed * 1.35)
+		gait_phase += delta * (4.5 + hspeed * 1.35) * gait_rate
 	## [steps] FOOTFALL. The bob already dips the camera at every
 	## |sin(gait_phase)| peak -- twice a stride, once per foot. The sound
 	## lands on that same beat, so what you hear is exactly what you see at
@@ -3794,6 +3878,8 @@ func _update_gait(delta: float) -> void:
 		StepAudio.landing(self, global_position, _fall_speed)  ## [steps]
 		_apply_fall_damage(_fall_speed)
 	_was_on_floor = is_on_floor()
+	## Re-sample after the phase ticks so limbs and body share this frame's stride.
+	_stance_pose = Locomotion.stance_pose(_stance_w, gait_amount, gait_phase, sliding)
 	## F2 DROP-IN GRACE. It lasts until your feet are properly under you again.
 	## The short hold covers the frame you dropped on, when is_on_floor() is
 	## still reporting the ground the parked body was standing on.
@@ -3815,8 +3901,12 @@ func _update_gait(delta: float) -> void:
 	## Settings and is folded back to zero whenever a menu owns the screen.
 	if camera != null:
 		var want_fov := 0.0
-		if menu_open == "" and not god and kd_phase == "" and mount == null:
-			want_fov = Locomotion.fov_bonus(hspeed, SPEED, SPRINT_SPEED)
+		if menu_open == "" and not god and kd_phase == "":
+			if mount != null:
+				var ride_spd := Vector2(mount.velocity.x, mount.velocity.z).length()
+				want_fov = Locomotion.fov_bonus(ride_spd, Horse.RIDE_WALK, Horse.RIDE_RUN)
+			else:
+				want_fov = Locomotion.fov_bonus(hspeed, SPEED, SPRINT_SPEED)
 		_fov_extra = lerpf(_fov_extra, want_fov, clampf(delta * 4.5, 0.0, 1.0))
 		camera.fov = set_fov + _fov_extra
 
@@ -4073,6 +4163,7 @@ func _update_body_arms(delta: float) -> void:
 	## guards, chops and draws are posed from the SAME state machines the
 	## viewmodels animate from, so the arm reaches its impact exactly when the
 	## damage lands (the held twins are shown by _update_tp_gear).
+	_stance_pose = Locomotion.stance_pose(_stance_w, gait_amount, gait_phase, sliding)
 	var s := sin(gait_phase) * 0.6 * gait_amount
 	var k := clampf(delta * 14.0, 0.0, 1.0)
 	var tp := cam_mode == "tp"
@@ -4138,11 +4229,18 @@ func _update_body_arms(delta: float) -> void:
 		r_now = true
 		l_pose = Vector3(0.30 * ge, 0.0, -0.18 * ge)   ## off hand braced on the knee
 
+	var sp: Dictionary = _stance_pose
+	var rest_lx := float(sp.get("arm_l", s))
+	var rest_rx := float(sp.get("arm_r", -s))
+	var rest_az := float(sp.get("arm_z", 0.0))
+
 	if mount != null:
 		## In the saddle: thighs forward, feet in the stirrups, arms quiet —
 		## except mid-sweep, where TP shows the saddle cut on the body's arm.
 		for lp in leg_pivots:
 			lp.rotation.x = lerpf(lp.rotation.x, -1.15, k)
+		for kp in knee_pivots:
+			kp.rotation.x = lerpf(kp.rotation.x, 1.55, k)
 		if left_arm:
 			left_arm.rotation.x = lerpf(left_arm.rotation.x, (l_pose.x if l_pose != Vector3.INF else -0.35), k)
 			left_arm.rotation.z = lerpf(left_arm.rotation.z, (l_pose.z if l_pose != Vector3.INF else 0.0), k)
@@ -4156,8 +4254,8 @@ func _update_body_arms(delta: float) -> void:
 		return
 
 	if left_arm:
-		left_arm.rotation.x = lerpf(left_arm.rotation.x, (l_pose.x if l_pose != Vector3.INF else s), k)
-		left_arm.rotation.z = lerpf(left_arm.rotation.z, (l_pose.z if l_pose != Vector3.INF else 0.0), k)
+		left_arm.rotation.x = lerpf(left_arm.rotation.x, (l_pose.x if l_pose != Vector3.INF else rest_lx), k)
+		left_arm.rotation.z = lerpf(left_arm.rotation.z, (l_pose.z if l_pose != Vector3.INF else rest_az), k)
 	if right_arm:
 		## In THIRD PERSON the body performs, so the arm is always there. In
 		## first person it shows only when sheathed (a drawn sword's right hand
@@ -4168,13 +4266,16 @@ func _update_body_arms(delta: float) -> void:
 			right_arm.rotation.x = r_pose.x
 			right_arm.rotation.z = r_pose.z
 		else:
-			right_arm.rotation.x = lerpf(right_arm.rotation.x, (r_pose.x if r_pose != Vector3.INF else -s), k)
-			right_arm.rotation.z = lerpf(right_arm.rotation.z, (r_pose.z if r_pose != Vector3.INF else 0.0), k)
-	## Legs stride on the same beat, opposite their arm (left arm + right leg
-	## forward together — an actual walk when you look down).
-	for i in range(leg_pivots.size()):
-		var lph := PI if i == 0 else 0.0
-		leg_pivots[i].rotation.x = lerpf(leg_pivots[i].rotation.x, sin(gait_phase + lph) * 0.5 * gait_amount, k)
+			right_arm.rotation.x = lerpf(right_arm.rotation.x, (r_pose.x if r_pose != Vector3.INF else rest_rx), k)
+			right_arm.rotation.z = lerpf(right_arm.rotation.z, (r_pose.z if r_pose != Vector3.INF else -rest_az), k)
+	## Legs follow the stance pose: standing stride, squat walk, or crawl.
+	## Left hip is index 0 (matches the old counter-phase to the right arm).
+	if leg_pivots.size() >= 2:
+		leg_pivots[0].rotation.x = lerpf(leg_pivots[0].rotation.x, float(sp.get("hip_l", 0.0)), k)
+		leg_pivots[1].rotation.x = lerpf(leg_pivots[1].rotation.x, float(sp.get("hip_r", 0.0)), k)
+	if knee_pivots.size() >= 2:
+		knee_pivots[0].rotation.x = lerpf(knee_pivots[0].rotation.x, float(sp.get("knee_l", 0.0)), k)
+		knee_pivots[1].rotation.x = lerpf(knee_pivots[1].rotation.x, float(sp.get("knee_r", 0.0)), k)
 
 
 func _tp_swing_arm_pose(p: float) -> Vector3:
@@ -5593,8 +5694,7 @@ func _try_climb(vault := false) -> bool:
 	vaulting = vault
 	_vault_exit = Vector2(velocity.x, velocity.z).length() * VAULT_KEEP if vault else 0.0
 	climb_t = 0.0
-	crouching = false  ## the grab stands you up — crouch/prone again at the top
-	prone = false
+	_clear_stance(true)  ## the grab stands you up — crouch/prone again at the top
 	_fall_speed = 0.0  ## the grab kills the fall — no phantom fall damage on top-out
 	climb_from = global_position
 	climb_to = land + Vector3.UP * 0.02
@@ -7450,7 +7550,7 @@ func _load_settings() -> void:
 	## Clamped to GrassSystem's own DRAW_MIN/DRAW_MAX rather than to the four
 	## preset buttons: a hand-edited settings.cfg is allowed to ask for 72 m,
 	## and the four buttons simply none of them light up when it does.
-	set_draw = clampf(float(cf.get_value("gfx", "draw", 90.0)), 30.0, 180.0)
+	set_draw = clampf(float(cf.get_value("gfx", "draw", 110.0)), 30.0, 180.0)
 	set_sens = clampf(float(cf.get_value("input", "sens", 1.0)), 0.3, 2.5)
 	set_hunch = bool(cf.get_value("game", "hunch", true))
 	set_lefty = bool(cf.get_value("game", "lefty", false))

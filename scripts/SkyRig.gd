@@ -53,7 +53,7 @@ var _sky: Sky
 
 ## --- what the world can drive from outside ---------------------------------
 var cloud_mode: int = Clouds.PAINTERLY : set = set_cloud_mode
-var cloud_coverage := 0.42 : set = _set_coverage      ## 0 clear ... 1 solid deck
+var cloud_coverage := 0.50 : set = _set_coverage      ## 0 clear ... 1 solid deck
 var cloud_darkness := 0.0 : set = _set_darkness       ## storm bellies
 var storm_gloom := 0.0 : set = _set_gloom             ## desaturate + darken the whole sky
 var aurora_strength := 0.0 : set = _set_aurora        ## Weather.gd rolls this at dusk

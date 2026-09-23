@@ -220,7 +220,7 @@ func _t_map() -> void:
 			"the open Gulf with no seat on it is water")
 	ok(not Factions.is_open_water(Vector2(3085.9, 559.9), 1.0),
 			"and one seat on it makes it ground, whatever the coastline says")
-	ok(not Factions.is_open_water(Vector2(2537.3, -4960.1), 0.0),
+	ok(not Factions.is_open_water(Vector2(2211.4, -4320.0), 0.0),
 			"Katahdin is not at sea")
 	# seats, off the Chronicle's roster and nothing else
 	near_f(float(_seats.get("CASCO BAY", 0.0)), SEATS_CASCO, 0.01, "Casco Bay's seats")

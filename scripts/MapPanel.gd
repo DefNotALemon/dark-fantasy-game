@@ -22,7 +22,7 @@ const LABEL_ZOOM := 1.8         ## small places only appear once you lean in
 
 ## Fallbacks for when the terrain never loaded, so the panel still opens
 ## instead of dividing by a zero-sized map.
-const FALLBACK_ORIGIN := Vector2(-1199.79, -8800.08)
+const FALLBACK_ORIGIN := Vector2(-1525.71, -8160.0)
 const FALLBACK_SIZE := Vector2(7200.0, 10800.0)
 
 var player: Node3D = null       ## the Player; set by Player._build_hud()
@@ -47,6 +47,7 @@ var _panning := false
 ## back in different hands.
 
 const L_FRONTIER := "frontier"
+const L_JOURNEY := "journey"
 const L_ROADS := "roads"
 const L_CROFTS := "crofts"
 const L_BANDS := "travellers"
@@ -55,9 +56,9 @@ const L_KILLS := "kills"
 ## All five start ON. The small ones respect the panel's own existing rule --
 ## villages and lake names only appear past LABEL_ZOOM -- so the unzoomed map
 ## stays a map of the state and leaning in is what fills it with people.
-const LAYERS: Array[String] = [L_FRONTIER, L_ROADS, L_CROFTS, L_BANDS, L_KILLS]
+const LAYERS: Array[String] = [L_JOURNEY, L_FRONTIER, L_ROADS, L_CROFTS, L_BANDS, L_KILLS]
 
-var _on := {L_FRONTIER: true, L_ROADS: true, L_CROFTS: true,
+var _on := {L_JOURNEY: true, L_FRONTIER: true, L_ROADS: true, L_CROFTS: true,
 	L_BANDS: true, L_KILLS: true}
 
 var _chips: HBoxContainer = null
@@ -133,6 +134,13 @@ func _ready() -> void:
 		b.toggled.connect(_on_chip.bind(id, b))
 		_chips.add_child(b)
 		_paint_chip(b, id)
+	## One-line key, no new bind — DevInputRegistry is full. Sits on the
+	## chips row so the control hint stays the close / zoom / pan line.
+	var fort_key := Label.new()
+	fort_key.text = "granite star = fort"
+	fort_key.add_theme_font_size_override("font_size", 12)
+	fort_key.modulate = Color(C_FORT, 0.85)
+	_chips.add_child(fort_key)
 
 
 ## Called by Player when M opens the panel: start looking at the whole state
@@ -348,10 +356,84 @@ func _refresh_readout() -> void:
 # =============================================================================
 const C_SEA := Color(0.06, 0.09, 0.13)
 const C_PLACE := Color(0.94, 0.90, 0.80)
+const C_FORT := Color(0.58, 0.56, 0.52)   ## granite — not cream, not the peak orange
 const C_PEAK := Color(0.98, 0.80, 0.45)
 const C_LAKE := Color(0.60, 0.82, 0.95)
 const C_REGION := Color(1.0, 1.0, 1.0, 0.32)
 const C_YOU := Color(0.35, 0.95, 1.0)
+
+const MARK_FORT := "fort"
+const MARK_CITY := "city"
+const MARK_TOWN := "town"
+const MARK_HAMLET := "hamlet"
+
+## Exact names only. "Fort Kent" is a rank-0 hamlet on the bake; a prefix
+## match would steal its mark. World appends Knox and Gorges as rank-1
+## places with no `kind` this slice — the names are the fort list.
+const FORT_PLACE_NAMES := ["Fort Knox", "Fort Gorges"]
+
+
+## Pure. Off-tree. `kind == "fort"` wins if a later row carries it; otherwise
+## only the two authored fort names. Never `begins_with("Fort")`.
+static func is_fort_place(pl: Dictionary) -> bool:
+	if String(pl.get("kind", "")) == "fort":
+		return true
+	return String(pl.get("name", "")) in FORT_PLACE_NAMES
+
+
+## Settlement glyph: fort | city | town | hamlet. Rank sizes the cream
+## circles (Portland bake rank 3 is the largest city mark); forts ignore
+## that ladder and take the granite star.
+static func place_mark(pl: Dictionary) -> String:
+	if is_fort_place(pl):
+		return MARK_FORT
+	var rank := int(pl.get("rank", 0))
+	if rank >= 3:
+		return MARK_CITY
+	if rank >= 1:
+		return MARK_TOWN
+	return MARK_HAMLET
+
+
+## Forts always show, like rank >= 1, even if someone later files them
+## rank 0. Hamlets stay zoom-gated at LABEL_ZOOM.
+static func place_visible(pl: Dictionary, zoom: float) -> bool:
+	if is_fort_place(pl):
+		return true
+	if int(pl.get("rank", 0)) >= 1:
+		return true
+	return zoom >= LABEL_ZOOM
+
+
+## Cream-circle radius. Rank 3 is the largest city mark.
+static func place_dot_radius(pl: Dictionary) -> float:
+	return 2.0 + float(int(pl.get("rank", 0)))
+
+
+## Four-pointed granite star (8 verts). Not a cream circle, not the 3-vert
+## peak caret.
+static func fort_star(p: Vector2, s: float = 5.5) -> PackedVector2Array:
+	var inner := s * 0.38
+	return PackedVector2Array([
+		p + Vector2(0.0, -s),
+		p + Vector2(inner, -inner),
+		p + Vector2(s, 0.0),
+		p + Vector2(inner, inner),
+		p + Vector2(0.0, s),
+		p + Vector2(-inner, inner),
+		p + Vector2(-s, 0.0),
+		p + Vector2(-inner, -inner),
+	])
+
+
+## The orange summit caret `_draw_peaks` already used. Kept as a function so
+## the fort star can be proved a different polygon, not a second peak.
+static func peak_caret(p: Vector2) -> PackedVector2Array:
+	return PackedVector2Array([
+		p + Vector2(0.0, -5.0),
+		p + Vector2(-4.5, 3.0),
+		p + Vector2(4.5, 3.0),
+	])
 
 
 func _draw_map() -> void:
@@ -375,6 +457,8 @@ func _draw_map() -> void:
 
 	var ow := Overworld.inst
 	if ow != null and ow._loaded:
+		if bool(_on[L_JOURNEY]):
+			_draw_journey(ow, vs)
 		_draw_regions(ow, vs)
 		_draw_lakes(ow, vs)
 		_draw_peaks(ow, vs)
@@ -439,9 +523,8 @@ func _draw_peaks(ow: Overworld, vs: Vector2) -> void:
 		var p := _to_view(float(q[0]), float(q[1]))
 		if not _on_screen(p, vs):
 			continue
-		## A little caret for a summit.
-		var tri := PackedVector2Array([p + Vector2(0, -5), p + Vector2(-4.5, 3), p + Vector2(4.5, 3)])
-		_view.draw_colored_polygon(tri, C_PEAK)
+		## A little caret for a summit — not the fort star.
+		_view.draw_colored_polygon(peak_caret(p), C_PEAK)
 		if _zoom >= LABEL_ZOOM:
 			_view.draw_string(_font, p + Vector2(7, 4),
 				"%s  %d m" % [String(pk["name"]), int(float(pk.get("y", 0.0)))],
@@ -450,19 +533,58 @@ func _draw_peaks(ow: Overworld, vs: Vector2) -> void:
 
 func _draw_places(ow: Overworld, vs: Vector2) -> void:
 	for pl: Dictionary in ow.places():
-		var rank := int(pl.get("rank", 0))
-		## Villages stay off the unzoomed map; cities are always on it.
-		if rank == 0 and _zoom < LABEL_ZOOM:
+		if not place_visible(pl, _zoom):
 			continue
 		var q: Array = pl["pos"]
 		var p := _to_view(float(q[0]), float(q[1]))
 		if not _on_screen(p, vs):
 			continue
-		var r := 2.0 + float(rank)
+		var mark := place_mark(pl)
+		if mark == MARK_FORT:
+			_view.draw_colored_polygon(fort_star(p, 6.6), Color(0.04, 0.04, 0.05, 0.72))
+			_view.draw_colored_polygon(fort_star(p), C_FORT)
+			_view.draw_string(_font, p + Vector2(8.0, 4.0), String(pl["name"]),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, C_FORT)
+			continue
+		var rank := int(pl.get("rank", 0))
+		var r := place_dot_radius(pl)
 		_view.draw_circle(p, r + 1.2, Color(0, 0, 0, 0.55))
 		_view.draw_circle(p, r, C_PLACE)
 		_view.draw_string(_font, p + Vector2(r + 4.0, 4.0), String(pl["name"]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11 + rank, C_PLACE)
+
+
+func _draw_journey(ow: Overworld, vs: Vector2) -> void:
+	## The gold thread is the main story's intended travel rhythm: Lewiston
+	## south-east to tidewater, north along the coast, then inland into the
+	## high-level country. It is deliberately broader than a road because it
+	## describes a chapter, not one compulsory footpath.
+	var acts: Array = ow.story_route()
+	for act: Dictionary in acts:
+		var points: Array = act.get("points", [])
+		if points.size() < 2:
+			continue
+		var line := PackedVector2Array()
+		var any := false
+		for point: Dictionary in points:
+			var q: Array = point.get("pos", [])
+			if q.size() < 2:
+				continue
+			var p := _to_view(float(q[0]), float(q[1]))
+			line.append(p)
+			any = any or _on_screen(p, vs, 80.0)
+		if not any or line.size() < 2:
+			continue
+		var act_i := clampi(int(act.get("act", 1)), 1, 5)
+		var col := Color(0.94, 0.72, 0.28, 0.68).lerp(
+			Color(0.72, 0.86, 1.0, 0.78), float(act_i - 1) / 4.0)
+		_view.draw_polyline(line, Color(0.05, 0.04, 0.03, 0.72), 5.2, true)
+		_view.draw_polyline(line, col, 2.4, true)
+		var start := line[0]
+		_view.draw_circle(start, 7.0, Color(0.04, 0.04, 0.05, 0.88))
+		_view.draw_circle(start, 5.5, col)
+		_view.draw_string(_font, start + Vector2(-3.2, 3.7), str(act_i),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.05, 0.05, 0.06))
 
 
 ## Whose position the arrow marks: the body, or the spectator camera while
@@ -583,6 +705,7 @@ func _paint_chip(b: Button, id: String) -> void:
 
 
 const CHIP_TINT := {
+	L_JOURNEY: Color(0.96, 0.74, 0.32),
 	L_FRONTIER: Color(0.90, 0.55, 0.45),
 	L_ROADS: Color(0.86, 0.78, 0.60),
 	L_CROFTS: Color(1.00, 0.84, 0.52),

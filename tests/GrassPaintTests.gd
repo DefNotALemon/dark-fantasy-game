@@ -74,7 +74,9 @@ func _run() -> void:
 	ok(src.contains("float grass_cell(ivec2 c)"), "...and the cell read")
 	ok(src.contains("* grass;") and src.contains("float rule = (1.0 - rock)"),
 		"the far meadow is the rule where the paint says ask, the paint elsewhere")
-	ok(src.contains("p00 = p00 < 0.0 ? rule : p00 * wet"), "painted grass still refuses the water")
+	ok(src.contains("tile_allows_grass"), "snow and packed tracks refuse the far meadow")
+	ok(src.contains("float allow = wet * (1.0 - snow) * tile_grass"),
+		"painted grass still refuses water, snow and tracks")
 	var mat := ShaderMaterial.new()
 	mat.shader = sh
 

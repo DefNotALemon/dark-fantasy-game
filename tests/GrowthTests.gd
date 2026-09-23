@@ -31,6 +31,11 @@ func _init() -> void:
 	_root3d = Node3D.new()
 	root.add_child(_root3d)
 
+	## --- card budget: never ask for more cards than probe hits ---
+	ok(GrowthPatch.card_budget(10.0, 1.0, 3, 2) == 2, "budget never exceeds hits")
+	ok(GrowthPatch.card_budget(10.0, 1.0, 3, 0) == 0, "budget zero on empty hits")
+	ok(GrowthPatch.card_budget(0.1, 1.0, 3, 20) == 3, "budget floors when hits allow")
+
 	## --- catalogue sanity ---
 	for t in GrowthTypes.type_ids():
 		var fam: Dictionary = GrowthTypes.family(t)

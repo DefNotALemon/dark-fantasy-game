@@ -22,14 +22,9 @@ const MIN_ASSERTIONS := 180
 ## TWO MASTER SWITCHES DECIDE WHETHER THE FOREST ASSERTIONS CAN MEAN ANYTHING,
 ## and as of 2026-09-13 both are off in the shipped project:
 ##
-##   Overworld.SCATTER — the whole procedural forest. Turned OFF on 2026-09-02
-##     at Lemon's request ("remove all trees for now... I want to hand place
-##     them"). With it off `_plan_tile` returns before it rolls a single slot,
-##     so every near tile plans zero trees and the far ring bakes zero. The
-##     census assertions below were written against SCATTER = true and were
-##     reporting 0-of-5000 for eleven days — a red suite nobody could act on,
-##     because nothing was broken. Flip SCATTER back to true and every one of
-##     them arms again on the next run.
+##   Overworld.SCATTER — the whole procedural forest. On again 2026-09-17 so
+##     walking and riding have a wood. Camp stays bald (FOREST_INNER_R).
+##     Census assertions below were written against SCATTER = true.
 ##
 ##   The far/tiny tiers are IMPOSTORS now (scripts/TreeImpostor.gd): a
 ##     photograph of the real tree shot through a SubViewport. A
@@ -79,6 +74,7 @@ func _run(T: Node3D) -> void:
 	_t_frame(T)
 	_t_facade(T)
 	_t_places(T)
+	_t_story(T)
 	_t_water(T)
 	_t_winding(T)
 	_t_valley(T)
@@ -168,7 +164,7 @@ func _t_facade(T: Node3D) -> void:
 		ok(r in ["temperate", "deepwood", "highland"], "region_for gives a known region (%s)" % r)
 	ok(regions.size() >= 2, "the map has more than one region in it")
 	# highland must actually be high
-	var hi: String = T.region_for(2329.0, -5046.0)
+	var hi: String = T.region_for(2070.0, -4364.0)
 	ok(hi == "highland", "Katahdin's shoulder is highland (got %s)" % hi)
 
 
@@ -189,8 +185,8 @@ func _t_places(T: Node3D) -> void:
 	if not portland.is_empty():
 		var pp: Array = portland["pos"]
 		var pos := Vector3(float(pp[0]), 0.0, float(pp[1]))
-		# The 2026-08-27 build documented Portland as ~400 m south of spawn.
-		near(pos.z, 400.0, 60.0, "Portland is ~400 m south of the valley")
+		# Lewiston-Auburn is the origin; Portland lies about a kilometre south.
+		near(pos.z, 1056.0, 60.0, "Portland is ~1 km south of Lewiston")
 		ok(absf(pos.x) < 400.0, "...and roughly due south, not across the map")
 		ok(T.place_name_at(pos) == "Portland", "place_name_at finds Portland at Portland")
 		ok(T.place_name_at(pos + Vector3(4000, 0, 4000)) != "Portland", "...and not from 5 km away")
@@ -205,20 +201,49 @@ func _t_places(T: Node3D) -> void:
 	if not kat.is_empty():
 		var kp: Array = kat["pos"]
 		var pos := Vector3(float(kp[0]), 0.0, float(kp[1]))
-		# documented: five kilometres north-east of the valley, 597 m tall
-		near(pos.z, -5000.0, 400.0, "Katahdin is ~5 km north")
+		# From Lewiston, Katahdin is over four kilometres north-east, 597 m tall.
+		near(pos.z, -4364.0, 400.0, "Katahdin is over 4 km north")
 		ok(pos.x > 1500.0, "...and east of the valley")
 		near(T.ground_y(pos), 597.0, 3.0, "Katahdin's summit is 597 m")
 		ok(T.ground_y(pos) > T.ground_y(Vector3(pos.x + 900.0, 0, pos.z)), "it falls away to the east")
 		ok(T.ground_y(pos) > T.ground_y(Vector3(pos.x, 0, pos.z + 900.0)), "and to the south")
 
-	# every city stands on land
+	var peak_names := {}
+	for p in peaks:
+		peak_names[String(p["name"])] = p
+	ok(peak_names.has("Traveler Mountain"), "Traveler keeps its own cairn (not snapped onto Katahdin)")
+	ok(peak_names.has("Bigelow"), "the Bigelow ridge is a named summit")
+	ok(peak_names.has("Sugarloaf"), "Sugarloaf is a named summit")
+	ok(peak_names.has("Old Speck"), "Old Speck stands on the Wall")
+	if peak_names.has("Traveler Mountain") and peak_names.has("Katahdin"):
+		var tv: Array = peak_names["Traveler Mountain"]["pos"]
+		var kv: Array = peak_names["Katahdin"]["pos"]
+		var td := Vector2(float(tv[0]) - float(kv[0]), float(tv[1]) - float(kv[1])).length()
+		ok(td > 200.0, "Traveler sits more than 200 m from Katahdin's cairn (%.0f m)" % td)
+
+	# Fort Knox's punch must stay land — the Penobscot channel is east of the bluff
+	var fk := Vector3(2310.1, 0.0, -1305.9)
+	ok(T.water_y(fk) == T.NO_WATER, "Fort Knox's site is dry")
+	var fk_wet := 0
+	for i in range(5):
+		for j in range(5):
+			var q := Vector3(2310.1 - 50.0 + 25.0 * float(i), 0.0, -1305.9 - 50.0 + 25.0 * float(j))
+			if T.water_y(q) != T.NO_WATER:
+				fk_wet += 1
+	ok(fk_wet == 0, "Fort Knox's punch rect has no water cells (%d wet)" % fk_wet)
+
+	# inland cities stand on land. Harbour towns (COASTAL_PLACES) sit on the
+	# shore pad and may be at the waterline; they are not inland drownings.
+	const COASTAL := ["Bar Harbor", "Bath", "Belfast", "Biddeford", "Boothbay",
+			"Calais", "Camden", "Eastport", "Ellsworth", "Kittery", "Rockland", "Stonington"]
 	var drowned := 0
 	for p in places:
+		if String(p["name"]) in COASTAL:
+			continue
 		var q: Array = p["pos"]
 		if T.ground_y(Vector3(float(q[0]), 0, float(q[1]))) <= T.get("sea_level"):
 			drowned += 1
-	ok(drowned == 0, "no city is underwater (%d drowned)" % drowned)
+	ok(drowned == 0, "no inland city is underwater (%d drowned)" % drowned)
 	# and inside the map
 	var outside := 0
 	for p in places:
@@ -228,18 +253,67 @@ func _t_places(T: Node3D) -> void:
 	ok(outside == 0, "no city is off the map (%d outside)" % outside)
 
 
+func _t_story(T: Node3D) -> void:
+	sec("the authored journey")
+	var acts: Array = T.story_route()
+	ok(acts.size() == 5, "the main journey has five acts")
+	if acts.size() != 5:
+		return
+	var first: Dictionary = acts[0]
+	var last: Dictionary = acts[acts.size() - 1]
+	ok(String(first.get("name", "")) == "The Ashen River", "the journey begins on the Androscoggin")
+	ok(String(last.get("name", "")) == "The Crown of Maine", "the journey ends in the northern highlands")
+	var fp: Array = first.get("points", [])
+	var lp: Array = last.get("points", [])
+	ok(fp.size() >= 3, "act one leads south-east through three anchors")
+	ok(lp.size() >= 2, "the final ascent has a foothill and summit anchor")
+	if not fp.is_empty():
+		var p0: Dictionary = fp[0]
+		var q0: Array = p0.get("pos", [])
+		ok(String(p0.get("name", "")) == "Lewiston–Auburn", "Lewiston-Auburn is the first story anchor")
+		ok(q0.size() == 2 and absf(float(q0[0])) < 0.1 and absf(float(q0[1])) < 0.1,
+			"...and it is the world origin")
+	if not lp.is_empty():
+		var pend: Dictionary = lp[lp.size() - 1]
+		ok(String(pend.get("name", "")) == "Katahdin", "Katahdin is the final story anchor")
+		ok(String(pend.get("kind", "")) == "peak", "...and is a landmark, not a town")
+	var previous_level := 0
+	var previous_danger := 0
+	var anchors := 0
+	for act: Dictionary in acts:
+		var levels: Array = act.get("levels", [])
+		ok(levels.size() == 2 and int(levels[0]) <= int(levels[1]), "act %d has an ordered level band" % int(act["act"]))
+		if levels.size() == 2:
+			ok(int(levels[1]) >= previous_level, "act %d does not lower the danger ceiling" % int(act["act"]))
+			previous_level = int(levels[1])
+		for point: Dictionary in (act.get("points", []) as Array):
+			var qp: Array = point.get("pos", [])
+			if qp.size() < 2:
+				continue
+			var at := Vector3(float(qp[0]), 0.0, float(qp[1]))
+			var danger: int = T.danger_tier_at(at)
+			ok(danger >= previous_danger, "%s does not lower the journey's danger tier" % String(point["name"]))
+			previous_danger = danger
+			anchors += 1
+	ok(anchors >= 18, "the route has enough anchors to pull the player around Maine (%d)" % anchors)
+	ok(T.danger_tier_at(Vector3.ZERO) == 0, "Lewiston starts at danger tier 0")
+	ok(T.danger_tier_at(Vector3(685.7, 0.0, 480.0)) == 0, "Bath is still opening-country danger")
+	ok(T.danger_tier_at(Vector3(3445.7, 0.0, -696.0)) >= 2, "Acadia is hardened coast")
+	ok(T.danger_tier_at(Vector3(2070.3, 597.0, -4364.0)) == 4, "Katahdin is apex ground")
+
+
 func _t_water(T: Node3D) -> void:
 	sec("water")
 	var NO: float = T.NO_WATER
 	# far out to sea, south-east of everything
-	var sea := Vector3(2000.0, 0.0, 1600.0)
+	var sea := Vector3(1674.0, 0.0, 2240.0)
 	var sy: float = T.water_y(sea)
 	ok(sy != NO, "there is water in the Gulf of Maine")
 	if sy != NO:
 		near(sy, T.get("sea_level"), 0.01, "the sea sits at sea level")
 	ok(T.ground_y(sea) < T.get("sea_level"), "and the seabed is under it")
 	# a summit is dry
-	ok(T.water_y(Vector3(2329.0, 0, -5046.0)) == NO, "Katahdin's summit is dry")
+	ok(T.water_y(Vector3(2070.0, 0, -4364.0)) == NO, "Katahdin's summit is dry")
 	# every lake surface is above its own bed
 	var bad := 0
 	var checked := 0
@@ -248,6 +322,9 @@ func _t_water(T: Node3D) -> void:
 		var p := Vector3(float(q[0]), 0, float(q[1]))
 		var wy: float = T.water_y(p)
 		if wy == NO:
+			continue
+		# a marker that landed on the exterior sea is tidal, not an inland lake shaft
+		if absf(wy - T.get("sea_level")) < 0.5:
 			continue
 		checked += 1
 		if wy <= T.ground_y(p):
@@ -367,9 +444,17 @@ func _t_forest(T: Node3D) -> void:
 		ok(true, "Overworld.SCATTER is off -- the world grows nothing, forest census skipped")
 	elif ResourceLoader.exists("res://assets/trees/glb/maple_2_mature.glb"):
 		var st: Dictionary = T.forest_stats()
-		ok(int(st["trees"]) > 5000, "the whole map is standing trees (%d)" % st["trees"])
-		var per: float = float(st["tris"]) / maxf(float(st["trees"]), 1.0)
-		ok(per <= 48.0, "the far ring uses the cheapest tier (%.1f tris/tree)" % per)
+		# Far/tiny trees are TreeImpostor photographs. A --headless --script
+		# run never renders a frame, so mesh_for() is null and forest_stats
+		# counts 0 -- the same skip as the lod bake checks below. Color and
+		# _plantable still assert the bake is forested. Not a geography pin.
+		if int(st["trees"]) == 0 and T._bake_species("maple", "tiny") == null:
+			ok(true, "far ring is impostors -- no SubViewport render headless, census skipped")
+			ok(true, "far ring cheapest-tier check skipped -- no impostor mesh headless")
+		else:
+			ok(int(st["trees"]) > 5000, "the whole map is standing trees (%d)" % st["trees"])
+			var per: float = float(st["tris"]) / maxf(float(st["trees"]), 1.0)
+			ok(per <= 48.0, "the far ring uses the cheapest tier (%.1f tris/tree)" % per)
 
 	# --- THE bug this section exists for. `_plantable` used to refuse anything
 	# within valley_ease (340 m) of the origin "to protect the clearing", which
@@ -388,7 +473,9 @@ func _t_forest(T: Node3D) -> void:
 			if T._plantable(cos(a) * r, sin(a) * r) > 0.0:
 				hit += 1
 		var pct := 100.0 * float(hit) / float(tot)
-		ok(pct > 40.0, "%.0f-%.0f m from spawn is forested (%.1f%%)" % [band[0], band[1], pct])
+		# 110-200 m overlaps the Lewiston metro pad (pale farm, not canopy)
+		var floor_pct := 25.0 if band[0] < 200.0 else 40.0
+		ok(pct > floor_pct, "%.0f-%.0f m from spawn is forested (%.1f%%)" % [band[0], band[1], pct])
 	# ...and the camp itself stays a clearing
 	var camp := 0
 	for i in range(200):
@@ -399,7 +486,7 @@ func _t_forest(T: Node3D) -> void:
 
 	# --- what can be planted where
 	near(T._plantable(0.0, 0.0), 0.0, 0.0001, "nothing is planted in the spawn clearing")
-	var sea := Vector3(2000.0, 0.0, 1600.0)
+	var sea := Vector3(1674.0, 0.0, 2240.0)
 	near(T._plantable(sea.x, sea.z), 0.0, 0.0001, "nothing is planted in the sea")
 	near(T._plantable(999999.0, 0.0), 0.0, 0.0001, "nothing is planted off the map")
 	var forested := 0
@@ -569,7 +656,7 @@ func _t_cells(T: Node3D) -> void:
 	if not _forest_on(T):
 		ok(true, "Overworld.SCATTER is off -- no slots are planned, cell assertions skipped")
 		return
-	var a := Vector3(800.0, 0.0, -1600.0)   ## deep wood, forest weight ~0.7
+	var a := Vector3(474.0, 0.0, -960.0)   ## deep wood, forest weight ~0.7
 	T.warm(a)
 	ok(T._near.size() > 0, "warm() built a near ring (%d tiles)" % T._near.size())
 	ok(T._cell_queue.is_empty(), "warm() promoted every cell in reach")
@@ -623,7 +710,7 @@ func _t_cells(T: Node3D) -> void:
 			% [drawn, real_here, slots])
 		ok(drawn + real_here >= slots - int(T.felled_count()), "...and never dropped")
 	# walk 800 m: the old woods demote, new ones grow around the new focus
-	var b := Vector3(-800.0, 0.0, -1200.0)  ## 1.65 km away, weight ~0.6
+	var b := Vector3(-1126.0, 0.0, -560.0)  ## 1.65 km away, weight ~0.6
 	T.warm(b)
 	var moved_far := 0
 	for k in T._plans.keys():
@@ -798,7 +885,7 @@ func _t_water_mesh(T: Node3D) -> void:
 	ok(seb_wet, "Sebago has water within 400 m of its marker")
 	# the lake that floated 130 m over its valley (Rangeley-Kennebago): either
 	# re-levelled onto its bed or dried -- never in the sky
-	var kb := Vector3(-479.8, 0, -3040.1)
+	var kb := Vector3(-805.7, 0, -2399.9)
 	var kw: float = T.water_y(kb)
 	ok(kw == T.NO_WATER or kw - T.ground_y(kb) < 15.0,
 		"Rangeley-Kennebago is not a lake in the sky (surface %.1f over ground %.1f)" % [kw, T.ground_y(kb)])
@@ -814,7 +901,7 @@ func _t_water_mesh(T: Node3D) -> void:
 	ok(T.water_y(Vector3(0, 0, -600)) == T.NO_WATER, "sample_water() treats water 40 m over the bed as dry")
 	T._w = keep_w
 	# a sane lake still answers (at its own marker, wherever the bake put it)
-	var moose := Vector3(1285.9, 0, -4120.1)
+	var moose := Vector3(960.0, 0, -3480.0)
 	for l in T.lakes():
 		if String(l["name"]) == "Moosehead Lake":
 			moose = Vector3(float(l["pos"][0]), 0, float(l["pos"][1]))
@@ -848,7 +935,7 @@ func _t_water_mesh(T: Node3D) -> void:
 	var flooded := 0
 	for i in range(24):
 		var a := TAU * float(i) / 24.0
-		var p := Vector3(240.2 + cos(a) * 150.0, 0, 415.9 + sin(a) * 150.0)
+		var p := Vector3(-85.7 + cos(a) * 150.0, 0, 1056.0 + sin(a) * 150.0)
 		var wy2: float = T.water_y(p)
 		if wy2 != T.NO_WATER and wy2 - T.ground_y(p) > 8.0:
 			flooded += 1
@@ -885,7 +972,7 @@ func _t_depth(T: Node3D) -> void:
 	sec("depth is measured from the local surface")
 	# Portland's ground is not the valley floor (world v2: +13; the 08-30 bake
 	# had it at -17.7). Standing on it is depth 0, not |g| m down.
-	var portland := Vector3(240.2, 0, 415.9)
+	var portland := Vector3(-85.7, 0, 1056.0)
 	var g: float = T.ground_y(portland)
 	ok(absf(g) > 5.0, "Portland is not at the valley floor's height (%.1f)" % g)
 	near(T.depth_below_surface(Vector3(portland.x, g, portland.z)), 0.0, 0.01, "standing on Portland is depth 0")

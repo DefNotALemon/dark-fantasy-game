@@ -93,6 +93,11 @@ func tier() -> int:
 	return MonsterGen.tier_for_level(player_level())
 
 
+func tier_at(pos: Vector3) -> int:
+	## Player progression may harden a region, but geography is its floor.
+	return mini(maxi(tier(), Overworld.danger_tier_at(pos)), MonsterGen.MAX_TIER)
+
+
 func key_at(pos: Vector3) -> String:
 	return MonsterGen.zone_key(pos)
 
@@ -101,11 +106,11 @@ func roster_here() -> Array:
 	## The species that hunt where the player stands, at the player's tier.
 	if player == null or not is_instance_valid(player):
 		return MonsterGen.roster(world_seed, "wild:wild:0,0", tier())
-	return MonsterGen.roster(world_seed, key_at(player.global_position), tier())
+	return MonsterGen.roster(world_seed, key_at(player.global_position), tier_at(player.global_position))
 
 
 func roll_for(pos: Vector3) -> Dictionary:
-	return MonsterGen.pick(world_seed, key_at(pos), tier(), _rng)
+	return MonsterGen.pick(world_seed, key_at(pos), tier_at(pos), _rng)
 
 
 func _in_settlement(pos: Vector3) -> bool:

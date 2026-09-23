@@ -122,6 +122,9 @@ func _process(delta: float) -> void:
 		## player rather than pushed in, because this node already holds them.
 		if "wade" in player:
 			push = minf(1.0, push + float(player.get("wade")) * Locomotion.WADE_PUSH)
+		## A gallop should feel like moving THROUGH weather, not past a still wood.
+		if player.get("mount") != null:
+			strength = minf(strength + 0.16, 1.05)
 		RenderingServer.global_shader_parameter_set("player_pos", p)
 	_swing = maxf(0.0, _swing - delta * SWING_DECAY)
 	push = maxf(push, _swing)

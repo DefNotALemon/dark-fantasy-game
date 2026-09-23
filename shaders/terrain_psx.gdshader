@@ -68,8 +68,9 @@ uniform float snow_line = 440.0;           // Katahdin's shoulders whiten
 // there is no line where one takes over from the other — stand anywhere and
 // the meadow you are in and the meadow on the far ridge are the same green.
 //
-// Rock faces, snow, the beach and the water keep their own surfaces: this is
-// grass, and grass does not grow on a cliff face or below the tide.
+// Rock faces, snow, the beach, packed tracks and the water keep their own
+// surfaces: this is grass, and grass does not grow on a cliff, a snowfield,
+// a road or below the tide.
 global uniform float season_phase;
 uniform vec3 meadow_spring : source_color = vec3(0.35, 0.53, 0.19);
 uniform vec3 meadow_summer : source_color = vec3(0.25, 0.40, 0.15);
@@ -149,6 +150,19 @@ vec3 tile_col(int id, vec2 uv, vec2 ddx, vec2 ddy) {
 	return textureGrad(ground_tiles, vec3(uv, layer), ddx, ddy).rgb;
 }
 
+// Packed dirt (col 3), mud/track (col 4) and snow (col 10) are not meadow.
+// Column index is (id - 1) % 11, matching GroundPaint.col_of / grass_on_tile.
+float tile_allows_grass(int id) {
+	if (id <= 0) {
+		return 1.0;
+	}
+	int col = (id - 1) % 11;
+	if (col == 3 || col == 4 || col == 10) {
+		return 0.0;
+	}
+	return 1.0;
+}
+
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_wnormal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -167,6 +181,7 @@ void fragment() {
 	// --- the ground textures: a bilinear blend of the four nearest cells -----
 	float tw = 0.0;            // how much of this fragment is textured (0..1)
 	vec3 tcol = vec3(0.0);     // the weighted texture colour (already x tw)
+	float tile_grass = 1.0;    // 0 on snow / packed dirt / a wet track
 	if (ground_layers > 0) {
 		vec2 g = (v_world.xz - ground_origin) / ground_step;
 		vec2 fl = floor(g);
@@ -184,6 +199,7 @@ void fragment() {
 				tcol = tile_col(i00, uv, ddx, ddy);
 				tw = 1.0;
 			}
+			tile_grass = tile_allows_grass(i00);
 		} else {
 			float w00 = (1.0 - f.x) * (1.0 - f.y);
 			float w10 = f.x * (1.0 - f.y);
@@ -193,6 +209,10 @@ void fragment() {
 			if (i10 > 0) { tcol += w10 * tile_col(i10, uv, ddx, ddy); tw += w10; }
 			if (i01 > 0) { tcol += w01 * tile_col(i01, uv, ddx, ddy); tw += w01; }
 			if (i11 > 0) { tcol += w11 * tile_col(i11, uv, ddx, ddy); tw += w11; }
+			tile_grass = w00 * tile_allows_grass(i00)
+				+ w10 * tile_allows_grass(i10)
+				+ w01 * tile_allows_grass(i01)
+				+ w11 * tile_allows_grass(i11);
 		}
 	}
 
@@ -212,10 +232,14 @@ void fragment() {
 	// THE MEADOW. Everything the map says is ground, from the fade ring out to
 	// the horizon, goes most of the way to the colour of the grass standing on
 	// it — with a patch grain coarse enough (11 m) not to shimmer at 2 km.
-	// the RULE: dry ground that is not a cliff face and not the beach
+	// the RULE: dry ground that is not a cliff, the beach, snow, or a track
+	float snow = smoothstep(snow_line, snow_line + 90.0, v_world.y + (h - 0.5) * 30.0)
+		* (1.0 - rock * 0.7);
 	float rule = (1.0 - rock)
 		* smoothstep(sea_level + 0.2, sea_level + 2.6, v_world.y)
-		* (1.0 - beach);
+		* (1.0 - beach)
+		* (1.0 - snow)
+		* tile_grass;
 	float grass = rule;
 	if (grass_paint_on > 0) {
 		// the paint, where there is any: a cell says bare, grass, or "ask"
@@ -227,12 +251,13 @@ void fragment() {
 		float p10 = grass_cell(i0 + ivec2(1, 0));
 		float p01 = grass_cell(i0 + ivec2(0, 1));
 		float p11 = grass_cell(i0 + ivec2(1, 1));
-		// painted grass still will not stand in the water
+		// painted grass still will not stand in the water, the snow, or a track
 		float wet = smoothstep(sea_level + 0.2, sea_level + 0.6, v_world.y);
-		p00 = p00 < 0.0 ? rule : p00 * wet;
-		p10 = p10 < 0.0 ? rule : p10 * wet;
-		p01 = p01 < 0.0 ? rule : p01 * wet;
-		p11 = p11 < 0.0 ? rule : p11 * wet;
+		float allow = wet * (1.0 - snow) * tile_grass;
+		p00 = p00 < 0.0 ? rule : p00 * allow;
+		p10 = p10 < 0.0 ? rule : p10 * allow;
+		p01 = p01 < 0.0 ? rule : p01 * allow;
+		p11 = p11 < 0.0 ? rule : p11 * allow;
 		grass = mix(mix(p00, p10, f.x), mix(p01, p11, f.x), f.y);
 	}
 	float meadow = meadow_amount
@@ -255,9 +280,8 @@ void fragment() {
 		col = mix(col, mix(col, mcol, meadow_bias), meadow);
 	}
 
-	// the high tops hold snow where it can lie
-	float snow = smoothstep(snow_line, snow_line + 90.0, v_world.y + (h - 0.5) * 30.0)
-		* (1.0 - rock * 0.7);
+	// the high tops hold snow where it can lie (amount already computed above
+	// so the meadow steps off it; this is the colour)
 	col = mix(col, snow_col, snow);
 
 	// Posterize the BASE on VALUE, so the painted map lands on one palette...

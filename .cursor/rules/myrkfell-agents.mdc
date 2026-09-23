@@ -1,0 +1,33 @@
+---
+description: How Cursor agents must split work on Myrkfell without colliding
+alwaysApply: true
+---
+
+# Myrkfell agent split
+
+Godot 4.7, GDScript. Title in-engine: **Myrkfell**. Design name: *The Withering*. Main scene `res://scenes/World.tscn` only attaches `scripts/World.gd` — the world is built in code, not in the editor.
+
+## Delegate
+
+Use project subagents for parallel work. One owner per file in a given turn.
+
+| Subagent | Owns |
+|---|---|
+| `myrkfell-director` | Scope, slice, which agents run |
+| `myrkfell-gameplay` | `Player.gd`, `Locomotion.gd`, combat/weapons/hit FX, survival ticks on the player |
+| `myrkfell-creatures` | `Enemy.gd` + kinds, `Critter*.gd`, directors, wildlife, slimes, NPCs |
+| `myrkfell-world` | `World.gd`, terrain, caves, trees, grass, cities, roads, sky/weather nodes |
+| `myrkfell-systems` | `GameMode.gd`, `SaveGame.gd`, `Materials.gd`, growth, chronicle, factions |
+| `myrkfell-ui` | Menus, map panel, character creator, settings rows — **not** HUD inside `Player.gd` unless gameplay is idle |
+| `myrkfell-reviewer` | After a slice: Godot idioms, cycles, tests |
+
+## Hard rules
+
+- Do not edit `addons/godot_ai` or `addons/terrabrush` unless the user asked.
+- `GameMode` must never name `Enemy`, `Critter`, `Player`, or `CaveRegion` (class-table cycles). Duck-type instead. See `docs/GAME_MODES.md`.
+- Prefer extending existing scripts over new autoloads. There is only `_mcp_game_helper` today.
+- Do not hand-edit giant `.tscn` graphs; keep building in GDScript.
+- Parallel agents: disjoint files only. Never two writers on `Player.gd` or `World.gd`.
+- Read `docs/ROADMAP.md` and the relevant `docs/*.md` before inventing systems that already exist.
+- Tests live in `tests/`. Prefer the matching `*Tests.gd` over a new suite.
+- In-game Claude (F4) writes `notes/claude-handoff/`. Treat new handoff files as playtest tickets: director scopes, then specialists. Skip `README.md`.

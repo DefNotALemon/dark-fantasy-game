@@ -1193,9 +1193,13 @@ func _spawn_band(id: String, c: Dictionary, at: Vector2) -> void:
 	var base := Vector3(at.x, _ground_y(at), at.y)
 	## The band's fighters are GENERATED raiders now (Lemon, 2026-09-14):
 	## one armed biped species per band cell (MonsterGen.raider), at the
-	## player's level tier. Goblin.gd stays in the repo; it just no longer
-	## spawns.
-	var raider_g := MonsterGen.raider(world_seed, int(c["cell"]), _player_tier())
+	## greater of the player's tier and the camp's world-danger floor.
+	## Goblin.gd stays in the repo; it just no longer spawns.
+	var camp_pos: Vector2 = c.get("pos", Vector2.ZERO)
+	var spawn_tier := maxi(_player_tier(),
+			Overworld.danger_tier_at(Vector3(camp_pos.x, 0.0, camp_pos.y)))
+	var raider_g := MonsterGen.raider(world_seed, int(c["cell"]),
+			mini(spawn_tier, MonsterGen.MAX_TIER))
 	for i in range(n):
 		var g := Monster.from(raider_g)
 		var h := _hash(world_seed, int(c["cell"]) * 31 + i, SALT_BODY)

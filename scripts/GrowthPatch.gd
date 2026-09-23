@@ -70,7 +70,7 @@ var centre := Vector3.ZERO      ## CYLINDER: (0, y, 0)  POINT: the lump's centre
 var facing := Vector3.FORWARD   ## POINT: outward direction of the heart
 var facing_ang := 0.0           ## CYLINDER: angle round the trunk (atan2(x, z))
 var span := Vector2(0.6, 0.9)   ## CYLINDER: (metres up, radians round)
-                                ## POINT: (radians pitch, radians yaw)
+								## POINT: (radians pitch, radians yaw)
 var reach := 3.0                ## how far out the rays start
 var inward := true              ## rays converge on the centre (false: diverge)
 var area := 1.0                 ## m^2 the patch covers, for the card budget
@@ -328,6 +328,10 @@ class Buf:
 	var idx := PackedInt32Array()
 
 
+static func card_budget(density_n: float, area_m2: float, min_cards: int, hit_count: int) -> int:
+	return clampi(int(density_n * area_m2), mini(min_cards, hit_count), hit_count)
+
+
 func _build_mesh(hits_base: Array, hits_acc: Array, rng: RandomNumberGenerator) -> void:
 	var fam := GrowthTypes.family(type_id)
 	var base: Dictionary = GrowthTypes.base_of(type_id, base_id)
@@ -335,9 +339,10 @@ func _build_mesh(hits_base: Array, hits_acc: Array, rng: RandomNumberGenerator) 
 	var buf := Buf.new()
 
 	## budget: cards per m^2 x the area the host says it covers, capped by the
-	## rays that actually landed
-	var n_base := clampi(int(float(base["n"]) * area), 10, hits_base.size())
-	var n_acc := clampi(int(float(acc["n"]) * area), 3, hits_acc.size())
+	## rays that actually landed. Floor the min against hit_count — Godot's
+	## clampi swaps when min > max, so clampi(n, 3, 2) can still return 3.
+	var n_base := card_budget(float(base["n"]), area, 10, hits_base.size())
+	var n_acc := card_budget(float(acc["n"]), area, 3, hits_acc.size())
 	## nearest-to-heart first, so the budget trims the fringe, not the middle
 	hits_base.sort_custom(func(p, q): return float(p["d"]) < float(q["d"]))
 	hits_acc.sort_custom(func(p, q): return float(p["d"]) < float(q["d"]))

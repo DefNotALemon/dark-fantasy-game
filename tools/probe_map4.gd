@@ -5,7 +5,7 @@ extends SceneTree
 ## region's margin, so a threshold taken from the per-region median called
 ## almost every border uneasy. Measure the thing the constant is actually asked.
 
-const ORIGIN := Vector2(-1199.79, -8800.08)
+const ORIGIN := Vector2(-1525.71, -8160.0)
 const SIZE := Vector2(7200.0, 10800.0)
 
 func _init() -> void:

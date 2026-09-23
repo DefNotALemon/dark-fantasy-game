@@ -205,6 +205,7 @@ func _run_all() -> void:
 	_t_streets()
 	_t_lots()
 	_t_kinds()
+	_t_portland_look()
 	_t_water()
 	_t_slope()
 	_t_lamps_clock()
@@ -378,7 +379,7 @@ func _t_gates() -> void:
 
 
 func _t_streets() -> void:
-	claim("streets: one from every gate to the square, entirely inside the wall; a ring for tier ≥ 2")
+	claim("streets: gate roads to the square; Portland is a harbor grid, the others keep their rings")
 	var L := _portland(3, [Vector2(1, 0), Vector2(-1, 0.3).normalized()])
 	var streets: Array = L["streets"]
 	var gates: Array = L["gates"]
@@ -393,31 +394,43 @@ func _t_streets() -> void:
 				inside = false
 		ok(inside, "street %d stays inside the wall" % i)
 		ok(pl.size() == 3, "street %d has one bend" % i)
+		var mid: Vector2 = pl[1]
+		var axis := absf(mid.x) < 0.05 or absf(mid.y) < 0.05 or absf(pl[0].x) < 10.0 or absf(pl[0].y) < 10.0
+		ok(axis, "Portland street %d doglegs on an axis, not a hashed radial" % i)
 	var rings: Array = L["rings"]
-	ok(rings.size() == 3, "tier 3 has three rings")
-	var wall: PackedVector2Array = L["wall"]
-	for k in range(rings.size()):
-		var ring: PackedVector2Array = rings[k]
-		ok(ring.size() == wall.size() + 1 and ring[0] == ring[ring.size() - 1], "ring %d is closed with the wall's vertex count" % k)
-		var f := float(Cities.RINGS[3][k])
-		var shaped := true
-		for v in range(wall.size()):
-			if ring[v].distance_to(wall[v] * f) > 0.001:
-				shaped = false
-		ok(shaped, "ring %d is the wall scaled by %.2f" % [k, f])
 	var minor: Array = L["minor"]
-	ok(minor.size() >= 3, "the hub's long outer arcs are cut by minor radials (%d)" % minor.size())
-	var span_ok := true
-	for pl in minor:
-		var p2: PackedVector2Array = pl
-		if p2.size() != 2 or p2[0].length() < p2[1].length():
-			span_ok = false
-		if not Geometry2D.is_point_in_polygon(p2[0], wall):
-			span_ok = false
-	ok(span_ok, "every minor radial runs from the outer ring inward, inside the wall")
+	ok(rings.size() >= 4, "the hub has several cobble grid runs (got %d)" % rings.size())
+	ok(minor.size() >= 4, "…and brick lanes between them (got %d)" % minor.size())
+	var axis_ok := 0
+	var segs := 0
+	for pl0 in rings + minor:
+		var p2: PackedVector2Array = pl0
+		for k in range(p2.size() - 1):
+			var d: Vector2 = p2[k + 1] - p2[k]
+			if d.length() < 0.5:
+				continue
+			segs += 1
+			if absf(d.x) < 0.05 or absf(d.y) < 0.05:
+				axis_ok += 1
+	ok(segs > 0 and axis_ok == segs, "grid streets are axis-aligned (%d/%d)" % [axis_ok, segs])
 	var roads: Array = L["roads"]
-	ok(roads.size() == streets.size() + minor.size() + rings.size(), "roads = gate streets + minor radials + rings, in that order")
+	ok(roads.size() == streets.size() + minor.size() + rings.size(), "roads = gate streets + grid + lanes")
 	ok(roads[0] == streets[0], "…gate streets first")
+	ok(rings.size() > 0 and roads[streets.size()] == rings[0], "…then cobble thoroughfares, before brick lanes")
+	var bangor := Cities.layout("Bangor", 2, Vector2.ZERO, [Vector2(1, 0), Vector2(0, 1)], 3, Callable(), Callable())
+	var br: Array = bangor["rings"]
+	ok(br.size() == 2, "tier 2 still has two rings")
+	var bwall: PackedVector2Array = bangor["wall"]
+	var shaped := true
+	for k in range(br.size()):
+		var ring: PackedVector2Array = br[k]
+		if ring.size() != bwall.size() + 1 or ring[0] != ring[ring.size() - 1]:
+			shaped = false
+		var f := float(Cities.RINGS[2][k])
+		for v in range(bwall.size()):
+			if ring[v].distance_to(bwall[v] * f) > 0.001:
+				shaped = false
+	ok(shaped, "Bangor's rings are the wall scaled in")
 	var t1 := Cities.layout("Brunswick", 1, Vector2.ZERO, [], 1, Callable(), Callable())
 	ok((t1["rings"] as Array).size() == 1 and (t1["minor"] as Array).size() == 0, "tier 1 has one ring and no minor radials")
 
@@ -482,27 +495,49 @@ func _t_lots() -> void:
 
 
 func _t_kinds() -> void:
-	claim("kinds: exactly one inn by the main gate; a hall for tier ≥ 2; a chapel only at the hub")
-	for nm in ["Portland", "Bangor", "Brunswick"]:
+	claim("kinds: inn at the main gate; walled towns keep hall/chapel; Portland remaps to custom-house and church")
+	for nm in ["Bangor", "Brunswick"]:
 		var tier: int = Cities.CITY_TIERS[nm]
 		var L := Cities.layout(nm, tier, Vector2.ZERO, [Vector2(0, -1), Vector2(1, 0)], 2, Callable(), Callable())
 		var kinds := {"inn": 0, "hall": 0, "chapel": 0, "house": 0}
 		var inn_lot := {}
 		for lot in L["lots"]:
-			kinds[str(lot["kind"])] += 1
-			if str(lot["kind"]) == "inn":
+			var k := str(lot["kind"])
+			if kinds.has(k):
+				kinds[k] += 1
+			if k == "inn":
 				inn_lot = lot
 		ok(int(kinds["inn"]) == 1, "%s has exactly one inn" % nm)
 		ok(int(kinds["hall"]) == (1 if tier >= 2 else 0), "%s hall count matches tier" % nm)
 		ok(int(kinds["chapel"]) == (1 if tier >= 3 else 0), "%s chapel count matches tier" % nm)
 		ok(int(kinds["house"]) >= Cities.HOUSE_MIN[tier] - 3, "%s the rest are houses (%d)" % [nm, int(kinds["house"])])
 		ok(int(inn_lot["street"]) == 0, "%s the inn is on the main gate's street" % nm)
-		# the inn is the OUTERMOST lot on that street — first thing through the gate
 		var outer := 0.0
 		for lot in L["lots"]:
 			if int(lot["street"]) == 0:
 				outer = maxf(outer, (lot["pos"] as Vector2).length())
 		ok(absf((inn_lot["pos"] as Vector2).length() - outer) < 0.01, "%s the inn is the first lot inside the gate" % nm)
+	var P := Cities.layout("Portland", 3, Vector2.ZERO, [Vector2(0, -1), Vector2(1, 0)], 2, Callable(), Callable())
+	var pk := {"inn": 0, "custom_house": 0, "church": 0, "warehouse": 0, "hall": 0, "chapel": 0, "house": 0}
+	var inn_p := {}
+	for lot in P["lots"]:
+		var k2 := str(lot["kind"])
+		if pk.has(k2):
+			pk[k2] += 1
+		if k2 == "inn":
+			inn_p = lot
+	ok(int(pk["inn"]) == 1, "Portland has exactly one inn")
+	ok(int(pk["custom_house"]) == 1, "Portland remaps the hall to a custom-house")
+	ok(int(pk["church"]) == 1, "Portland remaps the chapel to a brick church")
+	ok(int(pk["hall"]) == 0 and int(pk["chapel"]) == 0, "…and keeps no medieval hall or chapel")
+	ok(int(pk["warehouse"]) >= 1, "Portland has warehouses on the waterfront (%d)" % int(pk["warehouse"]))
+	ok(int(pk["house"]) >= Cities.HOUSE_MIN[3] - 8, "Portland the rest are houses (%d)" % int(pk["house"]))
+	ok(int(inn_p["street"]) == 0, "Portland the inn is on the main gate's street")
+	var outer_p := 0.0
+	for lot in P["lots"]:
+		if int(lot["street"]) == 0:
+			outer_p = maxf(outer_p, (lot["pos"] as Vector2).length())
+	ok(absf((inn_p["pos"] as Vector2).length() - outer_p) < 0.01, "Portland the inn is the first lot inside the gate")
 	var stalls: Array = _portland()["stalls"]
 	ok(stalls.size() == Cities.STALLS[3], "hub square has %d stalls" % Cities.STALLS[3])
 	var inside := true
@@ -510,6 +545,65 @@ func _t_kinds() -> void:
 		if (st["pos"] as Vector2).length() > Cities.SQUARE_R[3]:
 			inside = false
 	ok(inside, "every stall is on the square")
+
+
+func _t_portland_look() -> void:
+	claim("Portland Old Port: brick/stone townhouses, harbor grid, seawall not a curtain; Bangor and Brunswick stay medieval")
+	ok(Cities.style_of("Portland") == "old_port", "Portland is keyed old_port")
+	ok(Cities.style_of("Bangor") == "walled", "Bangor stays walled")
+	ok(Cities.style_of("Lewiston-Auburn") == "walled", "Lewiston-Auburn stays walled")
+	ok(Cities.style_of("Augusta") == "walled", "Augusta stays walled")
+	ok(Cities.style_of("Brunswick") == "walled", "Brunswick stays walled")
+	ok(Cities.style_of("Presque Isle") == "walled", "Presque Isle stays walled")
+	var p := _portland(3, [Vector2(1, 0), Vector2(0, 1)])
+	ok(str(p["style"]) == "old_port", "layout carries the dialect")
+	ok(str(p["wall_kind"]) == "seawall", "wall_kind is a seawall, not a stone curtain")
+	ok(str(p["wall_kind"]) != "stone" and str(p["wall_kind"]) != "palisade", "…not a full curtain kind")
+	ok((p["piers"] as Array).size() >= 3, "a few piers on the Casco face (%d)" % (p["piers"] as Array).size())
+	var pier_east := true
+	for pr in p["piers"]:
+		if (pr["root"] as Vector2).x <= 0.0:
+			pier_east = false
+	ok(pier_east, "every pier hangs off the east / Casco face")
+	var brick_stone := 0
+	var daubish := 0
+	var storey_ok := 0
+	var houses := 0
+	var thatch := 0
+	for lot in p["lots"]:
+		var wm := str(lot.get("wall_mat", ""))
+		var rm := str(lot.get("roof_mat", ""))
+		if wm == "brick" or wm == "stone":
+			brick_stone += 1
+		if wm == "daub" or wm == "board" or rm == "thatch":
+			daubish += 1
+		if rm == "thatch":
+			thatch += 1
+		if str(lot["kind"]) == "house":
+			houses += 1
+			if int(lot["storeys"]) >= 2:
+				storey_ok += 1
+	ok(brick_stone > 0 and brick_stone > daubish * 3, "majority walls are brick or stone (%d vs %d timber/thatch)" % [brick_stone, daubish])
+	ok(thatch == 0, "no thatch roofs on the hub")
+	ok(houses > 0 and storey_ok * 2 >= houses, "most houses are 2–3 storey (%d/%d)" % [storey_ok, houses])
+	ok(float(p["core_r"]) <= 190.0 + 0.01, "core stays on the 190 m pad")
+	var bangor := Cities.layout("Bangor", 2, Cities.BUILTIN_ROSTER["Bangor"], [Vector2(1, 0)], 3, Callable(), Callable())
+	ok(str(bangor["wall_kind"]) == "stone", "Bangor is still a stone-walled city")
+	var timber := 0
+	var b_houses := 0
+	for lot in bangor["lots"]:
+		if str(lot["kind"]) != "house":
+			continue
+		b_houses += 1
+		var wm2 := str(lot.get("wall_mat", ""))
+		if wm2 == "daub" or wm2 == "board":
+			timber += 1
+	ok(b_houses > 0 and timber * 2 >= b_houses, "Bangor houses are still timber (daub/board) (%d/%d)" % [timber, b_houses])
+	ok(str(bangor["style"]) == "walled", "Bangor dialect is walled")
+	var bru := Cities.layout("Brunswick", 1, Cities.BUILTIN_ROSTER["Brunswick"], [], 1, Callable(), Callable())
+	ok(str(bru["wall_kind"]) == "palisade", "Brunswick is still a palisade town")
+	ok((bru["rings"] as Array).size() == 1, "…with its one ring street")
+	ok(str(bru["style"]) == "walled", "Brunswick dialect is walled")
 
 
 func _t_water() -> void:
@@ -608,24 +702,25 @@ func _t_staging() -> void:
 	ok(with_door == lots.size(), "every house has a door")
 	ok(facing == lots.size(), "every house is turned to its yaw")
 	var wall_node := n.get_node("Wall")
-	var wall: PackedVector2Array = c.cities["Portland"]["wall"]
 	var gates: Array = c.cities["Portland"]["gates"]
 	var towers := 0
 	var segs := 0
 	var gate_marks := 0
+	var posts := 0
 	for ch in wall_node.get_children():
 		var nm := str(ch.name)
 		if nm.begins_with("Tower"):
 			towers += 1
 		elif nm.begins_with("Seg"):
 			segs += 1
+		elif nm.begins_with("Post"):
+			posts += 1
 		elif nm.begins_with("Gate"):
 			gate_marks += 1
-	ok(towers == gates.size() * 2, "two towers per gate (%d)" % towers)
+	ok(towers == 0, "Portland has no curtain-wall towers")
+	ok(posts == gates.size() * 2, "two posts per gate (%d)" % posts)
 	ok(gate_marks == gates.size(), "one threshold per gate")
-	## 2026-09-13: a wall RUN is cut into CONFORM_SPAN pieces so it can follow
-	## the ground, so the count is no longer one box per polygon edge.
-	ok(segs >= wall.size() - gates.size(), "a wall piece for every run at least: %d for %d verts and %d gates" % [segs, wall.size(), gates.size()])
+	ok(segs >= 2, "the Casco quay is built (%d runs)" % segs)
 	var longest := 0.0
 	for ch in wall_node.get_children():
 		if not str(ch.name).begins_with("Seg"):
@@ -642,6 +737,7 @@ func _t_staging() -> void:
 	var lamps_node := n.get_node("Lamps")
 	ok(lamps_node.get_child_count() == (c.cities["Portland"]["lamps"] as Array).size(), "one node per lamp")
 	ok(n.get_node("Square").get_node_or_null("Well") != null, "the square has a well")
+	ok(n.get_node_or_null("Wharf") != null and n.get_node("Wharf").get_child_count() >= 3, "the Casco wharf is staged")
 	ok(n.get_node("Square").get_child_count() == 1 + Cities.STALLS[3], "well plus the stalls")
 	# materials are SHARED — Enemy._box's lesson: not one per box
 	var mats := {}
@@ -845,6 +941,7 @@ func _t_paving() -> void:
 		if mi != null and mi.material_override != null:
 			kinds[(mi.material_override as StandardMaterial3D).albedo_color] = true
 	ok(kinds.has(Cities.mat("cobble").albedo_color), "the thoroughfares are cobbled")
+	ok(kinds.has(Cities.mat("brick").albedo_color), "the lanes are brick")
 	ok(not kinds.has(Cities.mat("dirt").albedo_color), "no dirt track left inside the walls")
 	ok(Cities.mat("cobble").albedo_color != Cities.mat("brick").albedo_color,
 		"cobble and brick are two different surfaces")
@@ -1056,10 +1153,13 @@ func _t_ground() -> void:
 	ok(lamp_spread > 4.0, "the lamps are at different heights on a hill (%.1f m apart)" % lamp_spread)
 	var pad: Node3D = node.get_node_or_null("SquarePad")
 	ok(pad != null and absf(pad.position.y - 0.03) < 0.01, "the square pad sits on the benched centre")
-	## A street LIES ON the hill. Laid level, piece by piece, the gate street
-	## came down Portland's harbour bank as a dashed line of floating plates.
+	## A street LIES ON the hill. The Old Port is a grid: E–W runs climb the
+	## 8% slope and must pitch; N–S runs are contours and stay level.
 	var streets: Node3D = node.get_node_or_null("Streets")
-	var tilted := 0
+	var climbing := 0
+	var climbing_tilted := 0
+	var contour := 0
+	var contour_level := 0
 	var street_pieces := 0
 	if streets != null:
 		for ch in streets.get_children():
@@ -1067,11 +1167,19 @@ func _t_ground() -> void:
 			if n3 == null:
 				continue
 			street_pieces += 1
-			if rad_to_deg(n3.basis.y.angle_to(Vector3.UP)) > 2.0:
-				tilted += 1
+			var along := n3.basis.z
+			var is_tilted := rad_to_deg(n3.basis.y.angle_to(Vector3.UP)) > 2.0
+			if absf(along.x) > 0.4:
+				climbing += 1
+				if is_tilted:
+					climbing_tilted += 1
+			else:
+				contour += 1
+				if not is_tilted:
+					contour_level += 1
 	ok(street_pieces > 20, "the hillside city has street pieces (%d)" % street_pieces)
-	@warning_ignore("integer_division")
-	ok(tilted > street_pieces / 2, "most of them lie along the slope, not level on it (%d of %d)" % [tilted, street_pieces])
+	ok(climbing > 0 and climbing_tilted == climbing, "E–W runs lie on the hill (%d/%d tilted)" % [climbing_tilted, climbing])
+	ok(contour > 0 and contour_level == contour, "N–S runs stay level on the contour (%d/%d)" % [contour_level, contour])
 	c2.free()
 	root.remove_child(w2)
 	w2.free()

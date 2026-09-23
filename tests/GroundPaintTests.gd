@@ -55,6 +55,16 @@ func _init() -> void:
 	ok(GroundPaint.tile_name(68).ends_with("Dry grass / Shelf"), "B is dry grass")
 	eq(GroundPaint.STYLES.size(), 11, "11 styles")
 	eq(GroundPaint.GROUNDS.size(), 11, "11 grounds")
+	ok(GroundPaint.grass_on_tile(GroundPaint.tile_id(6, 0)), "lush meadow grows grass")
+	ok(GroundPaint.grass_on_tile(GroundPaint.tile_id(6, 1)), "dry grass grows grass")
+	ok(not GroundPaint.grass_on_tile(GroundPaint.tile_id(6, GroundPaint.COL_DIRT)),
+		"packed dirt is a track, not a meadow")
+	ok(not GroundPaint.grass_on_tile(GroundPaint.tile_id(6, GroundPaint.COL_MUD)),
+		"mud is a wet track, not a meadow")
+	ok(not GroundPaint.grass_on_tile(GroundPaint.tile_id(6, GroundPaint.COL_SNOW)),
+		"snow is snow, not a meadow")
+	ok(GroundPaint.grass_on_tile(0), "the old tint lets the world's other rules decide")
+	ok(GroundPaint.GROUNDS[GroundPaint.COL_SNOW][0] == "snow_dusted", "column K is snow")
 	## every id round-trips
 	var rt := true
 	for r in range(11):

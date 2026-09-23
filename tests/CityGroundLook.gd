@@ -16,7 +16,7 @@ const PATCH_STEP := 4.0  ## the bake's own spacing
 const SHOTS := {
 	"Portland": [
 		["portland_1_from_the_harbour", Vector3(-30, 26, 300), Vector3(0, 6, 0), 60.0],
-		["portland_2_the_south_wall", Vector3(20, 4, 250), Vector3(0, 10, 60), 70.0],
+		["portland_2_from_the_square", Vector3(20, 8, 90), Vector3(0, 4, 0), 62.0],
 		["portland_3_aerial", Vector3(0, 300, 300), Vector3(0, 0, 0), 55.0],
 	],
 	"Presque Isle": [

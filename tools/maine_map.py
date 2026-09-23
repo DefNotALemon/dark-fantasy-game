@@ -63,14 +63,54 @@ def map_to_lonlat(mx, my):
     return ((mx - X_LON_C) / X_PER_DEG_LON, (my - Y_LAT_C) / Y_PER_DEG_LAT)
 
 # ------------------------------------------------------------- the spawn hole
-# The world origin is the spawn valley, real-world (-70.33, 43.82) -- the same
-# point the 2026-08-27 build used, which puts Portland ~390 m south-east and
-# Katahdin ~5 km north-east. The CaveRegion's grass top is the ground here, so
-# the bake flattens a disc to y = 0 and eases back to the real hills.
-VALLEY_LON, VALLEY_LAT = -70.33, 43.82
-ORIGIN = lonlat_to_map(VALLEY_LON, VALLEY_LAT)      # ~(-2283.3, -3429.8)
+# The journey begins in Lewiston-Auburn. Pin the origin to the recovered city
+# marker rather than another approximate lon/lat transform: the city, cave
+# field, first camp and player spawn must all agree on the same exact metre.
+# From here Bath is south-east, the coast carries the route north-east, and
+# Katahdin waits roughly five kilometres north-east in the endgame.
+VALLEY_LON, VALLEY_LAT = -70.2148, 44.1004
+ORIGIN = (-2074.286, -2760.0)
 VALLEY_FLAT_R = 150.0
 VALLEY_EASE_R = 340.0
+
+# ---------------------------------------------------------- narrative journey
+# Data, not quest code. mainegen resolves these names to baked world positions
+# so the map, future quest director and tests all follow one authored spine.
+STORY_ROUTE = [
+    {
+        "act": 1, "name": "The Ashen River", "levels": [1, 10],
+        "places": ["Lewiston–Auburn", "Brunswick", "Bath"],
+        "promise": "Leave the Androscoggin valley and follow its dying water to the sea.",
+    },
+    {
+        "act": 2, "name": "The Salt Road", "levels": [8, 24],
+        "places": ["Wiscasset", "Boothbay", "Rockland", "Camden", "Belfast"],
+        "promise": "Harbours, islands and old forts pull the road up the Midcoast.",
+    },
+    {
+        "act": 3, "name": "The Broken Coast", "levels": [20, 40],
+        "places": ["Bucksport", "Bar Harbor", "Ellsworth", "Machias", "Eastport", "Calais"],
+        "promise": "Cliff roads and drowned ruins carry the hunt to Maine's eastern edge.",
+    },
+    {
+        "act": 4, "name": "The North Road", "levels": [36, 56],
+        "places": ["Houlton", "Patten", "Millinocket"],
+        "promise": "Turn inland through the Aroostook shelf as settlements thin and winter closes.",
+    },
+    {
+        "act": 5, "name": "The Crown of Maine", "levels": [52, 75],
+        "places": ["Millinocket", "Katahdin"],
+        "promise": "Climb through Baxter's high country to the storm above Katahdin.",
+    },
+]
+
+# Recovered town markers intentionally sit on harbour water in the coarse
+# source map. These alone may use the low coastal pad; every other settlement
+# is inland and must remain visibly above the sea.
+COASTAL_PLACES = {
+    "Bar Harbor", "Bath", "Belfast", "Biddeford", "Boothbay", "Calais",
+    "Camden", "Eastport", "Ellsworth", "Kittery", "Rockland", "Stonington",
+}
 
 def map_to_world(mx, my):
     """Map metres -> Godot world (x east, z south)."""
@@ -91,8 +131,8 @@ PEAKS = [
     ("Old Speck",           -70.9469, 44.5647, 1274),
     ("Saddleback",          -70.5147, 44.9450, 1255),
     ("Mount Abraham",       -70.3350, 44.9008, 1234),
-    ("Bigelow — West Peak", -70.3053, 45.1483, 1245),
     ("Bigelow — Avery",     -70.2872, 45.1461, 1237),
+    ("Bigelow",             -70.3053, 45.1483, 1245),
     ("North Brother",       -69.0011, 45.9628, 1200),
     ("Baldpate Mountain",   -70.8817, 44.5931, 1152),
     ("White Cap Mountain",  -69.2586, 45.5647, 1109),
@@ -111,6 +151,13 @@ PEAKS = [
     ("Mount Battie",        -69.0603, 44.2247,  240),
     ("Cadillac Mountain",   -68.2247, 44.3528,  466),
 ]
+
+# Bake snap/merge. 140 m snap + 200 m merge walks Traveler onto Katahdin and
+# Bigelow onto Sugarloaf at this compression. Protected names keep a cairn
+# unless they truly landed on the same cell (~90 m).
+PEAK_SNAP_R = 80.0
+PEAK_MERGE_R = 160.0
+PEAK_KEEP = {"Katahdin", "Traveler Mountain", "Bigelow", "Sugarloaf", "Old Speck"}
 
 # ----------------------------------------------------------------- the tables
 def places():

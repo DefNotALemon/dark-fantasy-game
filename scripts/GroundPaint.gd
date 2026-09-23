@@ -73,6 +73,13 @@ const GROUNDS := [
 	["moss_bog",     "Moss / bog"],
 	["snow_dusted",  "Snow-dusted grass"],
 ]
+## Columns the meadow will not stand on. Dirt and mud are paint-only (the bake
+## never assigns them) — they are the packed track and the wet one. Snow is
+## both the bake's alpine class and a painted snowfield. Keep in lockstep with
+## `tile_allows_grass` in shaders/terrain_psx.gdshader.
+const COL_DIRT := 3
+const COL_MUD := 4
+const COL_SNOW := 10
 
 static var inst: GroundPaint = null
 
@@ -284,6 +291,15 @@ static func row_of(id: int) -> int:
 
 static func col_of(id: int) -> int:
 	return (id - 1) % N_COLS
+
+
+static func grass_on_tile(id: int) -> bool:
+	## Whether a worn tile (paint or world-style) is meadow. id 0 is the old
+	## tint — the world's other rules (water, snow line, the road net) decide.
+	if id <= 0:
+		return true
+	var c := col_of(id)
+	return c != COL_DIRT and c != COL_MUD and c != COL_SNOW
 
 
 static func grid_ref(id: int) -> String:

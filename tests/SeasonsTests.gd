@@ -56,21 +56,21 @@ const MIN_ASSERTIONS := 150
 ## is a literal set against what the model returned for these fifteen points
 ## when it was measured, not against a number that merely sounds demanding.
 const PLACES: Array = [
-	["AROOSTOOK", 3600.2, 210.0, -7000.1],
-	["ALLAGASH", 1885.9, 180.0, -6520.1],
-	["KATAHDIN", 2537.3, 900.0, -4960.1],
-	["BAXTER", 2485.9, 430.0, -5560.1],
-	["MOOSEHEAD", 1285.9, 320.0, -4120.1],
-	["BIGELOW", 171.6, 760.0, -3328.1],
-	["RANGELEY", -651.2, 480.0, -2872.1],
-	["MAHOOSUCS", -994.1, 700.0, -1888.1],
-	["PENOBSCOT R.", 3394.5, 40.0, -3160.1],
-	["DOWN EAST", 4971.6, 20.0, -2800.1],
-	["KENNEBEC", 1337.3, 20.0, -1432.1],
-	["MIDCOAST", 1885.9, 15.0, -1120.1],
-	["ACADIA", 3600.2, 120.0, -1120.1],
-	["PENOBSCOT BAY", 2657.3, 10.0, -520.1],
-	["CASCO BAY", 600.2, 8.0, 559.9],
+	["AROOSTOOK", 3274.3, 210.0, -6360.0],
+	["ALLAGASH", 1560.0, 180.0, -5880.0],
+	["KATAHDIN", 2211.4, 900.0, -4320.0],
+	["BAXTER", 2160.0, 430.0, -4920.0],
+	["MOOSEHEAD", 960.0, 320.0, -3480.0],
+	["BIGELOW", -154.3, 760.0, -2688.0],
+	["RANGELEY", -977.1, 480.0, -2232.0],
+	["MAHOOSUCS", -1320.0, 700.0, -1248.0],
+	["PENOBSCOT R.", 3068.6, 40.0, -2520.0],
+	["DOWN EAST", 4645.7, 20.0, -2160.0],
+	["KENNEBEC", 1011.4, 20.0, -792.0],
+	["MIDCOAST", 1560.0, 15.0, -480.0],
+	["ACADIA", 3274.3, 120.0, -480.0],
+	["PENOBSCOT BAY", 2331.4, 10.0, 120.0],
+	["CASCO BAY", 274.3, 8.0, 1200.0],
 ]
 
 ## Measured summer and winter lengths, in days, for the places the margins
@@ -301,18 +301,18 @@ func _t_geography() -> void:
 	## fixtures are synthetic points placed in it on purpose.
 	near_f(Seasons.coast_u(at("MIDCOAST")), 0.1911, 0.02,
 		"Midcoast is the one roster place inside the band, at its measured value")
-	near_f(Seasons.coast_u(Vector3(1885.9, 10.0, -530.1)), 0.666, 0.03,
+	near_f(Seasons.coast_u(Vector3(1560.0, 10.0, 110.0)), 0.666, 0.03,
 		"a point 300 m into the band reads two thirds")
-	near_f(Seasons.coast_u(Vector3(1885.9, 10.0, -1030.1)), 0.2635, 0.03,
+	near_f(Seasons.coast_u(Vector3(1560.0, 10.0, -390.0)), 0.2635, 0.03,
 		"and one 800 m in reads a quarter -- the reach is what decides both")
-	ok(Seasons.coast_u(Vector3(1885.9, 10.0, -1630.1)) < 0.001,
+	ok(Seasons.coast_u(Vector3(1560.0, 10.0, -990.0)) < 0.001,
 		"past the reach the sea is not felt at all")
 
 	## ⚠ The open Gulf is 1.5 km from the coast POLYLINE and unmistakably at
 	## sea. A bare distance test reads it as inland; the seaward cross
 	## product is what gets it right, and this is the assertion that holds
 	## that apart from the distance term.
-	near_f(Seasons.coast_u(Vector3(3085.9, 0.0, 559.9)), 1.0, 0.001,
+	near_f(Seasons.coast_u(Vector3(2760.0, 0.0, 1200.0)), 1.0, 0.001,
 		"the open Gulf of Maine is SEA, not inland")
 
 
@@ -667,8 +667,8 @@ func _t_collaborators() -> void:
 	## bound so `season_at` runs its own fallback -- which is the path a
 	## headless world and a fresh save both take.
 	var cr := Crofts.new()
-	var south_c := {"pos": Vector2(600.2, 559.9)}
-	var north_c := {"pos": Vector2(3600.2, -7000.1)}
+	var south_c := {"pos": Vector2(274.3, 1200.0)}
+	var north_c := {"pos": Vector2(3274.3, -6360.0)}
 
 	## ⚠ THE DEFECT THIS SECTION EXISTS FOR. The first draft called
 	## `Seasons.local_index` here and cut the Chronicle out of the calendar.
@@ -762,8 +762,8 @@ func _t_collaborators() -> void:
 	ok(src_a.contains("_step_rec(rec, t, hour, sky, season_here(t, rec))"),
 		"and its step loop asks per carcass -- the same call site, same hole")
 
-	var hot := {"at": Vector3(600.2, 8.0, 559.9)}
-	var cold := {"at": Vector3(2537.3, 900.0, -4960.1)}
+	var hot := {"at": Vector3(274.3, 8.0, 1200.0)}
+	var cold := {"at": Vector3(2211.4, 900.0, -4320.0)}
 	var s_hot := ca.season_here(boundary, hot)
 	var s_cold := ca.season_here(boundary, cold)
 	ok(s_hot != s_cold,
@@ -776,8 +776,8 @@ func _t_collaborators() -> void:
 
 	## ⚠ The altitude term has to be what did that, not the latitude alone.
 	## Same latitude, different height: the mountain still wins.
-	var v_low := Vector3(2537.3, 0.0, -4960.1)
-	var v_high := Vector3(2537.3, 900.0, -4960.1)
+	var v_low := Vector3(2211.4, 0.0, -4320.0)
+	var v_high := Vector3(2211.4, 900.0, -4320.0)
 	ok(Seasons.warp_at(v_high) > Seasons.warp_at(v_low) + 0.02,
 		"altitude alone shortens the year at a fixed latitude (%.3f vs %.3f)"
 		% [Seasons.warp_at(v_high), Seasons.warp_at(v_low)])

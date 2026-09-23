@@ -57,6 +57,7 @@ var rider: CharacterBody3D = null
 var ride_input := Vector2.ZERO   ## camera-relative reins (x strafe, y forward)
 var ride_run := false
 var _ride_jump := false
+var _hoof_si := 0              ## last |sin| foot index — hooves on the gait, not a timer
 
 ## --- The kick ---
 var kicking := false
@@ -681,6 +682,17 @@ func _animate(delta: float) -> void:
 	for i in range(legs_all.size()):
 		var ph := 0.0 if (i == 0 or i == 3) else PI
 		legs_all[i].rotation.x = sin(walk_t + ph) * swing
+
+	## Hooves land on the same |sin| beat as the legs. Only the ridden horse:
+	## a herd of wild ones would steal the 8-voice step pool from your own feet.
+	if rider != null and is_on_floor() and _loco_amount > 0.20 and not dying:
+		var si := int(floor((walk_t - PI * 0.5) / PI))
+		if si != _hoof_si:
+			_hoof_si = si
+			var hard := clampf(_loco_amount * (1.2 if ride_run else 0.72), 0.28, 1.0)
+			StepAudio.footfall(self, global_position, hard)
+	else:
+		_hoof_si = 0
 
 	## Kick pose: nose dips, rear rises, hind legs snap out behind.
 	var body_pitch := 0.0

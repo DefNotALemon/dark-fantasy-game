@@ -189,3 +189,96 @@ static func compose(base: float, surface: float, wade: float, slope: float) -> f
 	## One place where the ground's three opinions are multiplied together, so a
 	## bog on a hillside under deep grass cannot stack into a standstill.
 	return base * clampf(surface * wade_mult(wade) * slope, 0.30, 1.25)
+
+
+## --- 5. stance poses (stand / crouch / prone) --------------------------------
+## The camera already eases eye height. These numbers pose the VISIBLE body
+## to match: a squat with bent knees, a hunter's walk, then belly-down with a
+## crawl cycle. weight 0 = stand, 1 = crouch, 2 = prone; fractions are the
+## going-down / getting-up blend. Pure functions so StanceTests / LocomotionTests
+## can hold an opinion without booting the world.
+static func stance_target(is_crouch: bool, is_prone: bool, sliding := false) -> float:
+	if is_prone:
+		return 2.0
+	if sliding:
+		return 1.35
+	if is_crouch:
+		return 1.0
+	return 0.0
+
+
+static func stance_ease(current: float, want: float) -> float:
+	## Going prone (or rising through it) has a body's weight; a crouch is quicker.
+	if want >= 1.5 or current >= 1.5:
+		return 4.2
+	return 7.0
+
+
+static func stance_pose(weight: float, gait: float, phase: float, sliding := false) -> Dictionary:
+	var w := clampf(weight, 0.0, 2.0)
+	var g := clampf(gait, 0.0, 1.0)
+	var s := sin(phase)
+	var c := cos(phase)
+	var stand := _stance_stand(s, c, g)
+	var crouch := _stance_crouch(s, c, g, sliding)
+	var prone := _stance_prone(s, c, g)
+	if w <= 1.0:
+		return _stance_lerp(stand, crouch, w)
+	return _stance_lerp(crouch, prone, w - 1.0)
+
+
+static func _stance_stand(s: float, _c: float, g: float) -> Dictionary:
+	## Matches the old hip/arm stride exactly (left counter to right) so
+	## standing walk does not change silhouette; knees take a small walk-bend.
+	var hip_l := -s * 0.50 * g
+	var hip_r := s * 0.50 * g
+	return {
+		"body_y": 0.0, "body_z": 0.0, "pitch_deg": 0.0,
+		"hip_l": hip_l, "hip_r": hip_r,
+		"knee_l": -absf(hip_l) * 0.28, "knee_r": -absf(hip_r) * 0.28,
+		"arm_l": s * 0.6 * g, "arm_r": -s * 0.6 * g, "arm_z": 0.0, "arm_abs": 0.0,
+		"stride_mul": 1.0, "gait_rate": 1.0,
+	}
+
+
+static func _stance_crouch(s: float, _c: float, g: float, sliding: bool) -> Dictionary:
+	## Hips drop, thighs fold forward, shins fold back — a squat you can walk
+	## in. A slide lays it a little lower and trails the uphill leg.
+	var slide := 1.0 if sliding else 0.0
+	var hip_l := 0.92 + s * 0.30 * g + 0.18 * slide
+	var hip_r := 0.92 - s * 0.30 * g - 0.42 * slide
+	return {
+		"body_y": -0.38 + absf(s) * 0.028 * g - 0.06 * slide,
+		"body_z": 0.06 + 0.18 * slide,
+		"pitch_deg": 16.0 + 10.0 * slide,
+		"hip_l": hip_l, "hip_r": hip_r,
+		"knee_l": -1.42 - s * 0.24 * g, "knee_r": -1.42 + s * 0.24 * g,
+		"arm_l": 0.32 + s * 0.22 * g, "arm_r": 0.32 - s * 0.22 * g,
+		"arm_z": 0.16, "arm_abs": 0.0,
+		"stride_mul": 0.55, "gait_rate": 1.12,
+	}
+
+
+static func _stance_prone(s: float, _c: float, g: float) -> Dictionary:
+	## Belly to the earth, facing -Z. Origin stays at the capsule so the
+	## first-person lens (and the third-person head) sit at the skull, not
+	## the heels: pitch dumps the head forward, then body_z pulls it back.
+	## Crawl is a contralateral cycle — left arm with right hip.
+	return {
+		"body_y": 0.10 + absf(s) * 0.02 * g,
+		"body_z": 1.28,
+		"pitch_deg": -78.0,
+		"hip_l": 0.38 + s * 0.42 * g, "hip_r": 0.38 - s * 0.42 * g,
+		"knee_l": 0.62 - s * 0.32 * g, "knee_r": 0.62 + s * 0.32 * g,
+		"arm_l": 1.08 - s * 0.55 * g, "arm_r": 1.08 + s * 0.55 * g,
+		"arm_z": 0.38, "arm_abs": 1.0,
+		"stride_mul": 0.0, "gait_rate": 0.70,
+	}
+
+
+static func _stance_lerp(a: Dictionary, b: Dictionary, t: float) -> Dictionary:
+	var u := clampf(t, 0.0, 1.0)
+	var out := {}
+	for k in a.keys():
+		out[k] = lerpf(float(a[k]), float(b[k]), u)
+	return out

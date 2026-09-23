@@ -6,15 +6,36 @@ that used to live on `M`.
 ## What it draws
 
 `assets/terrain/maine_preview.png` stretched into a 520 x 780 frame (the bake's
-own 2:3, 7.2 x 10.8 km), with everything `maine_meta.json` knows laid over it:
+own 2:3, 7.2 x 10.8 km / 30.02 square miles), with everything
+`maine_meta.json` knows laid over it. The complete Maine silhouette is water-
+bounded; Lewiston-Auburn is world origin and the opening location.
 
 | layer | drawn as | when |
 |---|---|---|
 | regions (18) | faint centred caption | zoom < 3 |
-| places (50) | dot + name, dot and text sized by `rank` | rank >= 1 always; rank 0 from zoom 1.8 |
+| places (50) | cream circle + name sized by `rank`; granite star for the two forts | rank >= 1 always; forts always; rank 0 from zoom 1.8 |
 | peaks (17) | orange caret, `name  NNN m` | caret always; label from zoom 1.8 |
 | lakes (30) | pale blue name | from zoom 1.8 |
+| main journey (5 acts) | gold-to-frost route with numbered act heads | always; toggle with **journey** |
 | you | cyan arrow, rotated to your facing | always (edge dot when panned off) |
+
+Place marks follow rank: cream circles grow with the bake rank (Portland 3 is
+the largest city mark; Bangor, Augusta, and Lewiston–Auburn sit on 2–3; hamlets
+at rank 0 stay off the unzoomed map until `LABEL_ZOOM`). Fort Knox and Fort
+Gorges are appended by World as rank-1 places with no `kind` field; the panel
+still draws them as a granite star — never a cream town dot, never the orange
+peak caret — by exact name, or by `kind == "fort"` if a later row carries one.
+The prefix "Fort " is not a fort: Fort Kent is a rank-0 hamlet on the bake.
+Forts stay visible at every zoom, even if someone later files them rank 0.
+
+## Main journey
+
+The baked `story_route` is the authored spine, shared by map and future quest
+code: Lewiston-Auburn → Bath, up the Midcoast and Down East coast, then inland
+through Houlton / Patten / Millinocket to Katahdin. Its level bands rise from
+1–10 in the Androscoggin opening to 52–75 at the Crown of Maine. Geography
+also supplies a 0–4 danger floor, so arriving north early does not scale the
+endgame down to the player.
 
 The readout under the frame follows the cursor: nearest place (or region),
 world x/z, and either the ground height or the water depth.

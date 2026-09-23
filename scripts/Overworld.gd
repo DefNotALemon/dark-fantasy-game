@@ -15,9 +15,9 @@ class_name Overworld
 # =============================================================================
 # Myrkfell -- the overworld ground.
 #
-# The 208 m spawn valley is a clearing in a 7.2 x 10.8 km heightfield of Maine.
-# Walk out of it and keep walking: Portland is ~420 m south, Katahdin is five
-# kilometres north-east and 597 m tall.
+# The 208 m spawn valley is Lewiston-Auburn, inside a 7.2 x 10.8 km heightfield
+# shaped as Maine. The authored journey leaves south-east for Bath, follows
+# the coast north, then turns inland for Katahdin's high-level country.
 #
 # This node is TWO things, deliberately separated:
 #
@@ -104,6 +104,9 @@ const APPLY_BUDGET_MS := 4.0  ## ...and never more than this much of a frame
 ## Queue ORDER is sorted against a point this far ahead of the look, so the
 ## ground you are walking into is built before the ground behind you.
 const PREFETCH_M := 110.0
+## Gallop is 11 m/s; 110 m is ten seconds of empty tiles ahead. Push the
+## queue farther when someone is mounted so the wood arrives before the horse.
+const PREFETCH_RIDE := 240.0
 ## Slots in a job payload. Integer indices on purpose: a Dictionary with
 ## String keys shared across threads is the grass-v2 refcount trap.
 const JOB_KEY := 0
@@ -184,6 +187,7 @@ var _places: Array = []
 var _peaks: Array = []
 var _lakes: Array = []
 var _regions: Array = []
+var _story_route: Array = []
 
 # --- runtime ----------------------------------------------------------------
 var _near: Dictionary = {}    # Vector2i -> Node3D
@@ -339,6 +343,7 @@ func _load_data() -> bool:
 	_peaks = meta.get("peaks", [])
 	_lakes = meta.get("lakes", [])
 	_regions = meta.get("regions", [])
+	_story_route = meta.get("story_route", [])
 
 	_h = _read_raw("maine_height.r16")
 	_w = _read_raw("maine_water.r16")
@@ -423,6 +428,23 @@ static func in_hole(pos: Vector3) -> bool:
 ## "The Hollow Depths" with cave fog and an auto-drawn torch.
 static func depth_below_surface(pos: Vector3) -> float:
 	return ground_y(pos) - pos.y
+
+
+## The world gets harder along the authored journey even when the player
+## arrives early: Lewiston and the southern river are tier 0, the coast rises
+## eastward, and the far north / high summits are endgame ground. Player level
+## may raise a spawn above this floor, but can never make Katahdin harmless.
+static func danger_tier_at(pos: Vector3) -> int:
+	var y := ground_y(pos)
+	if y > 400.0 or pos.z < -5200.0:
+		return 4
+	if y > 240.0 or pos.z < -2800.0 or pos.x > 4300.0:
+		return 3
+	if y > 120.0 or pos.z < -1200.0 or pos.x > 2800.0:
+		return 2
+	if y > 55.0 or pos.z < -500.0 or pos.x > 1100.0:
+		return 1
+	return 0
 
 
 ## --- water queries (WaterAudio, WildlifeDirector, the Drowned, drinking) ---
@@ -619,6 +641,12 @@ func regions() -> Array:
 	return _regions
 
 
+func story_route() -> Array:
+	## Five authored acts from Lewiston to Katahdin. Kept in the terrain bake
+	## so the map, quest layer and world tests can never disagree on the route.
+	return _story_route
+
+
 func region_name_at(pos: Vector3) -> String:
 	var best := ""
 	var bd := INF
@@ -696,7 +724,11 @@ func _look_lead() -> Vector3:
 	fwd.y = 0.0
 	if fwd.length_squared() < 0.0001:
 		return Vector3.ZERO
-	return fwd.normalized() * PREFETCH_M
+	var lead := PREFETCH_M
+	var ps := get_tree().get_nodes_in_group("player")
+	if ps.size() > 0 and ps[0].get("mount") != null:
+		lead = PREFETCH_RIDE
+	return fwd.normalized() * lead
 
 
 func _focus_pos() -> Vector3:
@@ -1389,18 +1421,18 @@ func _build_inland_water() -> MeshInstance3D:
 #   LOD_DENSITY       density of the fake forest on the mid ring
 ## MASTER SWITCH for the whole procedural forest -- the near ring's real
 ## TreeV2s, the mid/far impostor MultiMeshes, all of it. Off 2026-09-02
-## (Lemon: "remove all trees for now... I want to hand place them"): the
-## world grows nothing on its own and the god editor's Trees tool (F1) is
-## the only thing that plants. Flip back to true to get the wood back --
-## it is deterministic in the tile key, so the same trees return.
-const SCATTER := false
-const REAL_R := 130.0             ## real TreeV2s within this of the focus
-const REAL_R_HYST := 22.0         ## ...and they stay real this much further out
+## (Lemon: "remove all trees for now... I want to hand place them"). On
+## again 2026-09-17: walking and riding are the game, and 78 km² cannot
+## be hand-planted. Camp still stays bald (FOREST_INNER_R); F1 placements
+## keep working. Deterministic in the tile key, so the same wood returns.
+const SCATTER := true
+const REAL_R := 155.0             ## real TreeV2s; extra metres for an 11 m/s gallop
+const REAL_R_HYST := 28.0         ## ...and they stay real this much further out
 const REAL_DENSITY := 0.019       ## trees per m^2 at full forest weight
 const TREE_MIN_GAP := 2.1         ## matches World.TREE_MIN_GAP
 const REAL_CAP := 90              ## per near tile, whatever the noise says
-const TREE_VIS_END := 165.0       ## LOD the trees have never had until now
-const TREE_VIS_FADE := 22.0
+const TREE_VIS_END := 210.0       ## keep real trees on-screen through a gallop
+const TREE_VIS_FADE := 36.0
 const CELL := 32.0                ## a near tile is 4 x 4 cells
 
 const LOD_SCALE_MIN := 0.72
@@ -1420,13 +1452,10 @@ func _forest_weight(c: Color) -> float:
 	return clampf((c.g - c.r * 0.9 - c.b * 0.6) * 8.0, 0.0, 1.0)
 
 
-## Trees start this far out from the spawn valley. It used to be valley_ease
-## (340 m) "to protect the clearing", which quietly meant NOTHING grew anywhere
-## within 340 m of the origin -- measured: 0.0% plantable from 0-340 m, 79%
-## beyond it. Since walking is the only way to travel right now, that bald ring
-## WAS the game. World plants its own 420 trees out to WORLD_RADIUS (80 m), so
-## the streamed forest picks up just outside that and the two meet.
-const FOREST_INNER_R := 100.0
+## Camp clearing: hand-placed / god-editor trees only. Streamed woods start
+## just past World.WORLD_RADIUS so a gallop out of camp hits a real stand
+## instead of a 100 m bald ring.
+const FOREST_INNER_R := 82.0
 
 
 func _plantable(wx: float, wz: float) -> float:

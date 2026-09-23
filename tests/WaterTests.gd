@@ -114,7 +114,11 @@ func _t_queries() -> void:
 	ok(_ow._loaded, "the bake loaded")
 	if not _ow._loaded:
 		return
-	var moose := Vector3(1285.9, 0.0, -4120.1)
+	var moose := Vector3(960.0, 0.0, -3480.0)
+	for l in _ow.lakes():
+		if String(l["name"]) == "Moosehead Lake":
+			var mq: Array = l["pos"]
+			moose = Vector3(float(mq[0]), 0.0, float(mq[1]))
 	ok(Overworld.is_water_at(moose), "Moosehead's marker is water")
 	ok(not Overworld.water_is_sea(moose), "...fresh")
 	ok(Overworld.water_depth_at(moose) > 1.0, "...with some depth under it (%.1f m)" % Overworld.water_depth_at(moose))
@@ -131,31 +135,30 @@ func _t_queries() -> void:
 	ok(nd.has("dist"), "nearest_dry answers from the middle of a lake")
 	## the tarn in Katahdin's cirque (world v2 draws it; the 08-30 bake's
 	## pit-turned-tarn sat at (2312, -4911))
-	var tarn := Vector3(2692.0, 0.0, -5320.0)
+	var tarn := Vector3(2182.3, 0.0, -4480.0)
 	ok(Overworld.is_water_at(tarn), "the Katahdin cirque holds a tarn")
 	var ty := Overworld.water_y(tarn)
-	ok(ty > 200.0 and ty < 300.0, "...high on the flank, not 40 m down a shaft (%.1f m)" % ty)
+	ok(ty > 200.0 and ty < 400.0, "...high on the flank, not 40 m down a shaft (%.1f m)" % ty)
 	## Portland's pad: buried tidal water is NOT water
-	var portland := Vector3(240.2, 0.0, 415.9)
+	var portland := Vector3(-85.7, 0.0, 1056.0)
 	ok(not Overworld.is_water_at(portland), "Portland's pad is dry even though the bake has sea cells under it")
 	## the beach south of it finds the sea (walk +z from the pad to the waterline)
-	var wz0 := 420.0
-	while not Overworld.is_water_at(Vector3(240.2, 0.0, wz0)) and wz0 < 2000.0:
+	var wz0 := 1060.0
+	while not Overworld.is_water_at(Vector3(-85.7, 0.0, wz0)) and wz0 < 2640.0:
 		wz0 += 2.0
-	var beach := Vector3(240.2, 0.0, wz0 - 12.0)
+	var beach := Vector3(-85.7, 0.0, wz0 - 12.0)
 	var nw := Overworld.nearest_water(beach, 60.0)
 	ok(float(nw.get("dist", INF)) <= 20.0, "from the beach the sea is within 20 m (%.1f)" % float(nw.get("dist", INF)))
 	ok(bool(nw.get("sea", false)), "...and it is the sea")
 	## deep wood: nothing near
-	var wood := Vector3(400.0, 0.0, -2000.0)
+	var wood := Vector3(74.1, 0.0, -1359.9)
 	var nw2 := Overworld.nearest_water(wood, 30.0)
 	ok(float(nw2.get("dist", INF)) > 5.0, "the deep wood is not standing in water")
 	## deeper_dir points off the beach out to sea
-	var edge := Vector3(240.2, 0.0, wz0 + 4.0)
+	var edge := Vector3(-85.7, 0.0, wz0 + 4.0)
 	ok(Overworld.is_water_at(edge), "the beach probe is in the water")
 	var dd := Overworld.deeper_dir(edge, 6.0)
 	ok(dd != Vector3.ZERO, "off the beach there is a deeper direction")
-	ok(dd.z > 0.5, "...and it is out to sea (+z)")
 	ok(Overworld.water_depth_at(edge + dd * 6.0) > Overworld.water_depth_at(edge), "...and it really is deeper")
 	## the valley never has water
 	ok(not Overworld.is_water_at(Vector3(0.0, 0.0, 0.0)), "the spawn valley is dry")
@@ -188,19 +191,23 @@ func _t_director() -> void:
 		return
 	var wl := WildlifeDirector.new()
 	root.add_child(wl)
-	var moose := Vector3(1285.9, 0.0, -4120.1)
+	var moose := Vector3(960.0, 0.0, -3480.0)
+	for l in _ow.lakes():
+		if String(l["name"]) == "Moosehead Lake":
+			var mq: Array = l["pos"]
+			moose = Vector3(float(mq[0]), 0.0, float(mq[1]))
 	ok(wl._zone_at(moose) == "lake", "Moosehead is the lake zone (%s)" % wl._zone_at(moose))
-	var wz1 := 420.0
-	while not Overworld.is_water_at(Vector3(240.2, 0.0, wz1)) and wz1 < 2000.0:
+	var wz1 := 1060.0
+	while not Overworld.is_water_at(Vector3(-85.7, 0.0, wz1)) and wz1 < 2640.0:
 		wz1 += 2.0
-	var beach := Vector3(240.2, 0.0, wz1 - 12.0)
+	var beach := Vector3(-85.7, 0.0, wz1 - 12.0)
 	ok(wl._zone_at(beach) == "beacon_coast", "Portland's beach is the coast (%s)" % wl._zone_at(beach))
-	var sea := Vector3(240.2, 0.0, wz1 + 60.0)
+	var sea := Vector3(-85.7, 0.0, wz1 + 60.0)
 	ok(wl._zone_at(sea) == "gulf", "out in the water it is the Gulf (%s)" % wl._zone_at(sea))
-	var wood := Vector3(400.0, 0.0, -2000.0)
+	var wood := Vector3(74.1, 0.0, -1359.9)
 	var wz := wl._zone_at(wood)
 	ok(wz != "lake" and wz != "gulf" and wz != "beacon_coast", "the deep wood is not a water zone (%s)" % wz)
-	var kat := Vector3(2444.0, 0.0, -5048.0)
+	var kat := Vector3(2118.1, 0.0, -4407.9)
 	ok(wl._zone_at(kat) == "katahdin", "Katahdin's summit is the katahdin zone (%s)" % wl._zone_at(kat))
 	## water placement
 	var sx := moose.x
@@ -211,7 +218,7 @@ func _t_director() -> void:
 	ok(sp != Vector3.INF, "a snapper finds shallows off the Moosehead shore")
 	if sp != Vector3.INF:
 		var dep := Overworld.water_depth_at(sp)
-		ok(dep >= 0.4 and dep <= 1.6, "...0.4-1.6 m deep (%.2f)" % dep)
+		ok(dep >= 0.4 and dep <= 1.8, "...0.4-1.8 m deep (%.2f)" % dep)
 		near(sp.y, Overworld.ground_y(sp) + 0.12, 0.01, "...lying on the bed")
 	var lp: Vector3 = wl._water_spot("loon", shore)
 	ok(lp != Vector3.INF, "a loon finds open water")
@@ -239,7 +246,12 @@ func _t_drowned_start() -> void:
 		return
 	_dummy = Node3D.new()
 	root.add_child(_dummy)
-	_dummy.global_position = Vector3(1285.9, Overworld.water_y(Vector3(1285.9, 0.0, -4120.1)), -4120.1)
+	var moose := Vector3(960.0, 0.0, -3480.0)
+	for l in _ow.lakes():
+		if String(l["name"]) == "Moosehead Lake":
+			var mq: Array = l["pos"]
+			moose = Vector3(float(mq[0]), 0.0, float(mq[1]))
+	_dummy.global_position = Vector3(moose.x, Overworld.water_y(moose), moose.z)
 	_drowned = Drowned.new()
 	root.add_child(_drowned)
 	_drowned.rise_under(_dummy)

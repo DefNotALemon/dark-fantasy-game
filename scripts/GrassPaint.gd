@@ -12,12 +12,12 @@ extends Node
 ## cell, stored as PNG bytes under design/grass_paint.dat:
 ##
 ##   0          AUTO   the world's own rule decides (GrassSystem._cover_at:
-##                     every dry cell is meadow; water, streets say no)
+##                     every dry cell is meadow; water, snow, streets say no)
 ##   1          BARE   no grass here, whatever the rule says
 ##   2 .. 255   GRASS  grass here, whatever the rule says, at a DENSITY of
 ##                     (v - 1) / 254 -- 255 is a full meadow, 128 is half,
 ##                     2 is the odd tuft. Painted grass grows on rock, on the
-##                     beach, up to the snow; only water still refuses it.
+##                     beach; snow, roads and water still refuse it.
 ##
 ## TWO READERS, one map:
 ##   the BLADES   GrassSystem._place_chunk reads value_at() per tuft (from its

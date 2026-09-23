@@ -3,7 +3,7 @@ extends SceneTree
 ## tools/probe_map2.gd -- the border is FOUND, not drawn. What does marching the
 ## sim's own partition actually cost, and how coarse can the grid be?
 
-const ORIGIN := Vector2(-1199.79, -8800.08)
+const ORIGIN := Vector2(-1525.71, -8160.0)
 const SIZE := Vector2(7200.0, 10800.0)
 
 func _part(roster: Array, nx: int, nz: int) -> PackedInt32Array:

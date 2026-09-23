@@ -142,7 +142,7 @@ const COARSE_PX := 1024
 const FINE_TILE_M := 64.0
 const FINE_PX := 256
 
-var draw_dist := 90.0
+var draw_dist := 110.0
 var base_seed := 0
 
 var _emit: Array[GPUParticles3D] = []

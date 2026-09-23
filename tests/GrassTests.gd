@@ -855,6 +855,67 @@ func _run() -> void:
 	gs.set_paint(null)
 	paint.queue_free()
 
+	print("\n-- 18. SNOW AND ROADS: the meadow stops at the white and the kerb --")
+	## The snow line matches the terrain shader. Below it, ground class decides;
+	## above it, nothing stands even on a lush tile.
+	_ok(not gs._surface_blocks_grass(0.0, 0.0, 0.0),
+		"bare tint at sea level is meadow")
+	_ok(gs._surface_blocks_grass(0.0, 0.0, GrassSystem.SNOW_LINE),
+		"the snow line is bare")
+	_ok(gs._surface_blocks_grass(0.0, 0.0, GrassSystem.SNOW_LINE + 80.0),
+		"...and so is Katahdin's shoulder")
+	var fake := _FakeGround.new()
+	gs._gp = fake
+	fake.id = GroundPaint.tile_id(6, GroundPaint.COL_SNOW)
+	_ok(gs._surface_blocks_grass(0.0, 0.0, 0.0), "a snow tile is bare at any height")
+	fake.id = GroundPaint.tile_id(6, GroundPaint.COL_DIRT)
+	_ok(gs._surface_blocks_grass(0.0, 0.0, 0.0), "packed dirt is a track")
+	fake.id = GroundPaint.tile_id(6, GroundPaint.COL_MUD)
+	_ok(gs._surface_blocks_grass(0.0, 0.0, 0.0), "mud is a wet track")
+	fake.id = GroundPaint.tile_id(6, 0)
+	_ok(not gs._surface_blocks_grass(0.0, 0.0, 0.0), "lush meadow still grows")
+	## and a snow tile over a valley chunk grows not one tuft
+	var snow_key := Vector2i(1, 1)
+	var n_meadow := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_meadow += ((gs._place_chunk(snow_key)["xf"] as Array)[k] as Array).size()
+	_ok(n_meadow > 200, "lush tile: the valley chunk is a meadow (%d tufts)" % n_meadow)
+	fake.id = GroundPaint.tile_id(6, GroundPaint.COL_SNOW)
+	var n_snow := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_snow += ((gs._place_chunk(snow_key)["xf"] as Array)[k] as Array).size()
+	_ok(n_snow == 0, "snow tile: not one tuft (%d)" % n_snow)
+	gs._gp = null
+	## Country roads stamp through pave_roads the same way a city street does.
+	var road_key := Vector2i(3, -2)
+	var rc := gs._chunk_center(road_key)
+	var n_pre_road := 0
+	for k in range(GrassSystem.KINDS.size()):
+		n_pre_road += ((gs._place_chunk(road_key)["xf"] as Array)[k] as Array).size()
+	var net := _FakeNet.new()
+	net.edges = [{
+		"poly": PackedVector2Array([
+			Vector2(rc.x - 40.0, rc.z),
+			Vector2(rc.x + 40.0, rc.z)])
+	}]
+	_ok(not gs._roads_bound, "the net is not bound yet")
+	gs.bind_roads(net)
+	_ok(gs._roads_bound, "bind_roads is idempotent's latch")
+	gs.bind_roads(net)
+	var n_road := 0
+	var on_road := 0
+	var road_half := GrassSystem.ROAD_W * 0.5
+	for k in range(GrassSystem.KINDS.size()):
+		for t: Transform3D in ((gs._place_chunk(road_key)["xf"] as Array)[k] as Array):
+			n_road += 1
+			if absf(t.origin.z - rc.z) <= road_half:
+				on_road += 1
+	_ok(on_road == 0, "not one tuft stands in the country road (%d checked)" % n_road)
+	_ok(n_road < n_pre_road, "the road took its strip out of the chunk (%d -> %d)"
+		% [n_pre_road, n_road])
+	_note("a %.1f m cart track through a 12.8 m chunk cost it %d of %d tufts"
+		% [GrassSystem.ROAD_W, n_pre_road - n_road, n_pre_road])
+
 	print("\n=====================================================")
 	print("  %d passed, %d failed" % [_pass, _fail])
 	print("=====================================================")
@@ -888,3 +949,13 @@ func _commas(n: int) -> String:
 		if c % 3 == 0 and i > 0:
 			out = "," + out
 	return out
+
+
+class _FakeGround:
+	var id := 0
+	func worn_id_at(_wx: float, _wz: float) -> int:
+		return id
+
+
+class _FakeNet:
+	var edges: Array = []

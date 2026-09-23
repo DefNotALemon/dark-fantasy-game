@@ -56,8 +56,8 @@ extends Node3D
 ## World XZ of the fort's centre: the west bank bluff over the narrows, about
 ## 220 m from the Bucksport marker. Checked against the bake — dry, no water
 ## in the footprint, ground falling 19.0 -> 13.6 eastward to the water.
-const SITE_X := 2636.0
-const SITE_Z := -1946.0
+const SITE_X := 2310.1
+const SITE_Z := -1305.9
 
 ## The parade stands this far over the ground sample at the centre. Two
 ## metres puts the paving clear of the grass layer, so the parade reads as

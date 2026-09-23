@@ -1968,7 +1968,7 @@ func _page_grass() -> void:
 	_para("Paint WHERE THE GRASS GROWS. Hold LEFT MOUSE and drag. Cells are 4 m; "
 		+ "the blades re-place under the brush as you go and the far meadow "
 		+ "follows. Unpainted ground obeys the world's rule: every dry cell is "
-		+ "meadow, and streets, water and the towns' cobbles are not. "
+		+ "meadow, and streets, snow, water and the towns' cobbles are not. "
 		+ "Saved to design/grass_paint.dat 2.5 s after you stop.")
 
 	_head("BRUSH")
@@ -1986,8 +1986,8 @@ func _page_grass() -> void:
 		_ghost_key = ""
 		_refresh_tool_page())
 	if grass_mode == "grow":
-		_para("Grow lays meadow whatever the rule says — on rock, on the beach, "
-			+ "up to the snow. Only water still refuses it.")
+		_para("Grow lays meadow whatever the rule says — on rock, on the beach. "
+			+ "Snow, roads and water still refuse it.")
 		_slider("density: %d%%" % int(round(grass_density * 100.0)), grass_density,
 			0.05, 1.0, 0.05, func(v):
 				grass_density = v

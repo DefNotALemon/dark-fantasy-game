@@ -139,6 +139,19 @@ def _pass_once(W: np.ndarray, H: np.ndarray, sea: float):
         new_W[idx[0][above], idx[1][above]] = np.nan
         dried += int(above.sum())
 
+    # Inland water whose own bed is fine can still hang over a neighbour cliff.
+    # Overworld meshes 8 m quads; TerrainTests samples ground 2 m into the quad
+    # (bilinear), which reads as a sky lake when the next 4 m cell drops 35 m.
+    inland = (~np.isnan(new_W)) & (np.abs(np.nan_to_num(new_W) - sea) >= 0.4)
+    if inland.any():
+        hmin = ndimage.minimum_filter(H, size=3)
+        hang = inland & ((np.nan_to_num(new_W) - hmin) > MAX_CELL_DEPTH + 4.0)
+        if hang.any():
+            n_hang = int(hang.sum())
+            new_W[hang] = np.nan
+            dried += n_hang
+            print(f"  cliff-edge: dried {n_hang} inland cells hanging over a neighbour")
+
     new_wet = ~np.isnan(new_W)
     changed = int((new_wet != wet).sum() + (new_wet & wet & (np.abs(np.nan_to_num(new_W) - np.nan_to_num(W)) > 0.01)).sum())
     print(f"  pass: dried {dried} cells, re-levelled {relevelled} bodies, {changed} cells changed")

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 terrain_relax.py -- lift the mountain lakes out of their shafts, fill the pits,
 and cut the vertical walls the bake left on the ranges.
@@ -63,6 +64,8 @@ encoding is widened only if a new tarn stands above the old water_range.
 mainegen.py calls this right after it writes the meta, and water_relevel.py
 runs after it, so a full re-bake produces the same files this pass produces.
 """
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -139,14 +142,24 @@ def main(dry_run: bool) -> int:
 
 def valley_mask(meta: dict) -> np.ndarray:
     """The spawn valley is the bake's own design (flat disc, no ponds, the
-    cave hole under it): nothing in this pass may touch it."""
+    cave hole under it): nothing in this pass may touch it. Metro pads are
+    likewise authored flats — a 72° cone from nearby Casco water must not
+    shave Portland back down to the beach."""
     nx, nz = meta["samples"]
     bx = meta["bounds_world"]["x"][0]
     bz = meta["bounds_world"]["z"][0]
     ease_r = float(meta["valley"]["ease_r"])
     gx = bx + np.arange(nx) * STEP
     gz = bz + np.arange(nz) * STEP
-    return np.hypot(gx[None, :], gz[:, None]) < ease_r + STEP
+    m = np.hypot(gx[None, :], gz[:, None]) < ease_r + STEP
+    for p in meta.get("places", []):
+        if int(p.get("rank", 0)) < 2:
+            continue
+        r = 140.0 if int(p["rank"]) >= 3 else 90.0
+        dx = gx[None, :] - float(p["pos"][0])
+        dz = gz[:, None] - float(p["pos"][1])
+        m |= np.hypot(dx, dz) < r
+    return m
 
 
 # ------------------------------------------------------------------ the pass --
@@ -451,7 +464,7 @@ def _remeta(meta: dict, Hg: np.ndarray) -> None:
         mx, my = M.lonlat_to_map(lon, lat)
         cx = int(np.clip((mx - M.X_MIN) / M.BAKE_STEP, 0, nx - 1))
         cy = int(np.clip((M.Y_MAX - my) / M.BAKE_STEP, 0, ny - 1))
-        rr = int(round(140.0 / M.BAKE_STEP))
+        rr = int(round(M.PEAK_SNAP_R / M.BAKE_STEP))
         y0, y1 = max(0, cy - rr), min(ny, cy + rr)
         x0, x1 = max(0, cx - rr), min(nx, cx + rr)
         win = Hg[y0:y1, x0:x1]
@@ -463,9 +476,21 @@ def _remeta(meta: dict, Hg: np.ndarray) -> None:
     peaks.sort(key=lambda p: -p["real_m"])
     kept = []
     for p in peaks:
-        if all((p["pos"][0] - q["pos"][0]) ** 2 + (p["pos"][1] - q["pos"][1]) ** 2 > 200.0 ** 2 for q in kept):
+        far = M.PEAK_MERGE_R
+        if p["name"] in M.PEAK_KEEP:
+            far = 90.0
+        if all((p["pos"][0] - q["pos"][0]) ** 2 + (p["pos"][1] - q["pos"][1]) ** 2 > far ** 2 for q in kept):
             kept.append(p)
     meta["peaks"] = sorted(kept, key=lambda p: -p["y"])
+    # The story route is authored by name. A relaxation can move a snapped
+    # summit, so refresh every route point from the final canonical records.
+    canonical = {p["name"]: p["pos"] for p in meta["places"]}
+    canonical.update({p["name"]: p["pos"] for p in meta["peaks"]})
+    for act in meta.get("story_route", []):
+        for point in act.get("points", []):
+            if point["name"] not in canonical:
+                raise RuntimeError(f"story route anchor disappeared during relax: {point['name']}")
+            point["pos"] = canonical[point["name"]]
 
 
 def write_preview() -> None:

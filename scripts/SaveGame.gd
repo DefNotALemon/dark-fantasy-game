@@ -17,8 +17,12 @@ extends RefCounted
 ## captured from the bed.
 
 const PATH := "user://save01.dat"
-const VERSION := 2          ## v2: equipment slots hold the ITEMS themselves
-const OLDEST_READABLE := 1  ## v1 (index-based equipment) migrates on load
+## v3 rebases every world-space position onto Lewiston-Auburn. Loading a v1/v2
+## body into that coordinate frame would move the player, beds, drops,
+## incidents and Chronicle places by different amounts, so those prototypes
+## are refused rather than silently corrupting the world.
+const VERSION := 3
+const OLDEST_READABLE := 3
 ## HARDCORE's tombstone. Written beside the save, never inside it, so that a
 ## dead run is still a readable file — it just cannot be gone back to.
 const SEAL_FILE := "save01.dead"

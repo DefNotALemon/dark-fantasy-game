@@ -3,7 +3,7 @@ extends SceneTree
 ## tools/probe_map3.gd -- does the thing this round just wrote actually produce
 ## a map? And does the ground you can WALK agree with the graph the sim PUSHES on?
 
-const ORIGIN := Vector2(-1199.79, -8800.08)
+const ORIGIN := Vector2(-1525.71, -8160.0)
 const SIZE := Vector2(7200.0, 10800.0)
 
 func _init() -> void:

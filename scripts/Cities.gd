@@ -78,26 +78,26 @@ const ALIASES := {
 ## World extent of the Maine bake (metres). x runs east, z runs SOUTH
 ## (Godot's −z is north).
 ##
-## 2026-09-13: the bake's origin is NOT the centre of the map. maine_meta.json
-## puts its bounds at x −1199.79…6000.21, z −8800.08…1999.92 — the spawn valley
-## sits inside it, not at its middle. The first estimate assumed a centred box
-## and every city came out ~4.2 km from the place it was named after.
+## The bake's origin is Lewiston-Auburn, not the centre of the map.
+## maine_meta.json puts its bounds at x −1525.71…5674.29,
+## z −8160…2640. The first estimate assumed a centred box and every city came
+## out ~4.2 km from the place it was named after.
 const WORLD_W := 7200.0
 const WORLD_H := 10800.0
-const WORLD_X0 := -1199.79      ## west edge of the bake
-const WORLD_Z0 := -8800.08      ## north edge of the bake
+const WORLD_X0 := -1525.71      ## west edge of the bake
+const WORLD_Z0 := -8160.0       ## north edge of the bake
 
 ## ESTIMATED positions — see rule 5. Real lat/lon of each city mapped
 ## linearly into Maine's bounding box (lon −71.08…−66.95, lat 43.06…47.46)
 ## and then into the bake's real bounds above. Within ~115 m of the bake's own
 ## rows; overridden by name the moment a roster is bound.
 const BUILTIN_ROSTER := {
-	"Portland": Vector2(235.0, 529.0),
-	"Lewiston-Auburn": Vector2(309.0, -554.0),
-	"Bangor": Vector2(2814.0, -2274.0),
-	"Augusta": Vector2(1067.0, -1070.0),
-	"Brunswick": Vector2(744.0, -97.0),
-	"Presque Isle": Vector2(4142.0, -6888.0),
+	"Portland": Vector2(-85.7, 1056.0),
+	"Lewiston-Auburn": Vector2.ZERO,
+	"Bangor": Vector2(2468.6, -1680.0),
+	"Augusta": Vector2(754.3, -504.0),
+	"Brunswick": Vector2(411.4, 432.0),
+	"Presque Isle": Vector2(3754.3, -6192.0),
 }
 
 ## ---------------------------------------------------------- the numbers ---
@@ -108,7 +108,14 @@ const HOUSE_CAP := [0, 44, 120, 260]              ## most houses a tier gets
 const HOUSE_MIN := [0, 20, 55, 120]               ## fewer than this is a defect
 const SQUARE_R := [0.0, 14.0, 20.0, 28.0]         ## the market square
 const WALL_KIND := ["", "palisade", "stone", "stone"]
+## Name-keyed dialect. Default is the walled medieval ring-town; Portland is
+## the 19th-century waterfront (RDR2 Saint Denis, not a curtain-wall hub).
+const STYLE := {
+	"Portland": "old_port",
+}
 const STALLS := [0, 4, 6, 8]
+const QUAY_H := 2.1                               ## granite seawall, not a 7.5 m curtain
+const QUAY_T := 2.4
 
 const WALL_VERTS_BASE := 10                       ## + 2 per tier
 const WALL_JITTER := 0.28                         ## radial ±, fraction of R
@@ -552,6 +559,10 @@ static func _h(wseed: int, city: String, k: int) -> float:
 
 ## ============================================================== layout ===
 
+static func style_of(city: String) -> String:
+	return str(STYLE.get(city, "walled"))
+
+
 ## THE PURE FUNCTION. Everything observable about a city comes out of here.
 ##
 ##   name      canonical city name (a CITY_TIERS key)
@@ -564,21 +575,46 @@ static func _h(wseed: int, city: String, k: int) -> float:
 ##
 ## Returns a Dictionary; every position inside it is LOCAL to `centre`
 ## except `centre` itself and each lot's `y`, which is world height.
+
+
 static func layout(city: String, tier: int, centre: Vector2, road_dirs: Array, wseed: int,
 		ground: Callable, water: Callable) -> Dictionary:
 	tier = clampi(tier, 1, 3)
 	var R: float = CORE_R[tier]
-	var wall := _wall_polygon(city, tier, wseed)
-	var gates := _gates(wall, road_dirs, city, wseed)
-	var streets := _streets(wall, gates, tier, city, wseed)
-	var rings := _rings(wall, tier)
-	var minor := _minor_radials(wall, gates, tier, city, wseed)
-	# every polyline a lot can front onto, in one fixed order: gate streets,
-	# minor radials, rings. `lot.street` indexes THIS list.
+	var style := style_of(city)
+	var wall: PackedVector2Array
+	var wall_kind: String
+	var gates: Array
+	var streets: Array
+	var rings: Array
+	var minor: Array
+	var piers: Array = []
+	if style == "old_port":
+		wall = _harbor_polygon(city, tier, wseed)
+		wall_kind = "seawall"
+		gates = _gates(wall, road_dirs, city, wseed)
+		streets = _harbor_streets(gates)
+		rings = _harbor_runs(wall, city, wseed, tier, false)
+		minor = _harbor_runs(wall, city, wseed, tier, true)
+		piers = _harbor_piers(wall, city, wseed)
+	else:
+		wall = _wall_polygon(city, tier, wseed)
+		wall_kind = WALL_KIND[tier]
+		gates = _gates(wall, road_dirs, city, wseed)
+		streets = _streets(wall, gates, tier, city, wseed)
+		rings = _rings(wall, tier)
+		minor = _minor_radials(wall, gates, tier, city, wseed)
+	# every polyline a lot can front onto. Walled towns: gate streets, then
+	# brick lanes, then rings. Old Port: gate streets, then cobble grid, then
+	# brick lanes — so townhouses fill the thoroughfares first.
 	var roads: Array = []
 	roads.append_array(streets)
-	roads.append_array(minor)
-	roads.append_array(rings)
+	if style == "old_port":
+		roads.append_array(rings)
+		roads.append_array(minor)
+	else:
+		roads.append_array(minor)
+		roads.append_array(rings)
 	var lots_and_rejects := _lots(city, tier, wseed, centre, wall, roads, streets.size(), ground, water)
 	var lots: Array = lots_and_rejects[0]
 	var rejected: Dictionary = lots_and_rejects[1]
@@ -588,17 +624,19 @@ static func layout(city: String, tier: int, centre: Vector2, road_dirs: Array, w
 	return {
 		"name": city,
 		"tier": tier,
+		"style": style,
 		"epithet": EPITHETS.get(city, ""),
 		"centre": Vector3(centre.x, cy, centre.y),
 		"site": _site_heights(centre, R, ground, cy),
 		"core_r": R,
 		"wall": wall,
-		"wall_kind": WALL_KIND[tier],
+		"wall_kind": wall_kind,
 		"gates": gates,
 		"streets": streets,
 		"minor": minor,
 		"rings": rings,
 		"roads": roads,
+		"piers": piers,
 		"square_r": SQUARE_R[tier],
 		"lots": lots,
 		"stalls": stalls,
@@ -678,6 +716,122 @@ static func _wall_polygon(city: String, tier: int, wseed: int) -> PackedVector2A
 		var ang := step * float(i) + (_h(wseed, city, 100 + i) - 0.5) * step * 0.5
 		var r := R * (1.0 - WALL_JITTER * 0.5 + WALL_JITTER * _h(wseed, city, 200 + i))
 		out.append(Vector2(cos(ang), sin(ang)) * r)
+	return out
+
+
+## Orthogonal-ish city pad: a hashed rectangle in polar form, flattened on
+## the east/SE (Casco) face so the quay reads as a run of granite, not a
+## curtain. Vertices stay inside CORE_R so the town pad is never overflowed.
+static func _harbor_polygon(city: String, tier: int, wseed: int) -> PackedVector2Array:
+	var R: float = CORE_R[tier]
+	var n := WALL_VERTS_BASE + 2 * tier
+	var wx := R * (0.78 + 0.10 * _h(wseed, city, 80))
+	var wz := R * (0.74 + 0.12 * _h(wseed, city, 81))
+	var out := PackedVector2Array()
+	var step := TAU / float(n)
+	for i in range(n):
+		var ang := step * float(i)
+		var c := cos(ang)
+		var s := sin(ang)
+		var r_rect: float
+		if absf(c) < 0.0001:
+			r_rect = wz
+		elif absf(s) < 0.0001:
+			r_rect = wx
+		else:
+			r_rect = minf(wx / absf(c), wz / absf(s))
+		var jitter := 0.08 * (_h(wseed, city, 200 + i) - 0.5)
+		if c > 0.35:
+			jitter *= 0.2
+		var r := minf(r_rect * (1.0 + jitter), R * 0.98)
+		out.append(Vector2(c, s) * r)
+	return out
+
+
+## Gate streets on an Old Port grid: an orthogonal dogleg into the square,
+## not a hashed radial bend.
+static func _harbor_streets(gates: Array) -> Array:
+	var out: Array = []
+	for g in gates:
+		var gp: Vector2 = g["pos"]
+		var mid: Vector2
+		if absf(gp.x) < 10.0 or absf(gp.y) < 10.0:
+			mid = gp * 0.5
+		elif absf(gp.x) >= absf(gp.y):
+			mid = Vector2(0.0, gp.y)
+		else:
+			mid = Vector2(gp.x, 0.0)
+		out.append(PackedVector2Array([gp, mid, Vector2.ZERO]))
+	return out
+
+
+## Axis-aligned runs clipped to the harbor polygon. Thoroughfares (`lane` =
+## false) sit on the cobble grid; lanes fill the half-offsets as brick.
+static func _harbor_runs(wall: PackedVector2Array, city: String, wseed: int, tier: int, lane: bool) -> Array:
+	var out: Array = []
+	var sq: float = SQUARE_R[tier]
+	var skip := sq + STREET_W + 6.0
+	var pitch := 48.0 + 10.0 * _h(wseed, city, 811 if lane else 810)
+	var reach := 0.0
+	for v in wall:
+		reach = maxf(reach, maxf(absf(v.x), absf(v.y)))
+	reach += 8.0
+	var offsets: Array = []
+	var max_k := maxi(1, int(floorf(reach / pitch)))
+	if lane:
+		for k in range(0, max_k + 1):
+			var o := (float(k) + 0.5) * pitch
+			if o < skip or o >= reach:
+				continue
+			offsets.append(o)
+			offsets.append(-o)
+	else:
+		for k in range(1, max_k + 1):
+			var o := float(k) * pitch
+			if o < skip or o >= reach:
+				continue
+			offsets.append(o)
+			offsets.append(-o)
+	for off in offsets:
+		var o := float(off)
+		for along_x in [true, false]:
+			var a := Vector2(-reach, o) if along_x else Vector2(o, -reach)
+			var b := Vector2(reach, o) if along_x else Vector2(o, reach)
+			var clipped: Array = Geometry2D.intersect_polyline_with_polygon(PackedVector2Array([a, b]), wall)
+			for bit in clipped:
+				if not (bit is PackedVector2Array):
+					continue
+				var pl: PackedVector2Array = bit
+				if pl.size() >= 2 and pl[0].distance_to(pl[pl.size() - 1]) > 24.0:
+					out.append(pl)
+	return out
+
+
+## A few wharves on the Casco face, extending east of the quay. House lots
+## still reject water; these boxes are allowed to overhang wet cells.
+static func _harbor_piers(wall: PackedVector2Array, city: String, wseed: int) -> Array:
+	var east: Array = []
+	for v in wall:
+		if v.x > 0.0:
+			east.append(v)
+	if east.size() < 2:
+		return []
+	east.sort_custom(func(a, b): return (a as Vector2).y < (b as Vector2).y)
+	var n := 3 + int(_h(wseed, city, 900) * 2.0)
+	n = clampi(n, 3, mini(5, east.size()))
+	var out: Array = []
+	for i in range(n):
+		var t := (float(i) + 0.55) / float(n + 1)
+		var idx := clampi(int(t * float(east.size() - 1)), 0, east.size() - 1)
+		var root_p: Vector2 = east[idx]
+		var length := 16.0 + 14.0 * _h(wseed, city, 910 + i)
+		var width := 5.0 + 3.5 * _h(wseed, city, 930 + i)
+		out.append({
+			"root": root_p,
+			"pos": root_p + Vector2(length * 0.5, 0.0),
+			"length": length,
+			"width": width,
+		})
 	return out
 
 
@@ -824,7 +978,7 @@ static func _minor_radials(wall: PackedVector2Array, gates: Array, tier: int, ci
 ## outside the wall, in the square, over a street, on another lot, on
 ## water, or across a slope; the counts are what the suite reads.
 static func _lots(city: String, tier: int, wseed: int, centre: Vector2, wall: PackedVector2Array,
-		polylines: Array, n_gate_streets: int, ground: Callable, water: Callable) -> Array:
+		polylines: Array, _n_gate_streets: int, ground: Callable, water: Callable) -> Array:
 	var lots: Array = []
 	var rejected := {"outside": 0, "square": 0, "street": 0, "overlap": 0, "water": 0, "slope": 0, "cap": 0}
 	var cap: int = HOUSE_CAP[tier]
@@ -842,13 +996,24 @@ static func _lots(city: String, tier: int, wseed: int, centre: Vector2, wall: Pa
 			var t: Vector2 = pt[1]
 			var nrm := Vector2(-t.y, t.x)
 			var widest := 0.0
+			var old_port := style_of(city) == "old_port"
 			for side: float in [-1.0, 1.0]:
 				k += 1
-				var w := 6.0 + 3.0 * _h(wseed, city, 1000 + k)
-				var d := 7.0 + 4.0 * _h(wseed, city, 2000 + k)
+				var w: float
+				var d: float
+				var storeys: int
+				var h: float
+				if old_port:
+					w = 5.4 + 2.6 * _h(wseed, city, 1000 + k)
+					d = 8.2 + 3.2 * _h(wseed, city, 2000 + k)
+					storeys = 2 + (1 if _h(wseed, city, 3000 + k) < 0.52 else 0)
+					h = 3.3 + 2.7 * float(storeys - 1) + 0.5 * _h(wseed, city, 4000 + k)
+				else:
+					w = 6.0 + 3.0 * _h(wseed, city, 1000 + k)
+					d = 7.0 + 4.0 * _h(wseed, city, 2000 + k)
+					storeys = 1 + (1 if (tier >= 2 and _h(wseed, city, 3000 + k) < 0.45) else 0)
+					h = 3.2 + 1.3 * _h(wseed, city, 4000 + k) + 2.6 * float(storeys - 1)
 				widest = maxf(widest, w)
-				var storeys := 1 + (1 if (tier >= 2 and _h(wseed, city, 3000 + k) < 0.45) else 0)
-				var h := 3.2 + 1.3 * _h(wseed, city, 4000 + k) + 2.6 * float(storeys - 1)
 				var half := 0.5 * maxf(w, d)
 				var to_street: Vector2 = -nrm * side
 				var c := p + nrm * side * (STREET_W * 0.5 + LOT_SETBACK + d * 0.5)
@@ -908,7 +1073,7 @@ static func _lots(city: String, tier: int, wseed: int, centre: Vector2, wall: Pa
 					"street": si,
 				})
 			s += widest + LOT_PITCH_GAP
-	_assign_kinds(lots, tier, n_gate_streets)
+	_assign_kinds(lots, tier, city, wseed)
 	return [lots, rejected]
 
 
@@ -929,10 +1094,11 @@ static func _along(pl: PackedVector2Array, s: float) -> Array:
 	return [pl[last], seg2.normalized() if seg2.length() > 0.0001 else Vector2.RIGHT]
 
 
-## The inn is the first lot inside the main gate; the hall (tier ≥ 2) is the
-## lot nearest the square; the chapel (tier 3) the next nearest on another
-## street. Kinds are labels the stage reads — the lot itself does not move.
-static func _assign_kinds(lots: Array, tier: int, _n_gate_streets: int) -> void:
+## The inn is the first lot inside the main gate. Walled towns: hall (tier
+## ≥ 2) nearest the square, chapel (tier 3) the next nearest on another
+## street. Old Port remaps those to a custom-house and a brick church, and
+## parks warehouses on the Casco side. Kinds are labels the stage reads.
+static func _assign_kinds(lots: Array, tier: int, city: String, wseed: int) -> void:
 	if lots.size() == 0:
 		return
 	# inn: on street 0 (the main gate's), farthest from the centre
@@ -945,6 +1111,7 @@ static func _assign_kinds(lots: Array, tier: int, _n_gate_streets: int) -> void:
 	if inn < 0:
 		inn = 0
 	lots[inn]["kind"] = "inn"
+	var old_port := style_of(city) == "old_port"
 	if tier >= 2:
 		var hall := -1
 		var near := INF
@@ -956,7 +1123,7 @@ static func _assign_kinds(lots: Array, tier: int, _n_gate_streets: int) -> void:
 				near = L
 				hall = i
 		if hall >= 0:
-			lots[hall]["kind"] = "hall"
+			lots[hall]["kind"] = "custom_house" if old_port else "hall"
 			if tier >= 3:
 				var chapel := -1
 				var near2 := INF
@@ -969,7 +1136,55 @@ static func _assign_kinds(lots: Array, tier: int, _n_gate_streets: int) -> void:
 						near2 = L2
 						chapel = i
 				if chapel >= 0:
-					lots[chapel]["kind"] = "chapel"
+					lots[chapel]["kind"] = "church" if old_port else "chapel"
+	if old_port:
+		var idxs: Array = []
+		for i in range(lots.size()):
+			if str(lots[i]["kind"]) == "house":
+				idxs.append(i)
+		idxs.sort_custom(func(a, b): return (lots[a]["pos"] as Vector2).x > (lots[b]["pos"] as Vector2).x)
+		var n_wh := mini(4, idxs.size())
+		for j in range(n_wh):
+			if (lots[idxs[j]]["pos"] as Vector2).x > 16.0:
+				lots[idxs[j]]["kind"] = "warehouse"
+				var s: Vector3 = lots[idxs[j]]["size"]
+				lots[idxs[j]]["size"] = Vector3(s.x * 1.35, s.y * 0.88, s.z * 1.55)
+	_assign_look(lots, city, tier, wseed)
+
+
+## Wall and roof materials live on the lot so `_stage` is a dumb reader.
+static func _assign_look(lots: Array, city: String, tier: int, wseed: int) -> void:
+	var old_port := style_of(city) == "old_port"
+	for i in range(lots.size()):
+		var kind := str(lots[i]["kind"])
+		if old_port:
+			match kind:
+				"inn":
+					lots[i]["wall_mat"] = "brick"
+					lots[i]["roof_mat"] = "slate"
+				"custom_house":
+					lots[i]["wall_mat"] = "stone"
+					lots[i]["roof_mat"] = "slate"
+				"church":
+					lots[i]["wall_mat"] = "brick"
+					lots[i]["roof_mat"] = "slate"
+				"warehouse":
+					lots[i]["wall_mat"] = "brick" if _h(wseed, city, 5000 + i) < 0.6 else "stone"
+					lots[i]["roof_mat"] = "cornice"
+				_:
+					lots[i]["wall_mat"] = "brick" if _h(wseed, city, 5000 + i) < 0.72 else "stone"
+					lots[i]["roof_mat"] = "slate" if _h(wseed, city, 6000 + i) < 0.58 else "cornice"
+		else:
+			match kind:
+				"inn":
+					lots[i]["wall_mat"] = "daub"
+					lots[i]["roof_mat"] = "thatch" if tier < 3 else "slate"
+				"hall", "chapel":
+					lots[i]["wall_mat"] = "stone"
+					lots[i]["roof_mat"] = "slate"
+				_:
+					lots[i]["wall_mat"] = "daub" if _h(wseed, city, 5000 + i) < 0.7 else "board"
+					lots[i]["roof_mat"] = "thatch" if tier < 3 or _h(wseed, city, 6000 + i) < 0.5 else "slate"
 
 
 ## A lamp just inside every gate, one every LAMP_STEP along each street,
@@ -1161,6 +1376,7 @@ func stage(city: String) -> Node3D:
 	_staged[city] = root
 	_build_ground_pad(root, c)
 	_build_wall(root, c)
+	_build_wharf(root, c)
 	_build_streets(root, c)
 	_build_lots(root, c)
 	_build_square(root, c)
@@ -1328,6 +1544,9 @@ func _build_wall(root: Node3D, c: Dictionary) -> void:
 	var wall: PackedVector2Array = c["wall"]
 	var tier: int = c["tier"]
 	var kind: String = c["wall_kind"]
+	if kind == "seawall" or kind == "quay":
+		_build_seawall(root, c)
+		return
 	var h: float = WALL_H[tier]
 	var t: float = WALL_T[tier]
 	var m: Material = mat("palisade") if kind == "palisade" else mat("stone")
@@ -1373,6 +1592,111 @@ func _build_wall(root: Node3D, c: Dictionary) -> void:
 				var lintel := _box_in(holder, Vector3(GATE_W + TOWER_W, 1.2, t), mat("stone_dk"),
 						Vector3(gc.x, gy + h - 0.6, gc.y), yaw)
 				lintel.name = "Lintel%d" % i
+
+
+## Low granite quay on the Casco (east / SE) face; landward sides stay open.
+## Gates get iron-topped posts, not curtain towers. Each gate is assigned to
+## exactly one segment so a vertex-hit (common on a rectangular pad) cannot
+## stamp two thresholds.
+func _build_seawall(root: Node3D, c: Dictionary) -> void:
+	var wall: PackedVector2Array = c["wall"]
+	var m: Material = mat("stone_dk")
+	var holder := Node3D.new()
+	holder.name = "Wall"
+	root.add_child(holder)
+	var n := wall.size()
+	var gates: Array = c["gates"]
+	var gate_seg: Dictionary = {}
+	for gi in range(gates.size()):
+		var gp: Vector2 = gates[gi]["pos"]
+		var best_i := -1
+		var best_d := 0.08
+		for i in range(n):
+			var q := Geometry2D.get_closest_point_to_segment(gp, wall[i], wall[(i + 1) % n])
+			var d := q.distance_to(gp)
+			if d < best_d:
+				best_d = d
+				best_i = i
+		if best_i >= 0:
+			gate_seg[best_i] = gi
+	for i in range(n):
+		var a := wall[i]
+		var b := wall[(i + 1) % n]
+		var d := b - a
+		if d.length() < 0.05:
+			continue
+		var outward := Vector2(d.y, -d.x)
+		var harbor := outward.x > 0.0 and absf(outward.x) >= absf(outward.y) * 0.35
+		var gi: int = int(gate_seg.get(i, -1))
+		var gate_t := -1.0
+		var gate_dir := Vector2.ZERO
+		if gi >= 0:
+			var gp: Vector2 = gates[gi]["pos"]
+			var q := Geometry2D.get_closest_point_to_segment(gp, a, b)
+			gate_t = (q - a).length() / maxf(a.distance_to(b), 0.001)
+			gate_dir = gates[gi]["dir"]
+		if harbor:
+			if gate_t < 0.0:
+				_wall_piece(holder, c, a, b, QUAY_H, QUAY_T, m, "Seg%d" % i)
+			else:
+				var L := a.distance_to(b)
+				var u := (b - a) / maxf(L, 0.001)
+				var gc := a + u * (gate_t * L)
+				var half := GATE_W * 0.5 + 0.45
+				var left := gc - u * half
+				var right := gc + u * half
+				if (left - a).length() > 1.0:
+					_wall_piece(holder, c, a, left, QUAY_H, QUAY_T, m, "Seg%dL" % i)
+				if (b - right).length() > 1.0:
+					_wall_piece(holder, c, right, b, QUAY_H, QUAY_T, m, "Seg%dR" % i)
+		if gi >= 0:
+			_harbor_gate(holder, c, a, b, gate_t, gate_dir, gi)
+
+
+func _harbor_gate(holder: Node3D, c: Dictionary, a: Vector2, b: Vector2, gate_t: float, gate_dir: Vector2, gi: int) -> void:
+	var L := a.distance_to(b)
+	var u := (b - a) / maxf(L, 0.001)
+	var gc := a + u * (gate_t * L)
+	var yaw := atan2(gate_dir.x, gate_dir.y)
+	var gy := local_y(c, gc.x, gc.y)
+	var half := GATE_W * 0.5
+	var left := gc - u * half
+	var right := gc + u * half
+	for pair in [[left, "L"], [right, "R"]]:
+		var at: Vector2 = pair[0]
+		var py := local_y(c, at.x, at.y)
+		var sb := _collider(Vector3(0.7, 3.4, 0.7), Vector3(at.x, py + 1.5, at.y))
+		sb.name = "Post%s%d" % [str(pair[1]), gi]
+		holder.add_child(sb)
+		_box_in(sb, Vector3(0.7, 3.4, 0.7), mat("stone_dk"), Vector3.ZERO)
+		_box_in(sb, Vector3(0.14, 1.6, 0.14), mat("iron"), Vector3(0.0, 2.4, 0.0))
+	_box_in(holder, Vector3(GATE_W, 0.45, 4.5), mat("cobble"),
+			Vector3(gc.x, gy - 0.18, gc.y), yaw).name = "Gate%d" % gi
+
+
+func _build_wharf(root: Node3D, c: Dictionary) -> void:
+	var piers: Array = c.get("piers", [])
+	if piers.is_empty():
+		return
+	var holder := Node3D.new()
+	holder.name = "Wharf"
+	root.add_child(holder)
+	var i := 0
+	for pr in piers:
+		var root_p: Vector2 = pr["root"]
+		var length: float = float(pr["length"])
+		var width: float = float(pr["width"])
+		var mid: Vector2 = root_p + Vector2(length * 0.5, 0.0)
+		var gy := local_y(c, root_p.x, root_p.y)
+		var sb := _collider(Vector3(length, 0.7, width), Vector3(mid.x, gy + 0.12, mid.y))
+		sb.name = "Pier%d" % i
+		holder.add_child(sb)
+		_box_in(sb, Vector3(length, 0.55, width), mat("stone_dk"), Vector3.ZERO)
+		for sx: float in [-0.38, 0.38]:
+			for sz: float in [-0.38, 0.38]:
+				_box_in(sb, Vector3(0.32, 2.8, 0.32), mat("frame"),
+						Vector3(sx * (length * 0.5 - 0.45), -1.15, sz * (width * 0.5 - 0.28)))
+		i += 1
 
 
 ## A wall run, cut into CONFORM_SPAN pieces so it FOLLOWS the ground instead
@@ -1427,18 +1751,24 @@ func _build_streets(root: Node3D, c: Dictionary) -> void:
 	var holder := Node3D.new()
 	holder.name = "Streets"
 	root.add_child(holder)
-	## `roads` is gate streets, then minor radials, then rings (layout()). The
-	## thoroughfares and the rings are COBBLE, the lanes between them BRICK.
-	## Outside the walls a road is still dirt — that is what a gate is for.
+	## Thoroughfares and rings are COBBLE, the lanes between them BRICK.
+	## Old Port stores cobble grid in `rings` and brick lanes in `minor`,
+	## and `roads` is streets + rings + minor so lots fill the cobbles first.
 	var n_gate: int = (c["streets"] as Array).size()
 	var n_minor: int = (c["minor"] as Array).size()
+	var n_rings: int = (c["rings"] as Array).size()
+	var old_port := str(c.get("style", "walled")) == "old_port"
 	var cen: Vector3 = c["centre"]
 	var paved: Array = []
 	var ri := -1
 	var k := 0
 	for pl in c["roads"]:
 		ri += 1
-		var surface := "brick" if (ri >= n_gate and ri < n_gate + n_minor) else "cobble"
+		var surface: String
+		if old_port:
+			surface = "brick" if ri >= n_gate + n_rings else "cobble"
+		else:
+			surface = "brick" if (ri >= n_gate and ri < n_gate + n_minor) else "cobble"
 		var p2: PackedVector2Array = pl
 		for i in range(p2.size() - 1):
 			var a := p2[i]
@@ -1487,7 +1817,7 @@ func _build_lots(root: Node3D, c: Dictionary) -> void:
 	holder.name = "Lots"
 	root.add_child(holder)
 	var cy: float = (c["centre"] as Vector3).y
-	var tier: int = c["tier"]
+	var old_port := str(c.get("style", "walled")) == "old_port"
 	var i := 0
 	for lot in c["lots"]:
 		var p: Vector2 = lot["pos"]
@@ -1495,6 +1825,8 @@ func _build_lots(root: Node3D, c: Dictionary) -> void:
 		var yaw: float = lot["yaw"]
 		var y: float = float(lot["y"]) - cy
 		var kind: String = lot["kind"]
+		var wall_mat := str(lot.get("wall_mat", "daub"))
+		var roof_mat := str(lot.get("roof_mat", "thatch"))
 		var house := Node3D.new()
 		house.name = "%s%d" % [kind.capitalize(), i]
 		house.position = Vector3(p.x, y, p.y)
@@ -1502,27 +1834,45 @@ func _build_lots(root: Node3D, c: Dictionary) -> void:
 		holder.add_child(house)
 		match kind:
 			"hall":
-				_house_body(house, Vector3(s.x * 1.5, s.y * 1.3, s.z * 1.4), "stone", "slate", true)
+				_house_body(house, Vector3(s.x * 1.5, s.y * 1.3, s.z * 1.4), wall_mat, roof_mat, true)
 			"chapel":
-				_house_body(house, Vector3(s.x * 1.1, s.y * 1.6, s.z * 1.6), "stone", "slate", true)
+				_house_body(house, Vector3(s.x * 1.1, s.y * 1.6, s.z * 1.6), wall_mat, roof_mat, true)
 				var spire := _box_in(house, Vector3(1.6, s.y * 1.6, 1.6), mat("stone_dk"),
 						Vector3(0.0, s.y * 1.6 + s.y * 0.8, -s.z * 0.5))
 				spire.name = "Spire"
 				_roof_in(spire, Vector3(2.0, 3.0, 2.0), mat("slate"), Vector3(0.0, s.y * 0.8 + 1.5, 0.0))
+			"custom_house":
+				_house_body(house, Vector3(s.x * 1.55, s.y * 1.35, s.z * 1.5), wall_mat, roof_mat, true, true)
+				var cup := _box_in(house, Vector3(2.2, s.y * 0.55, 2.2), mat("stone"),
+						Vector3(0.0, s.y * 1.35 + 0.9, 0.0))
+				cup.name = "Cupola"
+				_roof_in(cup, Vector3(2.6, 1.4, 2.6), mat("slate"), Vector3(0.0, s.y * 0.35 + 0.8, 0.0))
+			"church":
+				_house_body(house, Vector3(s.x * 1.15, s.y * 1.55, s.z * 1.7), wall_mat, roof_mat, true, true)
+				var cspire := _box_in(house, Vector3(1.7, s.y * 1.5, 1.7), mat("brick"),
+						Vector3(0.0, s.y * 1.55 + s.y * 0.75, -s.z * 0.45))
+				cspire.name = "Spire"
+				_roof_in(cspire, Vector3(2.1, 2.6, 2.1), mat("slate"), Vector3(0.0, s.y * 0.75 + 1.3, 0.0))
+			"warehouse":
+				_house_body(house, s, wall_mat, roof_mat, false)
 			"inn":
-				_house_body(house, Vector3(s.x * 1.3, s.y * 1.25, s.z * 1.3), "daub", "thatch" if tier < 3 else "slate", true)
+				_house_body(house, Vector3(s.x * 1.3, s.y * 1.25, s.z * 1.3), wall_mat, roof_mat, true, old_port)
 				var sign_mi := _box_in(house, Vector3(1.2, 0.8, 0.12), mat("board"),
 						Vector3(s.x * 0.65 + 0.7, s.y * 0.9, s.z * 0.65 - 0.2))
 				sign_mi.name = "Sign"
 			_:
-				var wall_kind := "daub" if _h(world_seed, c["name"], 5000 + i) < 0.7 else "board"
-				_house_body(house, s, wall_kind, "thatch" if tier < 3 or _h(world_seed, c["name"], 6000 + i) < 0.5 else "slate", false)
+				_house_body(house, s, wall_mat, roof_mat, false, old_port)
+				if old_port:
+					_box_in(house, Vector3(s.x * 0.62, 0.08, 0.85), mat("iron"),
+							Vector3(0.0, s.y * 0.52, s.z * 0.5 + 0.48))
+					_box_in(house, Vector3(s.x * 0.62, 0.7, 0.06), mat("iron"),
+							Vector3(0.0, s.y * 0.52 + 0.35, s.z * 0.5 + 0.88))
 		i += 1
 
 
 ## Body + plinth + roof + door + collider. `size` is (w, h, d); the door is
 ## on the +z face, which `layout` turned toward the street.
-func _house_body(house: Node3D, s: Vector3, wall_kind: String, roof_kind: String, grand: bool) -> void:
+func _house_body(house: Node3D, s: Vector3, wall_kind: String, roof_kind: String, grand: bool, shallow := false) -> void:
 	var sb := _collider(Vector3(s.x, s.y + 1.5, s.z), Vector3(0.0, s.y * 0.5 - 0.75, 0.0))
 	sb.name = "Body"
 	house.add_child(sb)
@@ -1535,8 +1885,14 @@ func _house_body(house: Node3D, s: Vector3, wall_kind: String, roof_kind: String
 			for sz: float in [-1.0, 1.0]:
 				_box_in(sb, Vector3(0.3, s.y, 0.3), mat("frame"), Vector3(sx * (s.x * 0.5 - 0.05), 0.75, sz * (s.z * 0.5 - 0.05)))
 		_box_in(sb, Vector3(s.x + 0.1, 0.25, s.z + 0.1), mat("frame"), Vector3(0.0, 0.75 - s.y * 0.5 + 1.2, 0.0))
-	var roof_h := 2.2 if not grand else 3.0
-	_roof_in(house, Vector3(s.x + 0.8, roof_h, s.z + 0.6), mat(roof_kind), Vector3(0.0, s.y + roof_h * 0.5 - 0.05, 0.0))
+	if roof_kind == "cornice":
+		_box_in(house, Vector3(s.x + 0.7, 0.14, s.z + 0.7), mat("stone_dk"), Vector3(0.0, s.y - 0.02, 0.0))
+		_box_in(house, Vector3(s.x + 0.5, 0.36, s.z + 0.5), mat("slate"), Vector3(0.0, s.y + 0.16, 0.0))
+	else:
+		var roof_h := 2.2 if not grand else 3.0
+		if shallow:
+			roof_h = 1.05 if not grand else 1.45
+		_roof_in(house, Vector3(s.x + 0.8, roof_h, s.z + 0.6), mat(roof_kind), Vector3(0.0, s.y + roof_h * 0.5 - 0.05, 0.0))
 	_box_in(house, Vector3(1.0, 2.0, 0.12), mat("door"), Vector3(0.0, 1.0, s.z * 0.5 + 0.04)).name = "Door"
 
 

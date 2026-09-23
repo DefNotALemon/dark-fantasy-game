@@ -12,7 +12,7 @@ extends SceneTree
 
 var _pass := 0
 var _fail := 0
-const MIN_ASSERTIONS := 140
+const MIN_ASSERTIONS := 165
 const DT := 1.0 / 60.0
 const SPRINT := 8.0
 const WALK := 5.0
@@ -247,7 +247,62 @@ func _run() -> void:
 	var fast: float = sprint + float(c["SLIDE_BOOST"]) - float(c["SLIDE_FRICTION"]) * float(c["SLIDE_TIME"])
 	ok(fast > 0.0, "a full-speed slide is ended by its timer, not by running out of speed")
 
-	## --- 12. the wiring is still in Player.gd -----------------------------------
+	## --- 12. stance poses: squat, crawl, and the blend between them ------------
+	near(Locomotion.stance_target(false, false), 0.0, 0.001, "standing wants weight 0")
+	near(Locomotion.stance_target(true, false), 1.0, 0.001, "crouch wants weight 1")
+	near(Locomotion.stance_target(true, true), 2.0, 0.001, "prone wants weight 2")
+	near(Locomotion.stance_target(false, true), 2.0, 0.001, "prone wins even if crouch is false")
+	ok(Locomotion.stance_target(true, false, true) > 1.0, "a slide sits lower than a crouch")
+	ok(Locomotion.stance_ease(0.0, 1.0) > Locomotion.stance_ease(0.0, 2.0) - 0.01,
+		"going prone eases slower than a crouch (or equal)")
+	ok(Locomotion.stance_ease(1.6, 0.0) < Locomotion.stance_ease(0.2, 1.0),
+		"...and rising through prone is the slow one")
+
+	var idle := Locomotion.stance_pose(0.0, 0.0, 0.0)
+	near(float(idle["body_y"]), 0.0, 0.001, "stand idle does not drop the hips")
+	near(float(idle["pitch_deg"]), 0.0, 0.001, "stand idle does not pitch the body")
+	near(float(idle["hip_l"]), 0.0, 0.001, "stand idle hips are at rest")
+
+	var squat := Locomotion.stance_pose(1.0, 0.0, 0.0)
+	ok(float(squat["body_y"]) < -0.2, "crouch drops the hips (%.2f)" % float(squat["body_y"]))
+	ok(float(squat["pitch_deg"]) > 8.0, "crouch hunches the torso")
+	ok(float(squat["hip_l"]) > 0.6, "crouch folds the thighs forward")
+	ok(float(squat["knee_l"]) < -0.8, "crouch folds the shins back")
+	ok(float(squat["arm_l"]) > 0.1, "crouch brings the arms a little forward")
+
+	var belly := Locomotion.stance_pose(2.0, 0.0, 0.0)
+	ok(float(belly["pitch_deg"]) < -50.0, "prone pitches onto the belly")
+	ok(float(belly["body_z"]) > 0.8, "prone pulls the skull back to the capsule")
+	ok(float(belly["arm_l"]) > 0.8, "prone plants the arms forward")
+	ok(float(belly["gait_rate"]) < float(squat["gait_rate"]), "a crawl cycles slower than a squat-walk")
+
+	## Blend is monotonic: half-crouch is between stand and squat.
+	var half := Locomotion.stance_pose(0.5, 0.0, 0.0)
+	ok(float(half["body_y"]) < float(idle["body_y"]) and float(half["body_y"]) > float(squat["body_y"]),
+		"going-down blend sits between stand and crouch")
+	var dropping := Locomotion.stance_pose(1.5, 0.0, 0.0)
+	ok(float(dropping["pitch_deg"]) < float(squat["pitch_deg"]) and float(dropping["pitch_deg"]) > float(belly["pitch_deg"]),
+		"going-prone blend sits between crouch and prone")
+
+	## Walk and crawl actually cycle: opposite hips, and a later phase differs.
+	var walk_a := Locomotion.stance_pose(1.0, 1.0, PI * 0.5)
+	var walk_b := Locomotion.stance_pose(1.0, 1.0, PI * 1.5)
+	ok(absf(float(walk_a["hip_l"]) - float(walk_b["hip_l"])) > 0.2,
+		"crouch-walk hips travel across a stride")
+	ok((float(walk_a["hip_l"]) - float(walk_a["hip_r"])) * (float(walk_b["hip_l"]) - float(walk_b["hip_r"])) < 0.0,
+		"...and left/right stay opposite")
+	var crawl_a := Locomotion.stance_pose(2.0, 1.0, PI * 0.5)
+	var crawl_b := Locomotion.stance_pose(2.0, 1.0, PI * 1.5)
+	ok(absf(float(crawl_a["arm_l"]) - float(crawl_b["arm_l"])) > 0.3,
+		"prone crawl reaches the arms across a cycle")
+	ok((float(crawl_a["arm_l"]) - 1.08) * (float(crawl_a["hip_l"]) - 0.38) < 0.0,
+		"crawl is contralateral: left arm with right hip")
+
+	var slide_p := Locomotion.stance_pose(1.0, 0.0, 0.0, true)
+	ok(float(slide_p["pitch_deg"]) > float(squat["pitch_deg"]), "a slide lays out further than a crouch")
+	ok(float(slide_p["hip_r"]) < float(slide_p["hip_l"]), "a slide trails the right (uphill) leg")
+
+	## --- 13. the wiring is still in Player.gd -----------------------------------
 	## Three other Claude sessions edit this repo at the same time and Player.gd is
 	## 9,600 lines. If the momentum call site is ever reverted by a bad merge, the
 	## game silently goes back to sliding around like a chess piece and NOTHING
@@ -255,8 +310,9 @@ func _run() -> void:
 	var psrc := FileAccess.get_file_as_string("res://scripts/Player.gd")
 	ok(psrc.length() > 1000, "Player.gd source is readable")
 	for needle in ["Locomotion.steer(", "Locomotion.compose(", "Locomotion.bank(",
-			"Locomotion.fov_bonus(", "Locomotion.wade_amount(", "_update_footing(",
-			"_try_climb(true)", "_try_slide()", "_update_slide("]:
+			"Locomotion.fov_bonus(", "Locomotion.wade_amount(", "Locomotion.stance_pose(",
+			"Locomotion.stance_target(", "_tick_stance(", "_clear_stance(", "_make_leg(",
+			"_update_footing(", "_try_climb(true)", "_try_slide()", "_update_slide("]:
 		ok(psrc.contains(needle), "Player.gd still calls %s" % needle)
 	ok(not psrc.contains("hv.move_toward(target,"),
 		"...and the old snap-to-target line is gone, not sitting alongside it")

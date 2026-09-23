@@ -5,7 +5,7 @@ extends SceneTree
 
 const MAP_W := 520.0
 const MAP_H := 780.0
-const ORIGIN := Vector2(-1199.79, -8800.08)
+const ORIGIN := Vector2(-1525.71, -8160.0)
 const SIZE := Vector2(7200.0, 10800.0)
 
 func _px(w: Vector2) -> Vector2:

@@ -52,8 +52,24 @@ PEAK_CHAIN_R    = 3000.0     # a peak orients on its neighbour within this
 # flat pad instead of a hillside.
 DETAIL_M = 38.0         # spurs on the ranges; the 08-30 bake used 120 (v2 is stylized)
 FLATTEN_TOWNS = True
-TOWN_R = {0: 55.0, 1: 85.0, 2: 120.0}      # by rank (village / town / city)
+TOWN_R = {0: 55.0, 1: 85.0, 2: 120.0, 3: 200.0}  # village / town / city / metro
 TOWN_EASE = 90.0
+METRO_FLOOR = 10.0       # game y; Portland/Brunswick pads must stay visibly above the sea
+# Extra flatten discs (map metres), matching tools/myrkgen.METRO_PADS.
+METRO_PADS = [
+    (-2020.0, -3980.0, 190.0),   # Portland south-east toward Casco
+    (-1774.0, -3264.0, 170.0),   # Brunswick–Freeport span
+]
+
+
+def town_rank(dim0):
+    if dim0 >= 320:
+        return 3
+    if dim0 >= 220:
+        return 2
+    if dim0 >= 170:
+        return 1
+    return 0
 
 
 # ------------------------------------------------------------------- noise ---
@@ -230,12 +246,13 @@ def main():
     # --- level a pad under every town ---------------------------------------
     if FLATTEN_TOWNS:
         pads = 0
-        for c in M.places()["cities"]:
-            rank = 2 if c["dim"][0] >= 220 else (1 if c["dim"][0] >= 170 else 0)
-            r = TOWN_R[rank]
+        flatten_sites = [(cx, cy, r, "") for cx, cy, r in METRO_PADS]
+        flatten_sites.extend((c["x"], c["y"], TOWN_R[town_rank(c["dim"][0])], c["name"])
+                             for c in M.places()["cities"])
+        for cx_m, cy_m, r, name in flatten_sites:
             rad = r + TOWN_EASE
-            cx = (c["x"] - M.X_MIN) / M.BAKE_STEP
-            cy = (M.Y_MAX - c["y"]) / M.BAKE_STEP
+            cx = (cx_m - M.X_MIN) / M.BAKE_STEP
+            cy = (M.Y_MAX - cy_m) / M.BAKE_STEP
             x0, x1 = max(0, int(cx - rad / M.BAKE_STEP) - 1), min(nx, int(cx + rad / M.BAKE_STEP) + 2)
             y0, y1 = max(0, int(cy - rad / M.BAKE_STEP) - 1), min(ny, int(cy + rad / M.BAKE_STEP) + 2)
             if x1 <= x0 or y1 <= y0:
@@ -248,13 +265,23 @@ def main():
             if not inner.any():
                 continue
             lvl = float(np.median(win[inner]))
-            # A harbour town sits ON the shore, not under it. The macro puts
-            # Eastport, Bath, Bar Harbor and Stonington within a metre of the
-            # waterline; padding them to the median drowns them.
-            lvl = max(lvl, M.SEA_LEVEL + 3.5)
+            # A harbour town sits ON the shore; an inland town must not inherit
+            # the sea-floor height merely because its compressed border cell
+            # touched the exterior mask.
+            floor = M.SEA_LEVEL + (3.5 if name in M.COASTAL_PLACES else 25.0)
+            # extra metro discs (empty name) and rank-3 pads share the city floor
+            if name == "" or r >= TOWN_R[3]:
+                floor = max(floor, METRO_FLOOR)
+            lvl = max(lvl, floor)
             tt = np.clip((dd - r) / TOWN_EASE, 0.0, 1.0)
             tt = tt * tt * (3.0 - 2.0 * tt)
-            Hg[y0:y1, x0:x1] = win * tt + lvl * (1.0 - tt)
+            # never raise the exterior sea floor into a metro pad
+            lifted = win * tt + lvl * (1.0 - tt)
+            if name == "":
+                # extra discs only fill toward the water; they must not shave
+                # an already-flattened city pad (Portland 2026-09-18: 10 m -> 5.6)
+                lifted = np.maximum(win, lifted)
+            Hg[y0:y1, x0:x1] = np.where(win >= M.SEA_LEVEL, lifted, win)
             pads += 1
         print(f"  town pads levelled: {pads}")
 
@@ -311,13 +338,15 @@ def main():
         "bounds_world": {
             "x": [M.X_MIN - M.ORIGIN[0], M.X_MAX - M.ORIGIN[0]],
             "z": [-(M.Y_MAX - M.ORIGIN[1]), -(M.Y_MIN - M.ORIGIN[1])]},
-        "places": [], "lakes": [], "regions": [], "peaks": [],
+        "playable_area_sq_mi": round((M.X_MAX - M.X_MIN) * (M.Y_MAX - M.Y_MIN) / 2589988.11, 2),
+        "land_area_sq_mi": round(float(dry.sum()) * M.BAKE_STEP ** 2 / 2589988.11, 2),
+        "places": [], "lakes": [], "regions": [], "peaks": [], "story_route": [],
     }
     for c in pl["cities"]:
         x, z = M.map_to_world(c["x"], c["y"])
         meta["places"].append({"name": c["name"], "pos": [round(x, 1), round(z, 1)],
                                "y": round(ground_at(c["x"], c["y"]), 2),
-                               "rank": 2 if c["dim"][0] >= 220 else (1 if c["dim"][0] >= 170 else 0)})
+                               "rank": town_rank(c["dim"][0])})
     for l in pl["lakes"]:
         x, z = M.map_to_world(l["x"], l["y"])
         meta["lakes"].append({"name": l["name"], "pos": [round(x, 1), round(z, 1)],
@@ -331,7 +360,7 @@ def main():
         mx, my = M.lonlat_to_map(lon, lat)
         cx = int(np.clip((mx - M.X_MIN) / M.BAKE_STEP, 0, nx - 1))
         cy = int(np.clip((M.Y_MAX - my) / M.BAKE_STEP, 0, ny - 1))
-        rr = int(round(140.0 / M.BAKE_STEP))
+        rr = int(round(M.PEAK_SNAP_R / M.BAKE_STEP))
         y0, y1 = max(0, cy - rr), min(ny, cy + rr)
         x0, x1 = max(0, cx - rr), min(nx, cx + rr)
         win = Hg[y0:y1, x0:x1]
@@ -342,20 +371,38 @@ def main():
         x, z = M.map_to_world(smx, smy)
         meta["peaks"].append({"name": name, "pos": [round(x, 1), round(z, 1)],
                               "y": round(float(Hg[py, px]), 1), "real_m": real_m})
-    # 47x horizontal compression puts whole ranges on top of each other -- the
-    # Baxter peaks land within 200 m of one another. Keep the tallest real
-    # summit of any such cluster so the teleport list has 26 distinct places,
-    # not five names for one cairn.
+    # 47x horizontal compression puts whole ranges on top of each other -- Hamlin
+    # lands on Katahdin. Traveler is a separate horn (~285 m) and must keep a cairn.
     meta["peaks"].sort(key=lambda p: -p["real_m"])
     kept = []
     for p in meta["peaks"]:
-        if all((p["pos"][0] - q["pos"][0]) ** 2 + (p["pos"][1] - q["pos"][1]) ** 2 > 200.0 ** 2
+        far = M.PEAK_MERGE_R
+        if p["name"] in M.PEAK_KEEP:
+            far = 90.0
+        if all((p["pos"][0] - q["pos"][0]) ** 2 + (p["pos"][1] - q["pos"][1]) ** 2 > far ** 2
                for q in kept):
             kept.append(p)
     dropped = [p["name"] for p in meta["peaks"] if p not in kept]
     if dropped:
         print(f"  summits merged by compression ({len(dropped)}): {', '.join(dropped)}")
     meta["peaks"] = sorted(kept, key=lambda p: -p["y"])
+
+    # The authored journey is resolved only after towns and summits have their
+    # final baked positions. Consumers never need to know lon/lat, punctuation
+    # aliases or whether an anchor is a settlement or a landmark.
+    anchors = {p["name"]: (p["pos"], "place") for p in meta["places"]}
+    anchors.update({p["name"]: (p["pos"], "peak") for p in meta["peaks"]})
+    for act in M.STORY_ROUTE:
+        points = []
+        for name in act["places"]:
+            if name not in anchors:
+                raise RuntimeError(f"story route anchor did not bake: {name}")
+            pos, kind = anchors[name]
+            points.append({"name": name, "kind": kind, "pos": pos})
+        meta["story_route"].append({
+            "act": act["act"], "name": act["name"], "levels": act["levels"],
+            "promise": act["promise"], "points": points,
+        })
     json.dump(meta, open(os.path.join(OUT, "maine_meta.json"), "w"), indent=1)
 
     # --- water sanity: the town pads above run AFTER the lake levelling and

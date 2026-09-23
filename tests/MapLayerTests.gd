@@ -44,7 +44,7 @@ extends SceneTree
 
 const MIN_ASSERTIONS := 250
 
-const ORIGIN := Vector2(-1199.79, -8800.08)
+const ORIGIN := Vector2(-1525.71, -8160.0)
 const SIZE := Vector2(7200.0, 10800.0)
 
 # --------------------------------------------------------------- measured
@@ -1140,18 +1140,18 @@ func _t_contracts() -> void:
 # ======================= 14 · the chips and the key =======================
 
 func _t_panel() -> void:
-	claim("panel", 17)
+	claim("panel", 19)
 	var panel := _code_only(read_src("res://scripts/MapPanel.gd"))
 	## Every layer has a name, a default, a chip and a chip colour, and the
 	## four lists agree. A layer with no chip cannot be turned off; a chip with
 	## no layer toggles nothing.
-	for id: String in ["frontier", "roads", "crofts", "travellers", "kills"]:
+	for id: String in ["journey", "frontier", "roads", "crofts", "travellers", "kills"]:
 		ok(panel.contains('L_%s := "%s"' % [_const_for(id), id]),
 			"the %s layer is named" % id)
-	ok(panel.contains("const LAYERS: Array[String] = [L_FRONTIER, L_ROADS, L_CROFTS, L_BANDS, L_KILLS]"),
-		"all five are in the LAYERS list the chips are built from")
-	ok(panel.contains("var _on := {L_FRONTIER: true, L_ROADS: true, L_CROFTS: true,"),
-		"and all five start ON")
+	ok(panel.contains("const LAYERS: Array[String] = [L_JOURNEY, L_FRONTIER, L_ROADS, L_CROFTS, L_BANDS, L_KILLS]"),
+		"all six are in the LAYERS list the chips are built from")
+	ok(panel.contains("var _on := {L_JOURNEY: true, L_FRONTIER: true, L_ROADS: true, L_CROFTS: true,"),
+		"and all six start ON")
 	ok(panel.contains("for id: String in LAYERS:"), "the chips are built FROM that list")
 	ok(panel.contains("_paint_chip(b, id)"), "and painted from it")
 	ok(panel.contains("CHIP_TINT.get(id,"), "each chip wears its layer's colour")
@@ -1165,7 +1165,7 @@ func _t_panel() -> void:
 	var tend := panel.find("}", tstart)
 	var table := panel.substr(tstart, tend - tstart)
 	ok(table.length() > 40, "and it was sliced out (%d chars)" % table.length())
-	for cid: String in ["L_FRONTIER:", "L_ROADS:", "L_CROFTS:", "L_BANDS:", "L_KILLS:"]:
+	for cid: String in ["L_JOURNEY:", "L_FRONTIER:", "L_ROADS:", "L_CROFTS:", "L_BANDS:", "L_KILLS:"]:
 		ok(table.contains(cid), "CHIP_TINT has a row for %s" % cid)
 	ok(not table.contains("L_NONSENSE:"),
 		"-- and the slice is not a scan that agrees with everything")

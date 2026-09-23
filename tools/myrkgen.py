@@ -145,20 +145,34 @@ def ridge(pts, h, width, crest=0.0, seed=0, sharp=1.3):
 
 
 # ---------------------------------------------------------------- geography ---
-def coast_polygon():
-    """The Gulf of Maine, as a polygon in map metres. Bold, few points."""
-    pts = [
-        (-70.75, 42.95), (-70.70, 43.08), (-70.60, 43.24), (-70.44, 43.44), (-70.33, 43.55),
-        (-70.20, 43.63), (-70.07, 43.70), (-69.99, 43.80), (-69.96, 43.90),   # Casco Bay
-        (-69.84, 43.86), (-69.78, 43.94), (-69.66, 43.85), (-69.54, 43.96), (-69.40, 43.92),
-        (-69.22, 44.02), (-69.10, 44.12), (-69.02, 44.24), (-68.98, 44.44), (-68.84, 44.58),  # Penobscot Bay
-        (-68.74, 44.50), (-68.66, 44.36), (-68.56, 44.30), (-68.48, 44.45), (-68.42, 44.56),  # Blue Hill
-        (-68.30, 44.52), (-68.18, 44.42), (-68.05, 44.48), (-67.92, 44.42), (-67.74, 44.56),
-        (-67.60, 44.55), (-67.47, 44.66), (-67.35, 44.64), (-67.20, 44.76), (-67.05, 44.82),
-        (-66.98, 44.90), (-67.06, 45.05), (-67.18, 45.13), (-67.27, 45.18),                  # Eastport, Calais
-        (-66.85, 45.22), (-66.85, 42.95),
-    ]
-    return [LL(*p) for p in pts]
+# The coast runs south-west -> north-east. It used to be closed against the
+# map rectangle, which meant only the Gulf was water: Maine's western and
+# northern edges were straight cuts through endless land. Joining this coast
+# to the international/state boundary gives the world its complete, instantly
+# readable Maine silhouette, with ocean around every edge.
+COAST = [
+    (-70.75, 42.95), (-70.70, 43.08), (-70.60, 43.24), (-70.44, 43.44), (-70.33, 43.55),
+    (-70.20, 43.63), (-70.10, 43.70), (-70.00, 43.76), (-69.94, 43.88),   # Casco Bay
+    (-69.84, 43.86), (-69.78, 43.94), (-69.66, 43.85), (-69.54, 43.96), (-69.40, 43.92),
+    (-69.22, 44.02), (-69.10, 44.12), (-69.02, 44.24), (-68.98, 44.44), (-68.84, 44.58),
+    (-68.74, 44.50), (-68.66, 44.36), (-68.56, 44.30), (-68.48, 44.45), (-68.42, 44.56),
+    (-68.30, 44.52), (-68.18, 44.42), (-68.05, 44.48), (-67.92, 44.42), (-67.74, 44.56),
+    (-67.60, 44.55), (-67.47, 44.66), (-67.35, 44.64), (-67.20, 44.76), (-67.05, 44.82),
+    (-66.98, 44.90), (-67.06, 45.05), (-67.18, 45.13), (-67.27, 45.18),
+]
+
+BOUNDARY = [
+    (-70.75, 42.95), (-70.90, 43.35), (-70.98, 43.75), (-71.02, 44.20),
+    (-71.08, 45.30), (-70.74, 45.25), (-70.45, 45.45), (-70.18, 45.72),
+    (-69.95, 46.10), (-69.72, 46.48), (-69.35, 47.05), (-69.22, 47.56),
+    (-68.72, 47.52), (-68.20, 47.44), (-67.60, 47.18), (-67.58, 46.45),
+    (-67.58, 45.95), (-67.48, 45.62), (-67.38, 45.32), (-67.27, 45.18),
+]
+
+
+def maine_polygon():
+    """The complete state outline, clockwise, in map metres."""
+    return [LL(*p) for p in BOUNDARY + list(reversed(COAST[:-1]))]
 
 
 ISLANDS = [   # (lon, lat, rx, ry, rot, lobes, top z, cliff)  -- z 0 = a low island
@@ -184,53 +198,71 @@ ISLANDS = [   # (lon, lat, rx, ry, rot, lobes, top z, cliff)  -- z 0 = a low isl
 ]
 
 # Katahdin and the Baxter peaks; the Wall; the coast hills. (lon, lat, z, sigma, along, across, rot)
+# Sigma is tight on purpose: at 1:47, Traveler is only ~285 map-m from Katahdin.
+# A 900 m Katahdin cone used to bury Traveler so the bake snapped both to one cairn.
 PEAKS = {
-    "Katahdin":            (-68.9214, 45.9044, KATAHDIN_Z, 900, 1.0, 1.0, 0.0),
-    "Hamlin Peak":         (-68.9161, 45.9250, 880, 300, 1.0, 0.8, 1.4),
-    "North Brother":       (-69.0011, 45.9628, 760, 330, 1.3, 0.8, 0.9),
-    "Doubletop Mountain":  (-69.0575, 45.8747, 640, 260, 1.0, 0.7, 1.2),
-    "Traveler Mountain":   (-68.8869, 46.0206, 700, 320, 1.0, 1.0, 0.0),
-    "White Cap Mountain":  (-69.2586, 45.5647, 700, 360, 1.6, 0.8, 0.5),
-    "Elephant Mountain":   (-69.5722, 45.5028, 620, 300, 1.4, 0.8, 0.3),
-    "Big Moose Mountain":  (-69.7167, 45.5236, 660, 300, 1.2, 0.9, 0.9),
-    "Old Speck":           (-70.9469, 44.5647, 820, 330, 1.2, 0.8, 0.8),
-    "Baldpate Mountain":   (-70.8817, 44.5931, 740, 280, 1.2, 0.8, 0.8),
-    "Saddleback":          (-70.5147, 44.9450, 800, 320, 1.4, 0.8, 0.6),
-    "Mount Abraham":       (-70.3350, 44.9008, 780, 300, 1.3, 0.8, 0.6),
-    "Spaulding Mountain":  (-70.3608, 44.9436, 760, 260, 1.2, 0.8, 0.6),
-    "Sugarloaf":           (-70.3131, 45.0353, 830, 330, 1.2, 0.9, 0.7),
-    "Crocker Mountain":    (-70.3806, 45.0272, 800, 300, 1.3, 0.8, 0.7),
-    "Mount Redington":     (-70.4064, 44.9686, 750, 260, 1.2, 0.8, 0.7),
-    "Bigelow — West Peak": (-70.3053, 45.1483, 800, 340, 1.8, 0.7, 0.15),
-    "Bigelow — Avery":     (-70.2872, 45.1461, 790, 300, 1.8, 0.7, 0.15),
-    "Snow Mountain":       (-70.7383, 45.2483, 740, 320, 1.3, 0.8, 0.9),
-    "Boundary Bald":       (-70.1919, 45.6142, 700, 330, 1.4, 0.8, 1.0),
-    "Coburn Mountain":     (-70.1256, 45.4694, 720, 320, 1.3, 0.8, 1.0),
-    "Mount Blue":          (-70.3286, 44.7286, 620, 280, 1.0, 1.0, 0.0),
-    "Tumbledown Mountain": (-70.5433, 44.7275, 600, 300, 1.5, 0.7, 0.2),
+    "Katahdin":            (-68.9214, 45.9044, KATAHDIN_Z, 520, 1.05, 0.85, 0.12),
+    "Hamlin Peak":         (-68.9161, 45.9250, 820, 200, 1.0, 0.7, 1.4),
+    "North Brother":       (-69.0011, 45.9628, 740, 220, 1.2, 0.65, 0.9),
+    "Doubletop Mountain":  (-69.0575, 45.8747, 680, 220, 1.0, 0.65, 1.2),
+    "Traveler Mountain":   (-68.8869, 46.0206, 880, 250, 1.15, 0.8, -0.25),
+    "White Cap Mountain":  (-69.2586, 45.5647, 760, 300, 1.6, 0.75, 0.5),
+    "Elephant Mountain":   (-69.5722, 45.5028, 640, 260, 1.4, 0.75, 0.3),
+    "Big Moose Mountain":  (-69.7167, 45.5236, 680, 260, 1.2, 0.8, 0.9),
+    "Old Speck":           (-70.9469, 44.5647, 940, 260, 1.15, 0.7, 0.8),
+    "Baldpate Mountain":   (-70.8817, 44.5931, 820, 220, 1.2, 0.7, 0.8),
+    "Saddleback":          (-70.5147, 44.9450, 880, 270, 1.5, 0.7, 0.6),
+    "Mount Abraham":       (-70.3350, 44.9008, 850, 250, 1.3, 0.7, 0.6),
+    "Spaulding Mountain":  (-70.3608, 44.9436, 780, 220, 1.2, 0.7, 0.6),
+    "Sugarloaf":           (-70.3131, 45.0353, 920, 260, 1.15, 0.72, 0.7),
+    "Crocker Mountain":    (-70.3806, 45.0272, 820, 230, 1.2, 0.7, 0.7),
+    "Mount Redington":     (-70.4064, 44.9686, 760, 220, 1.2, 0.7, 0.7),
+    "Bigelow":             (-70.3053, 45.1483, 900, 300, 2.3, 0.52, 0.15),
+    "Bigelow — Avery":     (-70.2872, 45.1461, 860, 240, 1.9, 0.52, 0.15),
+    "Snow Mountain":       (-70.7383, 45.2483, 780, 270, 1.3, 0.75, 0.9),
+    "Boundary Bald":       (-70.1919, 45.6142, 760, 280, 1.4, 0.75, 1.0),
+    "Coburn Mountain":     (-70.1256, 45.4694, 780, 270, 1.3, 0.75, 1.0),
+    "Mount Blue":          (-70.3286, 44.7286, 660, 250, 1.0, 0.9, 0.0),
+    "Tumbledown Mountain": (-70.5433, 44.7275, 680, 270, 1.5, 0.65, 0.2),
     "Mount Kineo":         (-69.7333, 45.6800, 330, 0, 0, 0, 0),      # built as a stack, below
-    "Mount Battie":        (-69.0603, 44.2247, 300, 190, 1.0, 1.0, 0.0),
-    "Cadillac Mountain":   (-68.2247, 44.3528, 430, 220, 1.0, 1.0, 0.0),
+    "Mount Battie":        (-69.0603, 44.2247, 320, 170, 1.0, 0.9, 0.0),
+    "Cadillac Mountain":   (-68.2247, 44.3528, 480, 200, 1.1, 0.85, 0.2),
 }
 
 RIDGES = [   # polylines in lon/lat: (points, z, half-width, crest)
-    # the Wall -- the Longfellows as one curtain
-    ([(-71.00, 44.45), (-70.95, 44.56), (-70.88, 44.59), (-70.70, 44.75), (-70.51, 44.95),
-      (-70.40, 44.97), (-70.34, 44.90), (-70.31, 45.04), (-70.38, 45.03), (-70.30, 45.15),
-      (-70.20, 45.16)], 610, 380, 0.3),
-    # the Boundary wall -- the world's north-west edge, up to the tip
-    ([(-71.08, 45.30), (-70.74, 45.25), (-70.45, 45.45), (-70.19, 45.61), (-70.13, 45.47),
-      (-70.05, 45.80), (-69.95, 46.10), (-69.75, 46.45), (-69.50, 46.80), (-69.30, 47.15),
-      (-69.20, 47.45)], 500, 400, 0.4),
-    # the NH edge, south of Old Speck: a lower curb so Fryeburg still has a horizon
-    ([(-71.08, 45.30), (-71.05, 44.60), (-71.00, 44.10), (-70.98, 43.70), (-70.90, 43.30)], 260, 300, 0.3),
+    # the Wall -- Longfellows as one climbable curtain, crest on land, drop to the exterior sea
+    ([(-70.98, 44.20), (-71.00, 44.45), (-70.96, 44.56), (-70.88, 44.59),
+      (-70.72, 44.74), (-70.54, 44.94), (-70.42, 44.97), (-70.34, 44.90),
+      (-70.32, 45.04), (-70.38, 45.03), (-70.31, 45.15), (-70.22, 45.22),
+      (-70.18, 45.40)], 760, 420, 0.22),
+    # the Boundary wall -- Quebec edge. Slightly inland so the crest is walkable land.
+    ([(-71.04, 45.28), (-70.72, 45.23), (-70.44, 45.42), (-70.20, 45.60),
+      (-70.14, 45.48), (-70.04, 45.78), (-69.94, 46.08), (-69.74, 46.42),
+      (-69.48, 46.78), (-69.28, 47.12), (-69.18, 47.42)], 680, 440, 0.28),
+    # the NH curb south of Old Speck: still a mountain wall, just lower than the Longfellows
+    ([(-71.04, 45.28), (-71.02, 44.70), (-70.99, 44.20), (-70.96, 43.75),
+      (-70.88, 43.32)], 440, 340, 0.25),
     # the Hundred-Mile -- Moosehead to Katahdin
-    ([(-69.50, 45.50), (-69.40, 45.55), (-69.26, 45.56), (-69.10, 45.70),
-      (-69.00, 45.82)], 420, 330, 0.4),
+    ([(-69.52, 45.48), (-69.40, 45.55), (-69.26, 45.56), (-69.12, 45.68),
+      (-69.02, 45.80), (-68.96, 45.88)], 540, 360, 0.32),
     # Knife Edge -- Katahdin summit out to Pamola, south-east
-    ([(-68.9214, 45.9044), (-68.905, 45.898), (-68.890, 45.892)], 840, 110, 0.0),
+    ([(-68.9214, 45.9044), (-68.905, 45.898), (-68.890, 45.892)], 860, 100, 0.0),
     # the Camden line over Penobscot Bay
-    ([(-69.10, 44.19), (-69.06, 44.22), (-69.03, 44.27)], 240, 260, 0.2),
+    ([(-69.10, 44.19), (-69.06, 44.22), (-69.03, 44.27)], 260, 240, 0.15),
+]
+
+# City pads: bump dim so mainegen rank/TOWN_R grows the metro flats. Names stay the 50.
+METRO_DIM = {
+    "Portland": 360.0,
+    "Brunswick": 320.0,
+    "Augusta": 320.0,
+    "Bangor": 320.0,
+}
+# Extra flatten discs (map metres) — no new markers. Portland SE toward Casco;
+# Brunswick–Freeport midpoint so one metro pad spans both existing sites.
+METRO_PADS = [
+    (-2020.0, -3980.0, 190.0),
+    (-1774.0, -3264.0, 170.0),
 ]
 
 # Lakes: name -> (cx, cy, rx, ry, rot, lobes, surface z or None = fit to ground)
@@ -238,7 +270,7 @@ RIDGES = [   # polylines in lon/lat: (points, z, half-width, crest)
 LAKES = {
     "Moosehead Lake":       None,       # drawn from a real-ish outline below
     "Sebago Lake":          (-2674, -3336, 300, 340, 0.3, 0.25, None),
-    "Flagstaff Lake":       (-2143, -96, 420, 95, 0.05, 0.3, 300),
+    "Flagstaff Lake":       (-1980, -20, 260, 80, 0.05, 0.25, 300),
     "Rangeley Lake":        (-2920, -600, 200, 110, 0.1, 0.25, 470),
     "Rangeley — Kennebago": (-2880, -360, 240, 90, 0.5, 0.3, 560),
     "Mooselookmeguntic":    (-3086, -840, 300, 170, -0.5, 0.3, 400),
@@ -275,28 +307,39 @@ MOOSEHEAD = [(-69.76, 45.33), (-69.66, 45.36), (-69.58, 45.44), (-69.54, 45.55),
 # Rivers: polylines in map metres, downstream order. (points, valley half-width, pool width)
 RIVERS = [   # (points, valley half-width, pool width, valley depth)
     # Kennebec: Moosehead's outlet to the sea at Bath
-    ([(-1290, 330), (-1400, -100), (-1470, -420), (-1290, -900), (-1180, -1110), (-1120, -1420),
-      (-1060, -1640), (-1200, -1980), (-1280, -2300), (-1300, -2500), (-1330, -2900), (-1350, -3250),
-      (-1300, -3520)], 400, 40, 55),
-    # Penobscot: Millinocket to the bay
-    ([(400, 1010), (600, 700), (820, 320), (700, -150), (560, -700), (450, -1040), (390, -1250),
-      (330, -1620), (340, -1900)], 380, 40, 55),
-    # Androscoggin: Umbagog round the Wall to Brunswick
-    ([(-3480, -1350), (-3590, -1500), (-3590, -1800), (-3400, -2000), (-3060, -2010), (-2800, -1780), (-2600, -1700), (-2300, -1800),
-      (-2060, -1960), (-2000, -2300), (-2050, -2650), (-1950, -2950), (-1720, -3140), (-1600, -3320)], 340, 34, 50),
-    # Saco: Fryeburg to Biddeford
-    ([(-3400, -2900), (-3150, -3300), (-2900, -3700), (-2600, -4100), (-2450, -4300)], 260, 28, 40),
-    # St John: the northern edge, west to east
-    ([(-1500, 4300), (-900, 4500), (-300, 4700), (300, 4800), (700, 4900), (1200, 4780),
-      (1800, 4660), (2400, 4900), (3000, 5150), (3600, 5300)], 380, 60, 110),
+    ([(-1290, 330), (-1360, 80), (-1420, -180), (-1470, -420), (-1380, -700),
+      (-1290, -900), (-1180, -1110), (-1120, -1420), (-1060, -1640),
+      (-1140, -1840), (-1200, -1980), (-1280, -2300), (-1300, -2500),
+      (-1330, -2900), (-1350, -3250), (-1320, -3480), (-1280, -3680)], 380, 28, 60),
+    # Penobscot: Millinocket to the bay. Stay east of Fort Knox punch (mx ~178-288).
+    ([(400, 1010), (560, 820), (700, 520), (820, 320), (760, 80), (700, -150),
+      (620, -420), (560, -700), (480, -980), (420, -1140), (400, -1250),
+      (380, -1380), (360, -1520), (340, -1680), (330, -1840), (340, -2020)], 360, 28, 58),
+    # Androscoggin: Umbagog around the Wall to Brunswick
+    ([(-3480, -1350), (-3560, -1480), (-3600, -1680), (-3540, -1860), (-3400, -1980),
+      (-3200, -2020), (-3000, -1960), (-2800, -1780), (-2600, -1700), (-2400, -1760),
+      (-2200, -1880), (-2060, -1960), (-2000, -2200), (-2020, -2480), (-2050, -2650),
+      (-1980, -2860), (-1840, -3040), (-1720, -3140), (-1600, -3320), (-1540, -3480)], 320, 26, 52),
+    # Saco: Fryeburg (wall foot) to Biddeford
+    ([(-3400, -2900), (-3280, -3100), (-3150, -3300), (-3000, -3520), (-2900, -3700),
+      (-2720, -3920), (-2600, -4100), (-2480, -4240), (-2380, -4380)], 240, 22, 42),
+    # St John: inside the Boundary wall, west to east
+    ([(-1680, 4180), (-1500, 4300), (-1100, 4440), (-600, 4580), (-300, 4700),
+      (300, 4800), (700, 4900), (1200, 4780), (1800, 4660), (2400, 4880),
+      (3000, 5150), (3480, 5280)], 360, 40, 100),
     # the Rift -- Allagash canyon, Chamberlain north to the St John
-    ([(-420, 2780), (-560, 3050), (-520, 3400), (-380, 3800), (-300, 4200), (-280, 4650)], 260, 46, 150),
+    ([(-420, 2780), (-500, 2960), (-560, 3050), (-540, 3240), (-520, 3400),
+      (-440, 3600), (-380, 3800), (-330, 4020), (-300, 4200), (-280, 4440),
+      (-270, 4650)], 240, 32, 140),
     # Aroostook river across the Shelf
-    ([(600, 3200), (1000, 3260), (1400, 3380), (1750, 3400), (2200, 3600), (2800, 3700), (3600, 3750)], 220, 34, 70),
+    ([(600, 3200), (1000, 3260), (1400, 3380), (1750, 3400), (2200, 3600),
+      (2800, 3700), (3400, 3740), (3680, 3720)], 200, 26, 68),
     # Piscataquis / Sebec outlet down to the Penobscot
-    ([(-380, 190), (-100, -150), (200, -480), (520, -720)], 200, 22, 35),
+    ([(-380, 190), (-240, 40), (-100, -150), (40, -320), (200, -480), (360, -600),
+      (520, -720)], 180, 18, 36),
     # St Croix -- the eastern border down to Calais
-    ([(2060, 1300), (2300, 900), (2600, 500), (2900, 100), (3080, -200), (3300, -500)], 240, 30, 45),
+    ([(2060, 1300), (2180, 1080), (2300, 900), (2460, 680), (2600, 500),
+      (2760, 280), (2900, 100), (3080, -200), (3200, -360), (3300, -500)], 220, 24, 44),
 ]
 
 MESAS = [   # (x, y, rx, ry, rot, top z) -- the Tablelands
@@ -322,14 +365,41 @@ REGIONS_KEEP = True
 
 
 # ------------------------------------------------------------------ the build ---
+def _apply_metro(pl):
+    """Bump metro dims in-place so rank, flatten and colour all see the same pads."""
+    for c in pl["cities"]:
+        d = METRO_DIM.get(c["name"])
+        if d:
+            zdim = c["dim"][2] if len(c["dim"]) > 2 else 20.0
+            c["dim"] = [d, d, zdim]
+    return pl
+
+
+def _pad_r(dim0):
+    if dim0 >= 320:
+        return 220.0
+    if dim0 >= 220:
+        return 140.0
+    return 110.0
+
+
 def build():
     print("myrkgen: the stylized Maine")
-    ocean = poly_mask(coast_polygon())
-    land = ~ocean
+    pl = _apply_metro(M.places())
+    land = poly_mask(maine_polygon())
     # islands
     for lon, lat, rx, ry, rot, lobes, _, _ in ISLANDS:
         cx, cy = LL(lon, lat)
         land |= blob(cx, cy, rx, ry, rot, lobes, seed=int(abs(lon * 100)))
+    outside = []
+    for city in pl["cities"]:
+        cx, cy = cell(city["x"], city["y"])
+        ix, iy = int(round(cx)), int(round(cy))
+        if (ix < 0 or iy < 0 or ix >= NX or iy >= NY or not land[iy, ix]) \
+                and city["name"] not in M.COASTAL_PLACES:
+            outside.append(city["name"])
+    if outside:
+        raise RuntimeError("Maine outline excludes inland places: " + ", ".join(outside))
     ocean = ~land
     dsea = dist_to(ocean)           # distance from land cells to the sea
     dland = dist_to(land)
@@ -354,8 +424,8 @@ def build():
     # the top of the Shelf rolls, gently, and drops toward its north edge (the St John)
 
     # --- the Steps: Rangeley terraces ------------------------------------------
-    steps = [((-2860, -520), 780, 300, 560), ((-3080, -830), 560, 270, 400),
-             ((-3250, -1080), 520, 240, 330), ((-3510, -1260), 470, 260, 250)]
+    steps = [((-2860, -520), 640, 260, 560), ((-3080, -830), 460, 230, 400),
+             ((-3250, -1080), 380, 210, 330), ((-3510, -1260), 260, 180, 250)]
     for (x, y), rx, ry, z in steps:
         t = blob(x, y, rx, ry, 0.3, 0.2, seed=int(-x))
         H = np.where(t, np.maximum(np.minimum(H, z + 40.0), z), H)
@@ -369,17 +439,26 @@ def build():
         if sig == 0:
             continue
         cx, cy = LL(lon, lat)
-        R = np.maximum(R, horn(cx, cy, z, sig * 1.3, al, ac, rot, sharp=1.7 if name == "Katahdin" else 1.2))
-    # teeth along the Boundary wall -- a skyline, not a dyke
-    wall = [LL(*p) for p in RIDGES[1][0]]
-    wl = np.r_[0.0, np.cumsum([math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(wall, wall[1:])])]
-    for i, sdist in enumerate(np.arange(250.0, wl[-1], 520.0)):
-        j = int(np.searchsorted(wl, sdist)) - 1
-        f = (sdist - wl[j]) / max(wl[j + 1] - wl[j], 1e-6)
-        px = wall[j][0] + f * (wall[j + 1][0] - wall[j][0])
-        py = wall[j][1] + f * (wall[j + 1][1] - wall[j][1])
-        rot = math.atan2(wall[j + 1][1] - wall[j][1], wall[j + 1][0] - wall[j][0])
-        R = np.maximum(R, horn(px, py, 600.0 + 90.0 * math.sin(i * 1.7), 230.0, 1.5, 0.8, rot))
+        if name == "Katahdin":
+            sharp = 1.75
+        elif name == "Traveler Mountain":
+            sharp = 1.5
+        elif name in ("Bigelow", "Old Speck", "Sugarloaf"):
+            sharp = 1.35
+        else:
+            sharp = 1.2
+        R = np.maximum(R, horn(cx, cy, z, sig * 1.3, al, ac, rot, sharp=sharp))
+    # teeth along the Wall and Boundary -- a skyline, not a dyke
+    for ri, base_h, spacing, sig in ((0, 820.0, 480.0, 200.0), (1, 720.0, 500.0, 220.0)):
+        wall = [LL(*p) for p in RIDGES[ri][0]]
+        wl = np.r_[0.0, np.cumsum([math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(wall, wall[1:])])]
+        for i, sdist in enumerate(np.arange(220.0, wl[-1], spacing)):
+            j = int(np.searchsorted(wl, sdist)) - 1
+            f = (sdist - wl[j]) / max(wl[j + 1] - wl[j], 1e-6)
+            px = wall[j][0] + f * (wall[j + 1][0] - wall[j][0])
+            py = wall[j][1] + f * (wall[j + 1][1] - wall[j][1])
+            rot = math.atan2(wall[j + 1][1] - wall[j][1], wall[j + 1][0] - wall[j][0])
+            R = np.maximum(R, horn(px, py, base_h + 80.0 * math.sin(i * 1.7), sig, 1.5, 0.75, rot))
     # the ridges sit on the plain: their zero is the local ground
     H = np.maximum(H, R + np.where(R > 0, np.minimum(H, 60.0), 0.0))
 
@@ -387,12 +466,15 @@ def build():
     kx, ky = LL(-68.9214, 45.9044)
     table = blob(kx - 420, ky + 60, 420, 300, 0.2, 0.15, seed=7)
     H = np.maximum(H, plateau(table, 690.0, edge=90.0))
-    cirque = blob(kx + 300, ky + 90, 190, 150, 0.4, 0.1, seed=8)
+    cirque = blob(kx + 300, ky + 90, 160, 120, 0.4, 0.1, seed=8)
     dc = dist_to(cirque)
-    bowl = 260.0 * (1.0 - smooth(dc / 120.0))
-    H = np.where(dc < 400, H - bowl * (H > 500), H)
+    bowl = 180.0 * (1.0 - smooth(dc / 90.0))
+    H = np.where(dc < 180, H - bowl * (H > 500), H)
     # cut a plateau under the tarn so it has a shore
-    H = np.where(cirque, np.minimum(H, 560.0), H)
+    H = np.where(cirque, np.minimum(H, 540.0), H)
+    # a closed lip — without it the tarn spills down the east face into a shaft
+    lip = (dc >= 60) & (dc < 150)
+    H = np.where(lip, np.maximum(H, 640.0), H)
 
     # --- the Tablelands: mesas ------------------------------------------------
     for x, y, rx, ry, rot, z in MESAS:
@@ -476,11 +558,12 @@ def build():
         shore = ndimage.binary_dilation(m, iterations=3)
         H = np.where(shore & ~m, np.maximum(H, surf + 1.5), H)
         # ...and eased: a lake you can walk down to, not a moat under a cliff
-        # (the Crater keeps its rim -- that one is the point)
+        # (the Crater keeps its rim -- that one is the point). Do not shave a
+        # named horn that happens to sit next to a mountain lake at this scale.
         if name != "Grand Lake":
             dsh = dist_to(m)
             ease = surf + 1.5 + np.clip(dsh / 140.0, 0.0, 1.0) ** 1.6 * 34.0
-            H = np.where((dsh < 140.0) & ~m, np.minimum(H, ease), H)
+            H = np.where((dsh < 140.0) & ~m & (R < surf + 80.0), np.minimum(H, ease), H)
         H = np.where(m, np.minimum(H, surf - 4.0 - 6.0 * smooth(dist_to(~m) / 120.0)), H)
         W[m] = surf
         lake_out[name] = (cx, cy, surf, m)
@@ -493,24 +576,59 @@ def build():
     kin_e = ndimage.binary_dilation(kin, iterations=1) & ~kin
     H = np.where(kin_e, np.maximum(H, 200.0), H)   # a cliff foot, not a slope
 
-    # the tarn in Katahdin's cirque
+    # the tarn in Katahdin's cirque — designed surface ~290 m game y after V_SCALE
     kx, ky = LL(-68.9214, 45.9044)
-    tarn = blob(kx + 300, ky + 90, 110, 80, 0.4, 0.1, seed=9)
-    tarn &= H < 600
+    tarn = blob(kx + 300, ky + 90, 90, 70, 0.4, 0.1, seed=9)
+    tarn &= (H < 620) & (H > 200)
     if tarn.any():
-        s = float(np.min(H[ndimage.binary_dilation(tarn, iterations=1) & ~tarn])) - 0.5
+        s = 520.0
         W[tarn] = s
         H[tarn] = np.minimum(H[tarn], s - 4.0)
 
+    # historic Moosehead marker (map -1114, 720 / world 960, -3480) stays wet
+    if "Moosehead Lake" in lake_out:
+        mh_surf = float(lake_out["Moosehead Lake"][2])
+        md = np.hypot(GX + 1114.0, GY - 720.0)
+        H = np.where((md < 100.0) & land & ~kin, np.minimum(H, mh_surf - 4.0), H)
+        W = np.where((md < 100.0) & land & ~kin, mh_surf, W)
+
+    # named horns punch back through river/lake ease so Traveler, Old Speck
+    # and Bigelow stay silhouettes at this compression
+    for name, (lon, lat, z, sig, al, ac, rot) in PEAKS.items():
+        if sig == 0:
+            continue
+        cx, cy = LL(lon, lat)
+        sharp = 1.75 if name == "Katahdin" else (1.5 if name == "Traveler Mountain" else 1.3)
+        pk = horn(cx, cy, z, sig * 1.3, al, ac, rot, sharp=sharp)
+        core = pk > z * 0.45
+        H = np.where(core, np.maximum(H, pk), H)
+        W = np.where(core, DRY, W)
+
     # --- cities always stand on dry ground -------------------------------------
-    for c in M.places()["cities"]:
-        d = np.hypot(GX - c["x"], GY - c["y"])
-        m = d < 110.0
-        wet = m & (W > DRY + 1)
+    # Extra metro discs first (they only raise), named pads last so a city
+    # floor cannot be shaved by a later overlap.
+    pads = list(METRO_PADS) + [(c["x"], c["y"], _pad_r(c["dim"][0])) for c in pl["cities"]]
+    n_extra = len(METRO_PADS)
+    for i, (cx, cy, rad) in enumerate(pads):
+        d = np.hypot(GX - cx, GY - cy)
+        m = d < rad
+        on = m & land
+        wet = on & (W > DRY + 1)
         if wet.any():
             lvl = float(np.max(W[wet])) + 2.0
-            H = np.where(m, np.maximum(H, lvl), H)
-            W = np.where(m, DRY, W)
+            H = np.where(on, np.maximum(H, lvl), H)
+            W = np.where(on, DRY, W)
+        # a gentle flatten so metro pads read as pale tables, not hillside lots
+        inner = d < rad * 0.72
+        if (inner & land).any():
+            lvl_h = float(np.median(H[inner & land]))
+            lvl_h = max(lvl_h, 4.0)
+            tt = np.clip((d - rad * 0.55) / max(rad * 0.45, 1.0), 0.0, 1.0)
+            tt = tt * tt * (3.0 - 2.0 * tt)
+            blended = H * tt + lvl_h * (1.0 - tt)
+            if i < n_extra:
+                blended = np.maximum(H, blended)
+            H = np.where(on, blended, H)
 
     # --- a last touch of shape, then tidy ---------------------------------------
     dry = W <= DRY + 1
@@ -536,15 +654,23 @@ def build():
     W = W.astype(np.float32)
 
     # --- colour ---------------------------------------------------------------------
-    C = colour(H, W, ocean, sandy, shelf, cliff, river_cells, M.places()["cities"])
+    C = colour(H, W, ocean, sandy, shelf, cliff, river_cells, pl["cities"])
 
     # --- places -------------------------------------------------------------------------
-    pl = M.places()
     def h_at(x, y):
         cx_, cy_ = cell(x, y)
         return float(H[int(np.clip(round(cy_), 0, NY - 1)), int(np.clip(round(cx_), 0, NX - 1))])
     for c in pl["cities"]:
         c["z"] = round(h_at(c["x"], c["y"]), 2)
+    # Moosehead's outline wraps Kineo; the bbox centre is dry land. Put the
+    # label on water so MapPanel and WaterTests agree with the lake.
+    if "Moosehead Lake" in lake_out:
+        _cx, _cy, surf, m = lake_out["Moosehead Lake"]
+        wet_m = m & (W > DRY + 1)
+        if wet_m.any():
+            ys_, xs_ = np.nonzero(wet_m)
+            lake_out["Moosehead Lake"] = (
+                float(np.median(GX[ys_, xs_])), float(np.median(GY[ys_, xs_])), surf, m)
     lakes = []
     for name, (cx, cy, surf, m) in lake_out.items():
         ys_, xs_ = np.nonzero(m)
@@ -578,10 +704,18 @@ def colour(H, W, ocean, sandy, shelf, cliff, river, cities):
     dr = dist_to(river)
     near_town = np.zeros((NY, NX), bool)
     for c in cities:
-        near_town |= np.hypot(GX - c["x"], GY - c["y"]) < (330.0 if c["dim"][0] >= 170 else 220.0)
+        near_town |= np.hypot(GX - c["x"], GY - c["y"]) < (420.0 if c["dim"][0] >= 320 else (330.0 if c["dim"][0] >= 170 else 220.0))
     fm = (H < 160) & (slope < 0.07) & ((dr < 260) | near_town) & (pat > -0.05)
     C[fm] = farm
     C[near_town & (slope < 0.07) & (H < 160)] = np.where(pat[near_town & (slope < 0.07) & (H < 160)][:, None] > 0.1, farm, meadow)
+    # metro pads: pale flats you can name on the painted map
+    dry_land = (W <= DRY + 1) & (H > 0)
+    for c in cities:
+        rr = 240.0 if c["dim"][0] >= 320 else (150.0 if c["dim"][0] >= 220 else 0.0)
+        if rr:
+            C[(np.hypot(GX - c["x"], GY - c["y"]) < rr) & dry_land] = farm
+    for cx, cy, rr in METRO_PADS:
+        C[(np.hypot(GX - cx, GY - cy) < rr) & dry_land] = farm
     # the Shelf is golden grassland
     C[shelf & (H > 150) & (slope < 0.12)] = gold
     C[shelf & (H > 150) & (slope < 0.12) & (pat > 0.2)] = farm

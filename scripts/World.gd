@@ -65,6 +65,10 @@ const TITLE_TIME := 3.0
 ## punched hole and its map marker all stay out of the world.
 const USE_FORT := true
 const FORT_NAME := "Fort Knox"
+## [gorges] hex-star on a built island in Portland Harbor. USE_FORT is still
+## Knox-only; this flag is the harbor work alone.
+const USE_GORGES := true
+const GORGES_NAME := "Fort Gorges"
 
 
 var _rng := RandomNumberGenerator.new()
@@ -181,6 +185,12 @@ func begin_world() -> void:
 		_player.global_position = _world_home()
 		_player.velocity = Vector3.ZERO
 	_cities = Cities.boot(self)    ## [cities] the big six stand up last, after the roster, the net and the crofts
+	## The meadow stops at the kerb. City streets already paved themselves;
+	## the country roads exist now, so stamp them into the grass the same way.
+	if _region != null:
+		var floor_sys = _region.grass()
+		if floor_sys != null and floor_sys.has_method("bind_roads"):
+			floor_sys.call("bind_roads", _roads)
 
 
 func _build_park_floor() -> void:
@@ -386,6 +396,19 @@ func _build_environment() -> void:
 
 	## Subtle tonemap so the vibrant accents read without blowing out.
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.05
+	## Always-on grade for walking and riding: contact shadow in the wood,
+	## a little bloom on dusk/fire, aerial fog so the ranges recede. SDFGI
+	## and volumetric shafts stay on the Ray-Traced Lighting toggle.
+	env.ssao_enabled = true
+	env.ssao_radius = 1.55
+	env.ssao_intensity = 1.35
+	env.glow_enabled = true
+	env.glow_normalized = true
+	env.glow_intensity = 0.34
+	env.glow_bloom = 0.04
+	env.fog_aerial_perspective = 0.72
+	env.fog_sky_affect = 0.38
 
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -451,12 +474,15 @@ func set_rt_lighting(on: bool) -> void:
 	_env.sdfgi_bounce_feedback = 0.4
 	_env.sdfgi_read_sky_light = true
 	_env.ssil_enabled = on
-	_env.ssao_enabled = on
+	## SSAO/glow stay on when RT is off — the riding vista still needs them.
+	_env.ssao_enabled = true
+	_env.ssao_radius = 1.2 if on else 1.55
+	_env.ssao_intensity = 2.0 if on else 1.35
 	_env.ssr_enabled = on
 	_env.ssr_max_steps = 48
-	_env.glow_enabled = on
-	_env.glow_intensity = 0.55
-	_env.glow_bloom = 0.05
+	_env.glow_enabled = true
+	_env.glow_intensity = 0.55 if on else 0.34
+	_env.glow_bloom = 0.05 if on else 0.04
 	_env.volumetric_fog_enabled = on
 	_env.volumetric_fog_density = 0.02
 	_env.volumetric_fog_anisotropy = 0.55  ## light shafts lean toward the sun
@@ -795,32 +821,49 @@ func spawn_cave_at(mouth: Vector3, cdir: Vector3) -> bool:
 
 
 
-## [fort] Stand Fort Knox up on the west bank of the Penobscot narrows, and
-## register it as a place so the map dot and the on-screen title both come
-## free — Overworld.places() hands back the live array, so appending to it is
-## all a landmark needs to exist everywhere the towns do.
+## [fort] Stand Fort Knox up on the west bank of the Penobscot narrows, then
+## Fort Gorges on its harbor island, and register each as a place so the map
+## dot and the on-screen title both come free — Overworld.places() hands back
+## the live array, so appending to it is all a landmark needs.
 func _build_fort() -> void:
-	if not USE_FORT or _terrain == null:
+	if _terrain == null:
 		return
-	var f := FortKnox.raise_fort(self)
-	if f == null:
-		push_warning("World: Fort Knox needs loaded terrain — skipped.")
-		return
+	if USE_FORT:
+		var f := FortKnox.raise_fort(self)
+		if f == null:
+			push_warning("World: Fort Knox needs loaded terrain — skipped.")
+		else:
+			_append_fort_place(FORT_NAME, FortKnox.SITE_X, FortKnox.SITE_Z, f.pad_y)
+	if USE_GORGES:
+		var g := FortGorges.raise_fort(self)
+		if g == null:
+			push_warning("World: Fort Gorges needs loaded terrain — skipped.")
+		else:
+			_append_fort_place(GORGES_NAME, FortGorges.SITE_X, FortGorges.SITE_Z, g.pad_y)
+
+
+func _append_fort_place(nm: String, x: float, z: float, y: float) -> void:
 	for p in _terrain.places():
-		if String((p as Dictionary).get("name", "")) == FORT_NAME:
+		if String((p as Dictionary).get("name", "")) == nm:
 			return
 	_terrain.places().append({
-		"name": FORT_NAME,
-		"pos": [FortKnox.SITE_X, FortKnox.SITE_Z],
-		"y": f.pad_y,
+		"name": nm,
+		"pos": [x, z],
+		"y": y,
 		"rank": 1,
 	})
 
 
 ## [fort] underground title — the depth title is right for a cave and wrong
-## for a magazine, so the fort names its own inside.
+## for a magazine, so each fort names its own inside.
 func _place_title_for(below: bool) -> String:
-	if USE_FORT and _player != null and FortKnox.contains(_player.global_position):
+	if _player == null:
+		return "The Hollow Depths" if below else "The Dusk Forest"
+	if USE_GORGES and FortGorges.contains(_player.global_position):
+		if below:
+			return "%s — the Hold" % GORGES_NAME
+		return GORGES_NAME
+	if USE_FORT and FortKnox.contains(_player.global_position):
 		if below:
 			return "%s — the Undercroft" % FORT_NAME
 		return FORT_NAME
@@ -909,6 +952,8 @@ func _build_terrain() -> void:
 		return
 	if _env != null:
 		_env.fog_density = TERRAIN_FOG
+		_env.fog_aerial_perspective = 0.78
+		_env.fog_sky_affect = 0.42
 
 
 ## [terrain] The ground height under a position: the heightfield's answer out

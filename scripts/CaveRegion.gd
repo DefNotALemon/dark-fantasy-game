@@ -548,13 +548,13 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 		var c := pockets[i]
 		if i == pockets.size() - 1 and pockets.size() >= 2:
 			## the champion: the deep band's meanest, alone, with a guard of the shallow kind
-			_spawn_gen(c, _gen_pick(c.y, true), 1)
-			_spawn_gen(c, _gen_pick(-6.0, false), _rng.randi_range(2, 3))
+			_spawn_gen(c, _gen_pick(c, true), 1)
+			_spawn_gen(c, _gen_pick(Vector3(c.x, -6.0, c.z), false), _rng.randi_range(2, 3))
 			continue
 		var roll := _rng.randf()
 		if c.y > -12.0:
 			if roll < 0.72:
-				_spawn_gen(c, _gen_pick(c.y, false), _rng.randi_range(3, 6))
+				_spawn_gen(c, _gen_pick(c, false), _rng.randi_range(3, 6))
 			else:
 				## [slimes] the shallow jellies: a green pocket, sometimes with
 				## a jolt or two skittering among them
@@ -563,13 +563,13 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 					_spawn_pack(c, SlimeYellow, _rng.randi_range(1, 2))
 		elif c.y > -21.0:
 			if roll < 0.85:
-				_spawn_gen(c, _gen_pick(c.y, false), _rng.randi_range(2, 5))
+				_spawn_gen(c, _gen_pick(c, false), _rng.randi_range(2, 5))
 			else:
 				## [slimes] the venom creeps in the middle galleries
 				_spawn_pack(c, SlimePurple, _rng.randi_range(2, 3))
 		else:
 			if roll < 0.85:
-				_spawn_gen(c, _gen_pick(c.y, false), _rng.randi_range(2, 4))
+				_spawn_gen(c, _gen_pick(c, false), _rng.randi_range(2, 4))
 			else:
 				## [slimes] the deeps burn ember -- and one tar sits in the dark
 				_spawn_pack(c, SlimeRed, _rng.randi_range(2, 4))
@@ -578,7 +578,7 @@ func _spawn_dwellers(reach: Array[Vector3i]) -> void:
 	## THE DEEP IS FULLER: an extra belt of mean packs below -20 -- the wide
 	## deep galleries deserve their garrisons.
 	for c in _pick_spots(reach, 9, -36.0, -20.0, 14.0, CaveField.PERM_R + 2.0):
-		_spawn_gen(c, _gen_pick(c.y, _rng.randf() < 0.1), _rng.randi_range(2, 5))
+		_spawn_gen(c, _gen_pick(c, _rng.randf() < 0.1), _rng.randi_range(2, 5))
 
 
 func _player_tier() -> int:
@@ -589,11 +589,14 @@ func _player_tier() -> int:
 	return MonsterGen.tier_for_level(lvl)
 
 
-func _gen_pick(depth_y: float, apex: bool) -> Dictionary:
+func _gen_pick(center: Vector3, apex: bool) -> Dictionary:
 	## A species from this cave's roster for the depth band. `apex` takes the
 	## roster's meanest (largest) instead of a weighted roll.
-	var key := MonsterGen.cave_key(global_position, depth_y)
-	var tier := MonsterGen.band_tier(key, _player_tier())
+	var world_center := to_global(center)
+	var key := MonsterGen.cave_key(world_center, center.y)
+	var surface := Vector3(world_center.x, 0.0, world_center.z)
+	var base_tier := maxi(_player_tier(), Overworld.danger_tier_at(surface))
+	var tier := MonsterGen.band_tier(key, mini(base_tier, MonsterGen.MAX_TIER))
 	var wseed := int(cave_seed)
 	if apex:
 		var best := {}
